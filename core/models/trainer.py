@@ -13,7 +13,10 @@ from pytorch3d.renderer import FoVPerspectiveCameras, look_at_view_transform
 
 from core.configs import paths 
 from core.models.cch import CCH 
+
 from core.utils.pytorch3d_surface_normal_renderer import SurfaceNormalRenderer 
+from core.utils.sample_utils import sample_cameras
+
 
 
 
@@ -141,20 +144,6 @@ class CCHTrainer(pl.LightningModule):
             num_views = 4
 
             
-            def sample_cameras(batch_size, num_views, t):
-                azim = torch.rand(batch_size * num_views) * 360
-                elev = torch.rand(batch_size * num_views) * 20 - 10
-                dist = torch.rand(batch_size * num_views) * 2 + 1
-                t = t.repeat_interleave(num_views, dim=0)
-
-                R, T = look_at_view_transform(dist=dist, 
-                                              elev=elev, 
-                                              azim=azim, 
-                                              at=t,
-                                              degrees=True)
-                R = R.view(batch_size, num_views, 3, 3)
-                T = T.view(batch_size, num_views, 3)
-                return R.to(t), T.to(t)
             
             R, T = sample_cameras(vp.shape[0], num_views, t)
 
