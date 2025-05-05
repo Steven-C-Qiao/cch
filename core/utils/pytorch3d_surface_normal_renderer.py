@@ -1,6 +1,8 @@
 import torch
+import torch.nn as nn
 import pytorch3d
 import smplx 
+import pytorch_lightning as pl
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import (
     look_at_view_transform,
@@ -22,17 +24,17 @@ CAPE_PATH = '/scratches/kyuban/cq244/datasets/CAPE/sequences/00032/longshort_ATU
 
 
 
-class SurfaceNormalRenderer:
+class SurfaceNormalRenderer(pl.LightningModule):
+    def __init__(self):
+        super().__init__()
 
-    def __init__(self, device='cuda'):
-        self.device = device
         self.renderer = self.create_normal_renderer()
 
     def create_normal_renderer(self):
         # Create a renderer for surface normals
         R, T = look_at_view_transform(dist=2., elev=-10, azim=0, degrees=True)
         # R, T = look_at_view_transform(at=torch.tensor([0, 0, 2.]), degrees=True)
-        cameras = FoVPerspectiveCameras(R=R, T=T, device=device)
+        cameras = FoVPerspectiveCameras(R=R, T=T, device=self.device)
         
         # Create rasterization settings
         raster_settings = RasterizationSettings(
@@ -49,47 +51,68 @@ class SurfaceNormalRenderer:
             ),
             shader=SoftPhongShader(
                 cameras=cameras,
-                device=self.device
             )
         )
         
         return renderer
 
-    def forward(self, vertices, faces, cameras=None):
-        # Create a mesh
+    def forward(self, vertices, faces, R=None, T=None):
+        """
+        Render surface normals 
+
+        Args:
+            vertices: (B, V, 3)
+            faces: (F, 3)
+            R: (B, N, 3, 3); N views
+            T: (B, N, 3)
+        Returns:
+            normals: (B, N, 3, H, W)
+        """
+        B = vertices.shape[0]
+        N = R.shape[1] if R is not None else 1
+
+        vertices = vertices.repeat_interleave(N, dim=0)
+        faces = faces[None].repeat_interleave(B * N, dim=0)
+
+        R = R.view(B * N, 3, 3)
+        T = T.view(B * N, 3)
+
         mesh = Meshes(
-            verts=[vertices],
-            faces=[faces],
-        ).to(device)
+            verts=vertices,
+            faces=faces,
+        )
+        surface_normals = mesh.verts_normals_padded()
 
-
-        surface_normals = mesh.verts_normals_packed()
-        
-        if cameras is not None:
+        if R is not None and T is not None:
+            cameras = FoVPerspectiveCameras(R=R, T=T).to(R)
             self.renderer.rasterizer.cameras = cameras
             self.renderer.shader.cameras = cameras
+
+            print(R.shape)
+            print(surface_normals.shape)
             
-            # also needs to transform the normals to camera space 
-            R, T = cameras.R.squeeze(), cameras.T.squeeze()
-            surface_normals = (R.T @ surface_normals.T).T
+            surface_normals = (torch.bmm(R, surface_normals.permute(0, 2, 1)).permute(0, 2, 1))
+            
             # invert z axis as per opencv? convention
             surface_normals[:, 2] *= -1
 
 
-
-            
         # normalise to 0 1
         surface_normals = (surface_normals + 1) / 2
         mesh = Meshes(
-            verts=[vertices],
-            faces=[faces],
-            textures=TexturesVertex(verts_features=surface_normals[None])
-        ).to(device)
+            verts=vertices,
+            faces=faces,
+            textures=TexturesVertex(verts_features=surface_normals)
+        )
+
+        import ipdb; ipdb.set_trace()
 
         images = self.renderer(mesh)
         
         # Extract normals from the rendered image
         # The RGB channels correspond to the XYZ components of the normal
+        
+        import ipdb; ipdb.set_trace()
         normals = images[0, ..., :3].cpu().numpy()
         
         # Normalize the normals

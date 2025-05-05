@@ -106,5 +106,6 @@ _C.LOSS.INIT_WEIGHTS.CAM_T = 1.0
 _C.LOSS.INIT_WEIGHTS.SHAPE = 1.0
 _C.LOSS.INIT_WEIGHTS.SILHOUETTES = 1.0
 _C.LOSS.INIT_WEIGHTS.D_VC = 1.0
-def get_multi_input_shape_cfg_defaults():
+
+def get_cch_cfg_defaults():
     return _C.clone()

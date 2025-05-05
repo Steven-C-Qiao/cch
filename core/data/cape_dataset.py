@@ -68,7 +68,7 @@ class CapeDataset(Dataset):
         
         if removed_frames is not None:
             all_removed = removed_frames.split(',')
-            print(all_removed)
+            # print(all_removed)
             for i in range(len(all_removed)):
                 # Parse removed frames range if present
                 removed_start, removed_end = map(int, all_removed[i].split('-'))
