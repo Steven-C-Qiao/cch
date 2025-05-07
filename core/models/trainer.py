@@ -7,16 +7,18 @@ import pytorch_lightning as pl
 
 import matplotlib.pyplot as plt
 from loguru import logger
+from einops import rearrange
 
-from smplx import SMPL
+
 from pytorch3d.renderer import FoVPerspectiveCameras, look_at_view_transform
 
 from core.configs import paths 
+from core.models.smpl import SMPL
 from core.models.cch import CCH 
 
-from core.utils.pytorch3d_surface_normal_renderer import SurfaceNormalRenderer 
+from core.utils.normal_renderer import SurfaceNormalRenderer 
 from core.utils.sample_utils import sample_cameras
-
+from core.utils.general_lbs import general_lbs
 
 
 
@@ -42,23 +44,24 @@ class CCHTrainer(pl.LightningModule):
         self.normalise = False
         self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 5
  
-        self.renderer = SurfaceNormalRenderer()
+        self.renderer = SurfaceNormalRenderer(image_size=(224, 224))
 
-        smpl_model = SMPL(
+        self.smpl_model = SMPL(
             model_path=paths.SMPL,
             num_betas=cfg.MODEL.NUM_SMPL_BETAS,
             gender=cfg.MODEL.GENDER
         )
-        smpl_faces = torch.tensor(smpl_model.faces, dtype=torch.int32)
-        self.register_buffer('smpl_faces', smpl_faces)
+        # smpl_faces = torch.tensor(smpl_model.faces, dtype=torch.int32)
+        # self.register_buffer('smpl_faces', smpl_faces)
         # for param in smpl_model.parameters():
         #     param.requires_grad = False
 
         self.model = CCH(
             cfg=cfg,
-            smpl_model=smpl_model
+            smpl_model=self.smpl_model
         )
 
+        self.criterion = nn.MSELoss()
         
         
         # visualiser = Visualiser(save_dir=vis_save_dir)
@@ -67,7 +70,6 @@ class CCHTrainer(pl.LightningModule):
         # self.model = model
         # self.smpl_model = smpl_model
         # self.visualiser = visualiser
-        self.criterion = nn.MSELoss()
         # # self.criterion = DeterministicLoss(loss_cfg=cfg.LOSS, backbone_losses=cfg.FINETUNE_BACKBONE)
         # self.criterion = HomoscedWeightedLoss(loss_cfg=cfg.LOSS, backbone_losses=cfg.TRAIN_BACKBONE)
         # self.metrics_calculator = MetricsCalculator()
@@ -75,30 +77,44 @@ class CCHTrainer(pl.LightningModule):
         self.save_hyperparameters(ignore=['smpl_model', 'edge_detect_model'])
         
 
-    def forward(self, batch, iters=2, epoch=0):
-        return self.model(batch, iters=iters)#, epoch=epoch)
+    def forward(self, batch):
+        return self.model(batch)
     
     def on_train_epoch_start(self):
         self.visualiser.set_global_rank(self.global_rank)
 
     def training_step(self, batch, batch_idx, split='train'):
+        batch = self.process_inputs(batch, batch_idx)
+        B, N = batch['pose'].shape[:2]
+        
         if batch_idx == 0:
-            inputs_dict, targets_dict, num_views = self.process_inputs(batch, batch_idx)
             self.first_batch = batch
-            self.first_vc = targets_dict['vc']
         if self.dev:    
             batch = self.first_batch
+
+        global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
+        joints = batch['joints']
+        normal_images = batch['normal_imgs']
             
-        inputs_dict, targets_dict, num_views = self.process_inputs(batch, batch_idx)
+        preds = self(normal_images)
 
-        inputs_dict['gt_pose'] = batch['pose_rotmats'].view(-1, 23, 3, 3)
-        inputs_dict['gt_glob_rotmats'] = batch['glob_rotmats'].view(-1, 3, 3)
-        inputs_dict['gt_cam_t'] = batch['cam_t'].view(-1, 3)
+        # ----------------- Loss -----------------
+        pred_vc, pred_w = preds['vc'], preds['w']
 
- 
-        pred_dict = self(inputs_dict, epoch=self.current_epoch)
+
+        parents = self.smpl_model.parents
+        
+        vp, joints = general_lbs(
+            vc=rearrange(pred_vc, 'b n h w c -> (b n) (h w) c'),
+            pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
+            lbs_weights=rearrange(pred_w, 'b n h w c -> (b n) (h w) c'),
+            J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
+            parents=parents#parents[None].repeat(B * N, 1)
+        )
 
         import ipdb; ipdb.set_trace()
+
+
 
 
         # loss, loss_dict = self.criterion(pred_dict['sculpted_pred_dict'], 
@@ -134,30 +150,39 @@ class CCHTrainer(pl.LightningModule):
 
 
     def process_inputs(self, batch, batch_idx):
+        """
+        Batch of size B contains N frames of the same person. For each frame, sample a random camera pose and render.
+        """
         with torch.no_grad():
-            t = batch['transl']
-            vp = batch['v_posed']
-            p = batch['pose']
-            vc = batch['v_cano']
+            t = batch['transl'] # B, N, 3
+            vp = batch['v_posed'] # B, N, 6890, 3
 
-            # num_views = t.shape[0]
-            num_views = 4
+            batch_size, num_frames = t.shape[:2]
+
+
+            smpl_output = self.smpl_model(
+                betas=batch['betas'],
+                body_pose = torch.zeros((batch_size, 69)).to(self.device),
+                global_orient = torch.zeros((batch_size, 3)).to(self.device)
+            )
+            joints = smpl_output.joints[:, :24]
 
             
-            
-            R, T = sample_cameras(vp.shape[0], num_views, t)
+            R, T = sample_cameras(batch_size, num_frames, t)
+            R = R.to(self.device)
+            T = T.to(self.device)
 
             # render normal images
-            normal_imgs = self.renderer(vp, self.smpl_faces, R, T)
-
-            ret = {
-                'normal_imgs': normal_imgs,
-                'pose': p
-            }
-
+            normal_imgs = self.renderer(vp, R, T)
+            normal_imgs = torch.tensor(normal_imgs, 
+                                       dtype=torch.float32).permute(0, 1, 4, 2, 3).to(self.device)
             
+            batch['normal_imgs'] = normal_imgs
+            batch['R'] = R
+            batch['T'] = T
+            batch['joints'] = joints
 
-        return ret 
+        return batch 
     
 
     def validation_step(self, batch, batch_idx):

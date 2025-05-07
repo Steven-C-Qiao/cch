@@ -7,6 +7,7 @@ import torch
 import trimesh
 import logging
 from tqdm import tqdm
+from collections import defaultdict
 
 from loguru import logger
 
@@ -72,24 +73,38 @@ class CapeDataset(Dataset):
             for i in range(len(all_removed)):
                 # Parse removed frames range if present
                 removed_start, removed_end = map(int, all_removed[i].split('-'))
-                
-                valid_frames_indices[removed_start:] += removed_end - removed_start + 1
+
+                idx = np.where(valid_frames_indices==removed_start)[0].item()
+                valid_frames_indices[idx:] += removed_end - removed_start + 1
 
         # randomly sample frames
         sampled_frames_indices = np.random.choice(valid_frames_indices, self.num_frames, replace=False)
 
-        ret = {}
-        # Load npz data
-        fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{sampled_frames_indices[0]:06d}.npz')
-        data = np.load(fpath)
+        ret = defaultdict(list)
+        for i in sampled_frames_indices:
+            # Load npz data
+            try:
+                fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{i:06d}.npz')
+                data = np.load(fpath)
+            except FileNotFoundError:
+                print(id, sequence_name, removed_frames, all_removed, len(all_removed))
+                print(sampled_frames_indices)
+                print(valid_frames_indices)
 
-        ret['transl'] = torch.from_numpy(data['transl']).float()
-        ret['v_cano'] = torch.from_numpy(data['v_cano']).float()
-        ret['pose'] = torch.from_numpy(data['pose']).float()
-        ret['v_posed'] = torch.from_numpy(data['v_posed']).float()
+            ret['transl'].append(torch.from_numpy(data['transl']).float())
+            ret['v_cano'].append(torch.from_numpy(data['v_cano']).float())
+            ret['pose'].append(torch.from_numpy(data['pose']).float())
+            ret['v_posed'].append(torch.from_numpy(data['v_posed']).float())
 
-        # TODO sample cameras and render images
+        # Convert lists to tensors
+        ret = {k: torch.stack(v) for k, v in ret.items()}
 
+        # Load per person attributes
+        fpath = os.path.join(PATH_TO_DATA, f'minimal_body_shape/{id}/{id}_param.pkl')
+        with open(fpath, 'rb') as f:
+            data = pickle.load(f)
+
+        ret['betas'] = torch.from_numpy(data['betas']).float()
 
         return ret
 

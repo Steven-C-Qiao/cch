@@ -37,11 +37,12 @@ class SimpleShader(nn.Module):
     
 
 class SurfaceNormalRenderer(pl.LightningModule):
-    def __init__(self):
+    def __init__(self, image_size=(256, 192)):
         super().__init__()
+        self.image_size = image_size
 
         raster_settings = RasterizationSettings(
-            image_size=512,
+            image_size=self.image_size,
             blur_radius=0.0,
             faces_per_pixel=1,
         )
@@ -52,28 +53,27 @@ class SurfaceNormalRenderer(pl.LightningModule):
             ),
             shader=SimpleShader()
         )
+
+        self.register_buffer('faces', smpl_faces)
     
 
-    def forward(self, vertices, faces=None, R=None, T=None):
+    def forward(self, vertices, R=None, T=None, faces=None):
         """
-        Render surface normals 
-
         Args:
-            vertices: (B, V, 3)
+            vertices: (B, N, V, 3)
             faces: (F, 3)
             R: (B, N, 3, 3); N views
             T: (B, N, 3)
         Returns:
             normals: (B, N, 3, H, W)
         """
-        B = vertices.shape[0]
-        N = R.shape[1] if R is not None else 1
+        B, N, _, _ = vertices.shape
 
         if faces is None:
-            faces = smpl_faces
+            faces = self.faces
 
-        vertices = vertices.repeat_interleave(N, dim=0)
-        faces = faces[None].repeat_interleave(B * N, dim=0)
+        vertices = vertices.view(B * N, -1, 3)
+        faces = faces[None].repeat(B * N, 1, 1)
 
         R = R.view(B * N, 3, 3)
         T = T.view(B * N, 3)
@@ -89,7 +89,7 @@ class SurfaceNormalRenderer(pl.LightningModule):
             self.renderer.rasterizer.cameras = cameras
             self.renderer.shader.cameras = cameras
 
-            surface_normals = torch.bmm(R.permute(0, 2, 1), surface_normals.permute(0, 2, 1)).permute(0, 2, 1)#
+            surface_normals = torch.bmm(R.permute(0, 2, 1), surface_normals.permute(0, 2, 1)).permute(0, 2, 1)
 
             # invert z axis as per opencv? convention
             surface_normals[..., 2] *= -1
@@ -129,7 +129,7 @@ if __name__ == "__main__":
     R, T = sample_cameras(1, num_angles, at)
 
 
-    renderer = SurfaceNormalRenderer()
+    renderer = SurfaceNormalRenderer(image_size=(256, 192))
 
     normals = renderer(vertices[None], 
                                R=R, 
