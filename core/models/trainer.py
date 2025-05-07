@@ -13,6 +13,8 @@ from einops import rearrange
 from pytorch3d.renderer import FoVPerspectiveCameras, look_at_view_transform
 
 from core.configs import paths 
+from core.losses.cch_loss import CCHLoss
+
 from core.models.smpl import SMPL
 from core.models.cch import CCH 
 
@@ -61,7 +63,7 @@ class CCHTrainer(pl.LightningModule):
             smpl_model=self.smpl_model
         )
 
-        self.criterion = nn.MSELoss()
+        self.criterion = CCHLoss()
         
         
         # visualiser = Visualiser(save_dir=vis_save_dir)
@@ -81,11 +83,13 @@ class CCHTrainer(pl.LightningModule):
         return self.model(batch)
     
     def on_train_epoch_start(self):
-        self.visualiser.set_global_rank(self.global_rank)
+        pass 
+        # self.visualiser.set_global_rank(self.global_rank)
 
     def training_step(self, batch, batch_idx, split='train'):
         batch = self.process_inputs(batch, batch_idx)
         B, N = batch['pose'].shape[:2]
+        vp = batch['v_posed']
         
         if batch_idx == 0:
             self.first_batch = batch
@@ -104,7 +108,7 @@ class CCHTrainer(pl.LightningModule):
 
         parents = self.smpl_model.parents
         
-        vp, joints = general_lbs(
+        vp_pred, joints_pred = general_lbs(
             vc=rearrange(pred_vc, 'b n h w c -> (b n) (h w) c'),
             pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
             lbs_weights=rearrange(pred_w, 'b n h w c -> (b n) (h w) c'),
@@ -112,25 +116,13 @@ class CCHTrainer(pl.LightningModule):
             parents=parents#parents[None].repeat(B * N, 1)
         )
 
-        import ipdb; ipdb.set_trace()
-
-
-
-
-        # loss, loss_dict = self.criterion(pred_dict['sculpted_pred_dict'], 
-        #                                  targets_dict, 
-        #                                  self.cfg.DATA.IMG_SIZE)
+        loss, loss_normals = self.criterion(vp_pred, rearrange(vp, 'b n v c -> (b n) v c'))
 
         # # Visualise and log
         # if batch_idx % self.vis_frequency == 0:
-        #     # self.visualiser.visualise(pred_dict.copy(), 
-        #     #                           targets_dict.copy(), 
-        #     #                           batch_idx, self.current_epoch)
-        #     self.visualiser.visualise_on_image(inputs_dict.copy(), 
-        #                                        targets_dict.copy(), 
-        #                                        pred_dict.copy(), 
-        #                                        batch_idx, self.current_epoch)
-        #     self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
+
+            # self.visualiser.visualise(normal_images, predicted_normal_images)
+            # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
 
         # self.metrics_calculator.update(pred_dict, targets_dict, self.cfg.TRAIN.BATCH_SIZE)
 
@@ -144,8 +136,10 @@ class CCHTrainer(pl.LightningModule):
         
         # for metrics in self.metrics_calculator.metrics:
         #     self.log(f'{split}_{metrics}', self.metrics_calculator.metrics_dict[metrics][-1], on_step=True, on_epoch=True, sync_dist=True)
+        self.log('loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        # self.log('loss_normals', loss_normals, on_step=True, on_epoch=True, sync_dist=True)
 
-        return None
+        return loss 
     
 
 
@@ -188,6 +182,8 @@ class CCHTrainer(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         with torch.no_grad():
             loss = self.training_step(batch, batch_idx, split='val')
+            # Add explicit validation logging
+            self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
     
     def on_validation_epoch_end(self):
@@ -196,7 +192,7 @@ class CCHTrainer(pl.LightningModule):
         for name, param in self.criterion.named_parameters():
             names.append(name.split('.')[-1])
             vals.append(torch.exp(-param.data.clone()).item())
-        logger.info(f'Current homosced weights: {list(zip(names, vals))}')
+        # logger.info(f'Current homosced weights: {list(zip(names, vals))}')
 
 
     def configure_optimizers(self):

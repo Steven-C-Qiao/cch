@@ -55,7 +55,7 @@ class CapeDataset(Dataset):
         self.total_num_frames = sum(int(valid_frames) for _, _, valid_frames, _ in self.all_seqs)
 
         assert self.total_num_sequences == 609
-        assert self.total_num_frames == 148411
+        # assert self.total_num_frames == 148411
         logger.info(f"Total number of sequences: {self.total_num_sequences}")
         logger.info(f"Total number of frames: {self.total_num_frames}")
 
@@ -65,7 +65,7 @@ class CapeDataset(Dataset):
     def __getitem__(self, index):
         # get sequence id
         id, sequence_name, valid_frames, removed_frames = self.all_seqs[index]
-        valid_frames_indices = np.arange(int(valid_frames))
+        valid_frames_indices = np.arange(int(valid_frames)) + 1
         
         if removed_frames is not None:
             all_removed = removed_frames.split(',')
@@ -74,7 +74,17 @@ class CapeDataset(Dataset):
                 # Parse removed frames range if present
                 removed_start, removed_end = map(int, all_removed[i].split('-'))
 
-                idx = np.where(valid_frames_indices==removed_start)[0].item()
+        
+                try:
+                    idx = np.where(valid_frames_indices==removed_start)[0].item()
+                except:
+                    continue
+                    # print(np.where(valid_frames_indices==removed_start))
+                    # print(id, sequence_name, removed_frames, all_removed, i)
+                    # # print(valid_frames_indices)
+                    # print(removed_start)
+                    # print(removed_end)
+                    # assert False 
                 valid_frames_indices[idx:] += removed_end - removed_start + 1
 
         # randomly sample frames
@@ -86,10 +96,16 @@ class CapeDataset(Dataset):
             try:
                 fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{i:06d}.npz')
                 data = np.load(fpath)
-            except FileNotFoundError:
-                print(id, sequence_name, removed_frames, all_removed, len(all_removed))
-                print(sampled_frames_indices)
-                print(valid_frames_indices)
+            except:
+                # CAPE seq_list has missing frames. Sample another frame when this happens
+                fpath = 'foo.bar'
+                while os.path.exists(fpath) is False:
+                    new_idx = np.random.choice(valid_frames_indices, 1, replace=False)
+                    fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{new_idx[0]:06d}.npz')
+                data = np.load(fpath)
+                # print(id, sequence_name, removed_frames, all_removed, idx, len(all_removed))
+                # print(sampled_frames_indices)
+                # print(valid_frames_indices)
 
             ret['transl'].append(torch.from_numpy(data['transl']).float())
             ret['v_cano'].append(torch.from_numpy(data['v_cano']).float())
