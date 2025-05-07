@@ -56,8 +56,8 @@ class CCHTrainer(pl.LightningModule):
         )
         # smpl_faces = torch.tensor(smpl_model.faces, dtype=torch.int32)
         # self.register_buffer('smpl_faces', smpl_faces)
-        # for param in smpl_model.parameters():
-        #     param.requires_grad = False
+        for param in self.smpl_model.parameters():
+            param.requires_grad = False
 
         self.model = CCH(
             cfg=cfg,
@@ -77,15 +77,14 @@ class CCHTrainer(pl.LightningModule):
         # self.criterion = HomoscedWeightedLoss(loss_cfg=cfg.LOSS, backbone_losses=cfg.TRAIN_BACKBONE)
         # self.metrics_calculator = MetricsCalculator()
 
-        self.save_hyperparameters(ignore=['smpl_model', 'edge_detect_model'])
+        self.save_hyperparameters(ignore=['smpl_model'])
         
 
     def forward(self, batch):
         return self.model(batch)
     
     def on_train_epoch_start(self):
-        pass 
-        # self.visualiser.set_global_rank(self.global_rank)
+        self.visualiser.set_global_rank(self.global_rank)
 
     def training_step(self, batch, batch_idx, split='train'):
         batch = self.process_inputs(batch, batch_idx)
@@ -129,7 +128,6 @@ class CCHTrainer(pl.LightningModule):
                                          vp_pred.cpu().detach().numpy())
             # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
 
-        import ipdb; ipdb.set_trace()
         # self.metrics_calculator.update(pred_dict, targets_dict, self.cfg.TRAIN.BATCH_SIZE)
 
         # d_vc = torch.cat(pred_dict['pred_d_vc_list'], dim=0) 

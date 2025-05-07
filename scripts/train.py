@@ -77,10 +77,11 @@ def run_train(exp_dir, cfg_opts=None, resume_from_epoch=None, dev=False, device_
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator='gpu',
         devices=[0] if dev else device_ids, 
-        strategy=DDPStrategy() if not dev else 'auto',
+        strategy=DDPStrategy(find_unused_parameters=True) if not dev else 'auto',
         callbacks=checkpoint_callbacks,
         logger=logger,
         log_every_n_steps=100,
+
     )
 
     trainer.fit(model, datamodule)
@@ -127,7 +128,7 @@ if __name__ == '__main__':
         logger.info('Dev mode: Using single GPU')
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+    # os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f'Device: {device}')
 
