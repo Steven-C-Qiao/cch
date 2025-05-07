@@ -1,0 +1,84 @@
+import torch 
+import os 
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+class Visualiser:
+    def __init__(self, save_dir):
+        self.save_dir = save_dir
+
+    def visualise_input_normal_imgs(self, normal_images):
+        B, N = normal_images.shape[:2]
+        # Convert to numpy and move channels to last dimension
+        normal_images = normal_images.permute(0, 1, 3, 4, 2).cpu().numpy()
+
+        # Create a grid of subplots
+        fig, axes = plt.subplots(B, N, figsize=(4*N, 4*B))
+        
+        # Handle single row/column case
+        if B == 1:
+            axes = axes[None, :]
+        if N == 1:
+            axes = axes[:, None]
+
+        # Plot each normal image
+        for b in range(B):
+            for n in range(N):
+                axes[b,n].imshow(normal_images[b,n])
+                axes[b,n].axis('off')
+        
+        # Save figure
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.save_dir, 'normal_images.png'))
+        plt.close()
+
+
+    def visualise_vp(self, vp, vp_pred):
+        B, N, V, C = vp.shape
+
+        B = max(B, 2)
+        N = max(N, 4)
+        fig = plt.figure(figsize=(4*N, 4*B))
+
+        for b in range(B):
+            for n in range(N):
+                # Create 3D subplot
+                ax = fig.add_subplot(B, N, b*N + n + 1, projection='3d')
+                
+                # Plot ground truth vertices in blue
+                ax.scatter(vp[b,n,:,0], vp[b,n,:,1], vp[b,n,:,2], 
+                          c='blue', s=0.5, alpha=0.5, label='Ground Truth')
+                
+                # Plot predicted vertices in red
+                ax.scatter(vp_pred[b,n,:,0], vp_pred[b,n,:,1], vp_pred[b,n,:,2],
+                          c='red', s=0.5, alpha=0.5, label='Predicted')
+
+                # ax.set_title(f'Batch {b}, Frame {n}')
+                # ax.legend()
+
+                # set look into z direction
+                ax.view_init(elev=10, azim=20, vertical_axis='y')
+                
+                # Set equal aspect ratio
+                ax.set_box_aspect([1, 1, 1])
+                
+                # Set equal tick ratios
+                max_range = np.array([
+                    vp[b,n,:,0].max() - vp[b,n,:,0].min(),
+                    vp[b,n,:,1].max() - vp[b,n,:,1].min(),
+                    vp[b,n,:,2].max() - vp[b,n,:,2].min()
+                ]).max() / 2.0
+                mid_x = (vp[b,n,:,0].max() + vp[b,n,:,0].min()) * 0.5
+                mid_y = (vp[b,n,:,1].max() + vp[b,n,:,1].min()) * 0.5
+                mid_z = (vp[b,n,:,2].max() + vp[b,n,:,2].min()) * 0.5
+                ax.set_xlim(mid_x - max_range, mid_x + max_range)
+                ax.set_ylim(mid_y - max_range, mid_y + max_range)
+                ax.set_zlim(mid_z - max_range, mid_z + max_range)
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.save_dir, 'vp.png'))
+        plt.close()
+
+    def save_image(self, image, name):
+        image.save(os.path.join(self.save_dir, name))

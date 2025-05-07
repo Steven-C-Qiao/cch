@@ -21,6 +21,7 @@ from core.models.cch import CCH
 from core.utils.normal_renderer import SurfaceNormalRenderer 
 from core.utils.sample_utils import sample_cameras
 from core.utils.general_lbs import general_lbs
+from core.utils.visualiser import Visualiser
 
 
 
@@ -63,10 +64,10 @@ class CCHTrainer(pl.LightningModule):
             smpl_model=self.smpl_model
         )
 
-        self.criterion = CCHLoss()
+        self.criterion = CCHLoss(single_directional=False)
         
         
-        # visualiser = Visualiser(save_dir=vis_save_dir)
+        self.visualiser = Visualiser(save_dir=vis_save_dir)
         
         
         # self.model = model
@@ -93,6 +94,7 @@ class CCHTrainer(pl.LightningModule):
         
         if batch_idx == 0:
             self.first_batch = batch
+            self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
         if self.dev:    
             batch = self.first_batch
 
@@ -115,15 +117,19 @@ class CCHTrainer(pl.LightningModule):
             J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
             parents=parents#parents[None].repeat(B * N, 1)
         )
+        joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
         loss, loss_normals = self.criterion(vp_pred, rearrange(vp, 'b n v c -> (b n) v c'))
 
-        # # Visualise and log
-        # if batch_idx % self.vis_frequency == 0:
+        vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
 
-            # self.visualiser.visualise(normal_images, predicted_normal_images)
+        # # Visualise and log
+        if batch_idx % self.vis_frequency == 0:
+            self.visualiser.visualise_vp(vp.cpu().detach().numpy(), 
+                                         vp_pred.cpu().detach().numpy())
             # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
 
+        import ipdb; ipdb.set_trace()
         # self.metrics_calculator.update(pred_dict, targets_dict, self.cfg.TRAIN.BATCH_SIZE)
 
         # d_vc = torch.cat(pred_dict['pred_d_vc_list'], dim=0) 

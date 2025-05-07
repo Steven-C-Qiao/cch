@@ -52,8 +52,8 @@ def run_train(exp_dir, cfg_opts=None, resume_from_epoch=None, dev=False, device_
         ModelCheckpoint(
             dirpath=model_save_dir,
             filename='loss_{epoch:03d}',
-            save_top_k=3,
-            save_last=True,
+            save_top_k=1,
+            save_last=False,
             verbose=True,
             monitor='loss',
             mode='min'

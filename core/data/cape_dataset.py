@@ -60,11 +60,12 @@ class CapeDataset(Dataset):
         logger.info(f"Total number of frames: {self.total_num_frames}")
 
     def __len__(self):
-        return self.total_num_sequences
+        # Pseudo lengthen CAPE since num_sequences is small, but frames in each sequence is large
+        return self.total_num_sequences * 100
 
     def __getitem__(self, index):
         # get sequence id
-        id, sequence_name, valid_frames, removed_frames = self.all_seqs[index]
+        id, sequence_name, valid_frames, removed_frames = self.all_seqs[index % self.total_num_sequences]
         valid_frames_indices = np.arange(int(valid_frames)) + 1
         
         if removed_frames is not None:
@@ -78,7 +79,7 @@ class CapeDataset(Dataset):
                 try:
                     idx = np.where(valid_frames_indices==removed_start)[0].item()
                 except:
-                    continue
+                    continue # this happens when all the rest of the frames are removed
                     # print(np.where(valid_frames_indices==removed_start))
                     # print(id, sequence_name, removed_frames, all_removed, i)
                     # # print(valid_frames_indices)
