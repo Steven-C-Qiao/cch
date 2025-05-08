@@ -66,6 +66,7 @@ class SurfaceNormalRenderer(pl.LightningModule):
             T: (B, N, 3)
         Returns:
             normals: (B, N, 3, H, W)
+            mask: (B, N, 1, H, W)
         """
         B, N, _, _ = vertices.shape
 
@@ -105,10 +106,14 @@ class SurfaceNormalRenderer(pl.LightningModule):
 
         images = self.renderer(mesh)
         
-        # discard alpha channel
+        # Get normal maps and alpha channel
         normals = images[..., :3].cpu().numpy()
+        mask = images[..., 3:4].cpu().numpy()  # Extract alpha channel as mask
 
-        return rearrange(normals, '(b n) c h w -> b n c h w', b=B, n=N)
+        normals = rearrange(normals, '(b n) c h w -> b n c h w', b=B, n=N)
+        mask = rearrange(mask, '(b n) c h w -> b n c h w', b=B, n=N)
+
+        return normals, mask
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
@@ -131,13 +136,14 @@ if __name__ == "__main__":
 
     renderer = SurfaceNormalRenderer(image_size=(256, 192))
 
-    normals = renderer(vertices[None], 
+    normals, mask = renderer(vertices[None], 
                                R=R, 
                                T=T)
 
     n_subplots = normals.shape[1]
-    fig, axs = plt.subplots(1, n_subplots, figsize = (n_subplots * 4, 4))
+    fig, axs = plt.subplots(2, n_subplots, figsize=(n_subplots * 4, 8))
     for i in range(n_subplots):
-        axs[i].imshow(normals[0, i])
+        axs[0, i].imshow(normals[0, i])
+        axs[1, i].imshow(mask[0, i, 0], cmap='gray')
     plt.savefig('tinkering/test_normal_renderer.png')
     plt.show()

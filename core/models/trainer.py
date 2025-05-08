@@ -118,7 +118,22 @@ class CCHTrainer(pl.LightningModule):
         )
         joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
-        loss, loss_normals = self.criterion(vp_pred, rearrange(vp, 'b n v c -> (b n) v c'))
+
+        # # Get valid vertices based on mask
+        # mask = batch['masks'].flatten(start_dim = 2).bool()  # B, N, C'
+
+        # vp_filtered = vp_pred[mask]
+
+        # import ipdb; ipdb.set_trace()   
+      
+        
+        
+
+
+
+        loss, loss_normals = self.criterion(vp_pred, 
+                                            rearrange(vp, 'b n v c -> (b n) v c'),
+                                            mask=batch['masks'])
 
         vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
 
@@ -171,15 +186,18 @@ class CCHTrainer(pl.LightningModule):
             T = T.to(self.device)
 
             # render normal images
-            normal_imgs = self.renderer(vp, R, T)
+            normal_imgs, masks = self.renderer(vp, R, T)
             normal_imgs = torch.tensor(normal_imgs, 
                                        dtype=torch.float32).permute(0, 1, 4, 2, 3).to(self.device)
+            
+            masks = torch.tensor(masks, 
+                                dtype=torch.float32).permute(0, 1, 4, 2, 3).to(self.device)
             
             batch['normal_imgs'] = normal_imgs
             batch['R'] = R
             batch['T'] = T
             batch['joints'] = joints
-
+            batch['masks'] = masks
         return batch 
     
 
