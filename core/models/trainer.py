@@ -90,6 +90,7 @@ class CCHTrainer(pl.LightningModule):
         batch = self.process_inputs(batch, batch_idx)
         B, N = batch['pose'].shape[:2]
         vp = batch['v_posed']
+        mask = batch['masks']
         
         if batch_idx == 0:
             self.first_batch = batch
@@ -119,28 +120,17 @@ class CCHTrainer(pl.LightningModule):
         joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
 
-        # # Get valid vertices based on mask
-        # mask = batch['masks'].flatten(start_dim = 2).bool()  # B, N, C'
-
-        # vp_filtered = vp_pred[mask]
-
-        # import ipdb; ipdb.set_trace()   
-      
-        
-        
-
-
-
         loss, loss_normals = self.criterion(vp_pred, 
                                             rearrange(vp, 'b n v c -> (b n) v c'),
-                                            mask=batch['masks'])
+                                            mask=mask)
 
         vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
 
         # # Visualise and log
         if batch_idx % self.vis_frequency == 0:
             self.visualiser.visualise_vp(vp.cpu().detach().numpy(), 
-                                         vp_pred.cpu().detach().numpy())
+                                         vp_pred.cpu().detach().numpy(), 
+                                         mask.cpu().detach().numpy())
             # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
 
         # self.metrics_calculator.update(pred_dict, targets_dict, self.cfg.TRAIN.BATCH_SIZE)

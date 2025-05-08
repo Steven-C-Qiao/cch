@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 from einops import rearrange
 
 from core.heads.dpt_head import DPTHead
@@ -16,7 +17,7 @@ class CCH(nn.Module):
         super(CCH, self).__init__()
         self.smpl_model = smpl_model
 
-        self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim)
+        self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="conv")
         self.canonical_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
         self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="sigmoid", conf_activation="expp1")
 
@@ -35,6 +36,9 @@ class CCH(nn.Module):
         with torch.cuda.amp.autocast(enabled=False):
             vc, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
             w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+
+            # normalise skinning weights across joints 
+            w = F.softmax(w, dim=-1)
 
             # TODO: Pose blend shapes 
 

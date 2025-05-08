@@ -41,7 +41,7 @@ class Visualiser:
             plt.close()
 
 
-    def visualise_vp(self, vp, vp_pred):
+    def visualise_vp(self, vp, vp_pred, mask=None):
         if self.rank == 0:
             B, N, V, C = vp.shape
 
@@ -51,6 +51,11 @@ class Visualiser:
 
             for b in range(B):
                 for n in range(N):
+                    vp_pred_to_scatter = vp_pred[b, n]
+                    if mask is not None:
+                        vp_pred_to_scatter = vp_pred_to_scatter[mask[b, n, 0].astype(np.bool).flatten()]
+
+
                     # Create 3D subplot
                     ax = fig.add_subplot(B, N, b*N + n + 1, projection='3d')
                     
@@ -59,8 +64,8 @@ class Visualiser:
                             c='blue', s=0.5, alpha=0.5, label='Ground Truth')
                     
                     # Plot predicted vertices in red
-                    ax.scatter(vp_pred[b,n,:,0], vp_pred[b,n,:,1], vp_pred[b,n,:,2],
-                            c='red', s=0.5, alpha=0.5, label='Predicted')
+                    ax.scatter(vp_pred_to_scatter[:,0], vp_pred_to_scatter[:,1], vp_pred_to_scatter[:,2],
+                            c='red', s=0.5, alpha=0.3, label='Predicted')
 
                     # ax.set_title(f'Batch {b}, Frame {n}')
                     # ax.legend()
