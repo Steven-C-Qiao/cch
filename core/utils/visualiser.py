@@ -2,10 +2,11 @@ import torch
 import os 
 import matplotlib.pyplot as plt
 import numpy as np
+import pytorch_lightning as pl 
 
-
-class Visualiser:
+class Visualiser(pl.LightningModule):
     def __init__(self, save_dir, rank=0):
+        super().__init__()
         self.save_dir = save_dir
         self.rank = rank
 
@@ -41,7 +42,7 @@ class Visualiser:
             plt.close()
 
 
-    def visualise_vp(self, vp, vp_pred, mask=None):
+    def visualise_vp(self, vp, vp_pred, mask=None, color=None):
         if self.rank == 0:
             B, N, V, C = vp.shape
 
@@ -52,8 +53,13 @@ class Visualiser:
             for b in range(B):
                 for n in range(N):
                     vp_pred_to_scatter = vp_pred[b, n]
+                    if color is not None:
+                        color_masked = color[b, n].flatten()
+                    else:
+                        color_masked = 'red'
                     if mask is not None:
                         vp_pred_to_scatter = vp_pred_to_scatter[mask[b, n, 0].astype(np.bool).flatten()]
+                        color_masked = color_masked[mask[b, n, 0].astype(np.bool).flatten()]
 
 
                     # Create 3D subplot
@@ -65,7 +71,7 @@ class Visualiser:
                     
                     # Plot predicted vertices in red
                     ax.scatter(vp_pred_to_scatter[:,0], vp_pred_to_scatter[:,1], vp_pred_to_scatter[:,2],
-                            c='red', s=0.5, alpha=0.3, label='Predicted')
+                            c=color_masked, s=0.5, alpha=0.3, label='Predicted')
 
                     # ax.set_title(f'Batch {b}, Frame {n}')
                     # ax.legend()
@@ -90,7 +96,7 @@ class Visualiser:
                     ax.set_zlim(mid_z - max_range, mid_z + max_range)
 
             plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, 'vp.png'))
+            plt.savefig(os.path.join(self.save_dir, f'vp_{self.global_step}.png'))
             plt.close()
 
     def visualise_vc(self, vc_pred, mask=None):
@@ -128,7 +134,7 @@ class Visualiser:
                 ax.set_box_aspect([1, 1, 1])
                 
             plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, 'vc.png'))
+            plt.savefig(os.path.join(self.save_dir, f'vc_{self.global_step}.png'))
             plt.close()
                     
                     

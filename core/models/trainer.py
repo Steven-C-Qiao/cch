@@ -35,7 +35,7 @@ class CCHTrainer(pl.LightningModule):
         self.dev = dev
         self.cfg = cfg
         self.normalise = False
-        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 50
+        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 300
  
         self.renderer = SurfaceNormalRenderer(image_size=(224, 224))
 
@@ -97,7 +97,8 @@ class CCHTrainer(pl.LightningModule):
 
 
         # pred_w = self.dev_pred_w
-        w_pred = dw_pred + coarse_skinning_weights_maps
+        # w_pred = dw_pred + coarse_skinning_weights_maps
+        w_pred = coarse_skinning_weights_maps
 
 
         parents = self.smpl_model.parents
@@ -126,7 +127,8 @@ class CCHTrainer(pl.LightningModule):
         if batch_idx % self.vis_frequency == 0:
             self.visualiser.visualise_vp(vp.cpu().detach().numpy(), 
                                          vp_pred.cpu().detach().numpy(), 
-                                         mask.cpu().detach().numpy())
+                                         mask.cpu().detach().numpy(),
+                                         color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1))
             self.visualiser.visualise_vc(vc_pred.cpu().detach().numpy(), 
                                          mask.cpu().detach().numpy())
             # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
