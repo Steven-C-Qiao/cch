@@ -35,7 +35,7 @@ class CCHTrainer(pl.LightningModule):
         self.dev = dev
         self.cfg = cfg
         self.normalise = False
-        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 250
+        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 50
  
         self.renderer = SurfaceNormalRenderer(image_size=(224, 224))
 
@@ -68,11 +68,9 @@ class CCHTrainer(pl.LightningModule):
         self.visualiser.set_global_rank(self.global_rank)
 
     def training_step(self, batch, batch_idx, split='train'):
-        
-        
-        
+        batch = self.process_inputs(batch, batch_idx)
         if batch_idx == 0:
-            batch = self.process_inputs(batch, batch_idx)
+            # batch = self.process_inputs(batch, batch_idx)
             self.first_batch = batch
             self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
         if self.dev:    
@@ -88,26 +86,25 @@ class CCHTrainer(pl.LightningModule):
 
         preds = self(normal_images)
 
-        pred_vc, pred_dw = preds['vc'], preds['w']
+        vc_pred, dw_pred = preds['vc'], preds['w']
 
         if batch_idx == 0:
             # Debug: set pred_w to one-hot vectors (one random joint per vertex)
-            B, N, H, W, J = pred_dw.shape
-            random_joints = torch.randint(0, J, (B, N, H, W), device=pred_dw.device)
-            pred_dw = torch.zeros_like(pred_dw)
-            self.dev_pred_w = pred_dw.scatter_(-1, random_joints.unsqueeze(-1), 1.0)
-        if self.dev:
-            # NOTE: needs to toggle manually
-            # pred_w = self.dev_pred_w
-            # import ipdb; ipdb.set_trace()
-            pred_w = pred_dw + coarse_skinning_weights_maps
+            B, N, H, W, J = dw_pred.shape
+            random_joints = torch.randint(0, J, (B, N, H, W), device=dw_pred.device)
+            dw_pred = torch.zeros_like(dw_pred)
+            self.dev_pred_w = dw_pred.scatter_(-1, random_joints.unsqueeze(-1), 1.0)
+
+
+        # pred_w = self.dev_pred_w
+        w_pred = dw_pred + coarse_skinning_weights_maps
 
 
         parents = self.smpl_model.parents
         vp_pred, joints_pred = general_lbs(
-            vc=rearrange(pred_vc, 'b n h w c -> (b n) (h w) c'),
+            vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
             pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
-            lbs_weights=rearrange(pred_w, 'b n h w c -> (b n) (h w) c'),
+            lbs_weights=rearrange(w_pred, 'b n h w c -> (b n) (h w) c'),
             J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
             parents=parents#parents[None].repeat(B * N, 1)
         )
@@ -117,10 +114,10 @@ class CCHTrainer(pl.LightningModule):
         loss, loss_normals = self.criterion(vp_pred, 
                                             rearrange(vp, 'b n v c -> (b n) v c'),
                                             mask=mask,
-                                            pred_dw=pred_dw)
+                                            pred_dw=dw_pred)
 
         vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
-
+        vc_pred = rearrange(vc_pred, 'b n h w c -> b n (h w) c', b=B, n=N)
         if batch_idx % 200 == 0 and batch_idx > 0:
             # import ipdb; ipdb.set_trace()
             pass 
@@ -129,6 +126,8 @@ class CCHTrainer(pl.LightningModule):
         if batch_idx % self.vis_frequency == 0:
             self.visualiser.visualise_vp(vp.cpu().detach().numpy(), 
                                          vp_pred.cpu().detach().numpy(), 
+                                         mask.cpu().detach().numpy())
+            self.visualiser.visualise_vc(vc_pred.cpu().detach().numpy(), 
                                          mask.cpu().detach().numpy())
             # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
 

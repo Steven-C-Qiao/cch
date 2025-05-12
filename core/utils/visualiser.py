@@ -92,3 +92,43 @@ class Visualiser:
             plt.tight_layout()
             plt.savefig(os.path.join(self.save_dir, 'vp.png'))
             plt.close()
+
+    def visualise_vc(self, vc_pred, mask=None):
+        """
+        Visualise the canonical space
+        """
+        if self.rank == 0:
+            B, N, V, C = vc_pred.shape
+
+            B = min(B, 2)
+            N = min(N, 4)
+            
+            fig = plt.figure(figsize=(4*1, 4*B))
+
+            for b in range(B):
+                ax = fig.add_subplot(B, 1, b + 1, projection='3d')
+                
+                # Collect all points across N frames
+                all_points = []
+                for n in range(N):
+                    vc_pred_to_scatter = vc_pred[b, n]
+                    if mask is not None:
+                        vc_pred_to_scatter = vc_pred_to_scatter[mask[b, n, 0].astype(np.bool).flatten()]
+                    all_points.append(vc_pred_to_scatter)
+                
+                # Combine all points and plot them together
+                all_points = np.concatenate(all_points, axis=0)
+                ax.scatter(all_points[:,0], all_points[:,1], all_points[:,2],
+                        c='blue', s=0.5, alpha=0.5, label='Canonical Points')
+                
+                # set look into z direction
+                ax.view_init(elev=10, azim=20, vertical_axis='y')
+
+                # Set equal aspect ratio
+                ax.set_box_aspect([1, 1, 1])
+                
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.save_dir, 'vc.png'))
+            plt.close()
+                    
+                    

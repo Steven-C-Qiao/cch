@@ -77,7 +77,7 @@ def run_train(exp_dir, cfg_opts=None, resume_from_epoch=None, dev=False, device_
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator='gpu',
-        devices= [np.array(device_ids).max().item()] if dev else device_ids, 
+        devices=device_ids, 
         strategy=DDPStrategy(find_unused_parameters=True) if not dev else 'auto',
         callbacks=checkpoint_callbacks,
         logger=logger,
@@ -124,9 +124,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # If in dev mode, override GPU settings to use single GPU
-    if args.dev:
-        args.gpus = '0'
-        logger.info('Dev mode: Using single GPU')
+    # if args.dev:
+    #     args.gpus = '0'
+    #     logger.info('Dev mode: Using single GPU')
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     # os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
