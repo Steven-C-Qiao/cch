@@ -18,20 +18,10 @@ from core.losses.cch_loss import CCHLoss
 from core.models.smpl import SMPL
 from core.models.cch import CCH 
 
-from core.utils.normal_renderer import SurfaceNormalRenderer 
+from core.utils.renderer import SurfaceNormalRenderer 
 from core.utils.sample_utils import sample_cameras
 from core.utils.general_lbs import general_lbs
 from core.utils.visualiser import Visualiser
-
-
-
-
-# from losses.deterministic_loss import DeterministicLoss
-# from losses.homosced_loss import HomoscedWeightedLoss
-# from utils.vis_utils import SculpterVisualiser
-# from utils.label_conversions import convert_joints2D_to_hmaps
-# from utils.geometry_utils import compute_smpl, compute_smpl_from_canonical_mesh
-# from utils.augmentation.proxy_rep import random_swap_joints2D, random_joints2D_deviation, random_remove_joints2D
 
 # from metrics.metrics_calculator import MetricsCalculator
 
@@ -45,7 +35,7 @@ class CCHTrainer(pl.LightningModule):
         self.dev = dev
         self.cfg = cfg
         self.normalise = False
-        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 5
+        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 250
  
         self.renderer = SurfaceNormalRenderer(image_size=(224, 224))
 
@@ -65,16 +55,7 @@ class CCHTrainer(pl.LightningModule):
         )
 
         self.criterion = CCHLoss(single_directional=False)
-        
-        
         self.visualiser = Visualiser(save_dir=vis_save_dir)
-        
-        
-        # self.model = model
-        # self.smpl_model = smpl_model
-        # self.visualiser = visualiser
-        # # self.criterion = DeterministicLoss(loss_cfg=cfg.LOSS, backbone_losses=cfg.FINETUNE_BACKBONE)
-        # self.criterion = HomoscedWeightedLoss(loss_cfg=cfg.LOSS, backbone_losses=cfg.TRAIN_BACKBONE)
         # self.metrics_calculator = MetricsCalculator()
 
         self.save_hyperparameters(ignore=['smpl_model'])
@@ -87,29 +68,42 @@ class CCHTrainer(pl.LightningModule):
         self.visualiser.set_global_rank(self.global_rank)
 
     def training_step(self, batch, batch_idx, split='train'):
-        batch = self.process_inputs(batch, batch_idx)
-        B, N = batch['pose'].shape[:2]
-        vp = batch['v_posed']
-        mask = batch['masks']
+        
+        
         
         if batch_idx == 0:
+            batch = self.process_inputs(batch, batch_idx)
             self.first_batch = batch
             self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
         if self.dev:    
             batch = self.first_batch
 
+        B, N = batch['pose'].shape[:2]
+        vp = batch['v_posed']
+        mask = batch['masks']
         global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
         joints = batch['joints']
         normal_images = batch['normal_imgs']
-            
+        coarse_skinning_weights_maps = batch['skinning_weights_maps']
+
         preds = self(normal_images)
 
-        # ----------------- Loss -----------------
-        pred_vc, pred_w = preds['vc'], preds['w']
+        pred_vc, pred_dw = preds['vc'], preds['w']
+
+        if batch_idx == 0:
+            # Debug: set pred_w to one-hot vectors (one random joint per vertex)
+            B, N, H, W, J = pred_dw.shape
+            random_joints = torch.randint(0, J, (B, N, H, W), device=pred_dw.device)
+            pred_dw = torch.zeros_like(pred_dw)
+            self.dev_pred_w = pred_dw.scatter_(-1, random_joints.unsqueeze(-1), 1.0)
+        if self.dev:
+            # NOTE: needs to toggle manually
+            # pred_w = self.dev_pred_w
+            # import ipdb; ipdb.set_trace()
+            pred_w = pred_dw + coarse_skinning_weights_maps
 
 
         parents = self.smpl_model.parents
-        
         vp_pred, joints_pred = general_lbs(
             vc=rearrange(pred_vc, 'b n h w c -> (b n) (h w) c'),
             pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
@@ -122,9 +116,14 @@ class CCHTrainer(pl.LightningModule):
 
         loss, loss_normals = self.criterion(vp_pred, 
                                             rearrange(vp, 'b n v c -> (b n) v c'),
-                                            mask=mask)
+                                            mask=mask,
+                                            pred_dw=pred_dw)
 
         vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
+
+        if batch_idx % 200 == 0 and batch_idx > 0:
+            # import ipdb; ipdb.set_trace()
+            pass 
 
         # # Visualise and log
         if batch_idx % self.vis_frequency == 0:
@@ -170,24 +169,30 @@ class CCHTrainer(pl.LightningModule):
             )
             joints = smpl_output.joints[:, :24]
 
+            w = (self.smpl_model.lbs_weights)[None, None].repeat(batch_size, num_frames, 1, 1)
+
             
             R, T = sample_cameras(batch_size, num_frames, t)
             R = R.to(self.device)
             T = T.to(self.device)
 
             # render normal images
-            normal_imgs, masks = self.renderer(vp, R, T)
-            normal_imgs = torch.tensor(normal_imgs, 
+            ret = self.renderer(vp, R, T, skinning_weights=w)
+            normal_imgs = torch.tensor(ret['normals'], 
                                        dtype=torch.float32).permute(0, 1, 4, 2, 3).to(self.device)
             
-            masks = torch.tensor(masks, 
+            masks = torch.tensor(ret['masks'], 
                                 dtype=torch.float32).permute(0, 1, 4, 2, 3).to(self.device)
+            
+            skinning_weights_maps = torch.tensor(ret['skinning_weights_maps'], 
+                                                dtype=torch.float32).to(self.device)
             
             batch['normal_imgs'] = normal_imgs
             batch['R'] = R
             batch['T'] = T
             batch['joints'] = joints
             batch['masks'] = masks
+            batch['skinning_weights_maps'] = skinning_weights_maps
         return batch 
     
 
@@ -210,9 +215,17 @@ class CCHTrainer(pl.LightningModule):
     def configure_optimizers(self):
         params = list(self.model.parameters()) + list(self.criterion.parameters())
         optimizer = optim.Adam(params, lr=self.cfg.TRAIN.LR)
-        return optimizer 
+        return optimizer
     
     # def on_after_backward(self):
     #     for name, param in self.named_parameters():
     #         if param.grad is None:
     #             print(name)
+
+    def on_after_backward(self):
+        for name, param in self.named_parameters():
+            if param.grad is not None:
+                grad_norm = param.grad.norm().item()
+                if grad_norm > 10:
+                    print(f"Large gradient in {name}: {grad_norm}")
+    

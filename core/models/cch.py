@@ -19,7 +19,10 @@ class CCH(nn.Module):
 
         self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="conv")
         self.canonical_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
-        self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="sigmoid", conf_activation="expp1")
+        
+        # use inv_log since now producing updates to the coarse_smpl_skinning_weights 
+        self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1")
+
 
         # self.count_parameters()
 
@@ -38,7 +41,8 @@ class CCH(nn.Module):
             w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
 
             # normalise skinning weights across joints 
-            w = F.softmax(w, dim=-1)
+            # No softmax now as using inv_log activation
+            # w = F.softmax(w, dim=-1)
 
             # TODO: Pose blend shapes 
 

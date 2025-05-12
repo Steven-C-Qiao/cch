@@ -1,6 +1,7 @@
 import os
 import torch
 import argparse
+import numpy as np
 import pytorch_lightning as pl
 from loguru import logger
 
@@ -76,12 +77,12 @@ def run_train(exp_dir, cfg_opts=None, resume_from_epoch=None, dev=False, device_
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator='gpu',
-        devices=[0] if dev else device_ids, 
+        devices= [np.array(device_ids).max().item()] if dev else device_ids, 
         strategy=DDPStrategy(find_unused_parameters=True) if not dev else 'auto',
         callbacks=checkpoint_callbacks,
         logger=logger,
         log_every_n_steps=100,
-
+        gradient_clip_val=1.0,
     )
 
     trainer.fit(model, datamodule)
