@@ -99,14 +99,27 @@ class CapeDataset(Dataset):
                 data = np.load(fpath)
             except:
                 # CAPE seq_list has missing frames. Sample another frame when this happens
-                fpath = 'foo.bar'
-                while os.path.exists(fpath) is False:
-                    new_idx = np.random.choice(valid_frames_indices, 1, replace=False)
-                    fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{new_idx[0]:06d}.npz')
-                data = np.load(fpath)
+                # fpath = 'foo.bar'
+                # while os.path.exists(fpath) is False:
+                #     new_idx = np.random.choice(valid_frames_indices, 1, replace=False)
+                #     fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{new_idx[0]:06d}.npz')
+
+                # try: # Some frames are corrupted, so loading here still might fail
+                #     data = np.load(fpath)
+                # except:
+                #     fpath = 'foo.bar'
+                #     continue
                 # print(id, sequence_name, removed_frames, all_removed, idx, len(all_removed))
                 # print(sampled_frames_indices)
                 # print(valid_frames_indices)
+                data = None
+                while data is None:
+                    new_idx = np.random.choice(valid_frames_indices, 1, replace=False) # sample a new random frame
+                    fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{new_idx[0]:06d}.npz')
+                    try: # some frames are corrupted, so loading here still might fail
+                        data = np.load(fpath)
+                    except: # iterate until a valid frame is loaded
+                        continue
 
             ret['transl'].append(torch.from_numpy(data['transl']).float())
             ret['v_cano'].append(torch.from_numpy(data['v_cano']).float())
@@ -122,6 +135,20 @@ class CapeDataset(Dataset):
             data = pickle.load(f)
 
         ret['betas'] = torch.from_numpy(data['betas']).float()
+
+
+
+        i=1
+        frame = f'{i:06d}'
+        fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{frame}.npz')
+        while not os.path.exists(fpath):
+            i+=1
+            frame = f'{i:06d}'
+            fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{frame}.npz')
+        # print(fpath)
+        # Load the first frame of the sequence, and use its v_cano as the canonical mesh
+        data = np.load(fpath)
+        ret['first_frame_v_cano'] = torch.from_numpy(data['v_cano']).float()
 
         return ret
 

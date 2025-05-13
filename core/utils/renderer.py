@@ -70,7 +70,7 @@ class SurfaceNormalRenderer(pl.LightningModule):
         self.register_buffer('faces', smpl_faces)
     
 
-    def forward(self, vertices, R=None, T=None, faces=None, skinning_weights=None):
+    def forward(self, vertices, R=None, T=None, faces=None, skinning_weights=None, first_frame_v_cano=None):
         """
         Args:
             vertices: (B, N, V, 3)
@@ -78,6 +78,7 @@ class SurfaceNormalRenderer(pl.LightningModule):
             R: (B, N, 3, 3); N views
             T: (B, N, 3)
             skinning_weights: (B, N, V, 24)
+            first_frame_v_cano: (B, V, 3)
         Returns:
             normals: (B, N, 3, H, W)
             mask: (B, N, 1, H, W)
@@ -88,12 +89,17 @@ class SurfaceNormalRenderer(pl.LightningModule):
         if faces is None:
             faces = self.faces
 
+        if first_frame_v_cano is not None:
+            assert len(first_frame_v_cano.shape) == 3
+            first_frame_v_cano = first_frame_v_cano.repeat_interleave(N, dim=0)
+
         vertices = vertices.view(B * N, -1, 3)
         faces = faces[None].repeat(B * N, 1, 1)
 
         R = R.view(B * N, 3, 3)
         T = T.view(B * N, 3)
 
+        # ------------------- surface normals -------------------
         mesh = Meshes(
             verts=vertices,
             faces=faces,
@@ -123,12 +129,13 @@ class SurfaceNormalRenderer(pl.LightningModule):
         
         # Get normal maps and alpha channel
         normals = images[..., :3].cpu().numpy()
-        mask = images[..., 3:4].cpu().numpy()  # Extract alpha channel as mask
-
         ret['normals'] = rearrange(normals, '(b n) h w c -> b n h w c', b=B, n=N)
+
+        # ------------------- masks -------------------
+        mask = images[..., 3:4].cpu().numpy()  # Extract alpha channel as mask
         ret['masks'] = rearrange(mask, '(b n) h w c -> b n h w c', b=B, n=N)
 
-
+        # ------------------- color maps -------------------
         colors = (vertices - vertices.min()) / (vertices.max() - vertices.min())
 
         mesh.textures = TexturesVertex(verts_features=colors) # render a color map 
@@ -137,13 +144,21 @@ class SurfaceNormalRenderer(pl.LightningModule):
         ret['color_maps'] = rearrange(color_map, '(b n) h w c -> b n h w c', b=B, n=N)
 
 
-        # render the skinning weight maps 
+        # ------------------- skinning weight maps -------------------
         if skinning_weights is not None:
             skinning_weights = rearrange(skinning_weights, 'b n v k -> (b n) v k')
             mesh.textures = TexturesVertex(verts_features=skinning_weights)
             images = self.renderer(mesh)
             skinning_weights_map = images[..., :-1].cpu().numpy()
             ret['skinning_weights_maps'] = rearrange(skinning_weights_map, '(b n) h w c -> b n h w c', b=B, n=N)
+
+        # ------------------- canonical color maps -------------------
+        
+        if first_frame_v_cano is not None:
+            mesh.textures = TexturesVertex(verts_features=first_frame_v_cano)
+            images = self.renderer(mesh)
+            canonical_color_map = images[..., :3].cpu().numpy()
+            ret['canonical_color_maps'] = rearrange(canonical_color_map, '(b n) h w c -> b n h w c', b=B, n=N)
 
         return ret
 
@@ -187,10 +202,12 @@ if __name__ == "__main__":
     ret = renderer(vertices, 
                     R=R, 
                     T=T,
-                    skinning_weights=skinning_weights)
+                    skinning_weights=skinning_weights,
+                    first_frame_v_cano=torch.tensor(v_posed[:, 0]).float())
     normals = ret['normals']
     mask = ret['masks']
     color_map = ret['color_maps']
+    canonical_color_map = ret['canonical_color_maps']
     w = ret['skinning_weights_maps'] # B, N, H, W, 24
 
     w = w.argmax(axis=-1)
@@ -199,12 +216,13 @@ if __name__ == "__main__":
     
 
     n_subplots = normals.shape[1]
-    fig, axs = plt.subplots(4, n_subplots, figsize=(n_subplots * 4, 12))
+    fig, axs = plt.subplots(5, n_subplots, figsize=(n_subplots * 4, 12))
     for i in range(n_subplots):
         axs[0, i].imshow(normals[0, i])
         axs[1, i].imshow(mask[0, i], cmap='gray')
         axs[2, i].imshow(color_map[0, i])
-        axs[3, i].imshow(w[0, i])
+        axs[3, i].imshow(canonical_color_map[0, i])
+        axs[4, i].imshow(w[0, i])
     plt.tight_layout()
     for ax in axs.flatten():
         ax.axis('off')

@@ -68,9 +68,11 @@ class CCHTrainer(pl.LightningModule):
         self.visualiser.set_global_rank(self.global_rank)
 
     def training_step(self, batch, batch_idx, split='train'):
-        batch = self.process_inputs(batch, batch_idx)
+        if not self.dev: # more randomness in process_inputs, naive set first batch doesn't work 
+            batch = self.process_inputs(batch, batch_idx)
         if batch_idx == 0:
-            # batch = self.process_inputs(batch, batch_idx)
+            if self.dev:
+                batch = self.process_inputs(batch, batch_idx)
             self.first_batch = batch
             self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
         if self.dev:    
@@ -83,7 +85,11 @@ class CCHTrainer(pl.LightningModule):
         joints = batch['joints']
         normal_images = batch['normal_imgs']
         coarse_skinning_weights_maps = batch['skinning_weights_maps']
+        posed_canonical_color_maps = batch['canonical_color_maps']
 
+
+
+        # ------------------- forward pass -------------------
         preds = self(normal_images)
 
         vc_pred, dw_pred = preds['vc'], preds['w']
@@ -107,18 +113,23 @@ class CCHTrainer(pl.LightningModule):
             pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
             lbs_weights=rearrange(w_pred, 'b n h w c -> (b n) (h w) c'),
             J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
-            parents=parents#parents[None].repeat(B * N, 1)
+            parents=parents #parents[None].repeat(B * N, 1)
         )
         joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
 
-        loss, loss_normals = self.criterion(vp_pred, 
-                                            rearrange(vp, 'b n v c -> (b n) v c'),
-                                            mask=mask,
-                                            pred_dw=dw_pred)
+        loss, loss_dict = self.criterion(v=rearrange(vp, 'b n v c -> (b n) v c'),
+                                         v_pred=vp_pred,
+                                         vc=rearrange(posed_canonical_color_maps, 'b n h w c -> (b n) (h w) c'),
+                                         vc_pred=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
+                                         mask=mask,
+                                         # pred_dw=dw_pred
+                                         )
 
         vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
         vc_pred = rearrange(vc_pred, 'b n h w c -> b n (h w) c', b=B, n=N)
+
+
         if batch_idx % 200 == 0 and batch_idx > 0:
             # import ipdb; ipdb.set_trace()
             pass 
@@ -178,7 +189,11 @@ class CCHTrainer(pl.LightningModule):
             T = T.to(self.device)
 
             # render normal images
-            ret = self.renderer(vp, R, T, skinning_weights=w)
+            ret = self.renderer(vp, 
+                                R, 
+                                T, 
+                                skinning_weights=w,
+                                first_frame_v_cano=batch['first_frame_v_cano'])
             normal_imgs = torch.tensor(ret['normals'], 
                                        dtype=torch.float32).permute(0, 1, 4, 2, 3).to(self.device)
             
@@ -188,12 +203,17 @@ class CCHTrainer(pl.LightningModule):
             skinning_weights_maps = torch.tensor(ret['skinning_weights_maps'], 
                                                 dtype=torch.float32).to(self.device)
             
+            canonical_color_maps = torch.tensor(ret['canonical_color_maps'], 
+                                                dtype=torch.float32).to(self.device)
+            
+            
             batch['normal_imgs'] = normal_imgs
             batch['R'] = R
             batch['T'] = T
             batch['joints'] = joints
             batch['masks'] = masks
             batch['skinning_weights_maps'] = skinning_weights_maps
+            batch['canonical_color_maps'] = canonical_color_maps
         return batch 
     
 
