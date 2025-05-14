@@ -54,10 +54,9 @@ class CCHLoss(nn.Module):
 
     def forward(self, v, v_pred, vc, vc_pred, mask=None, pred_dw=None):
         posed_loss, _ = self.posed_pointmap_loss(v, v_pred, mask)
-        canonical_loss = self.canonical_rgb_loss(vc, vc_pred, mask)
+        canonical_loss = self.canonical_rgb_loss(vc, vc_pred, mask) * 10.
 
 
-        total_loss = posed_loss + canonical_loss
         loss_dict = {
             'posed_loss': posed_loss,
             'canonical_loss': canonical_loss,
@@ -67,5 +66,9 @@ class CCHLoss(nn.Module):
             loss_dict['loss_w'] = loss_w
             total_loss += loss_w
 
+        total_loss = posed_loss + canonical_loss
+
+        total_loss = canonical_loss
+        total_loss *= 100.
         loss_dict['total_loss'] = total_loss
         return total_loss, loss_dict

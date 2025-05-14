@@ -146,5 +146,38 @@ class Visualiser(pl.LightningModule):
             plt.close()
                     
                     
-    def visualise_vc_as_image(self, vc_pred, mask=None, color=None):
-        pass
+    def visualise_vc_as_image(self, vc_pred, vc=None, mask=None, color=None):
+        if self.rank == 0:
+            B, N, V, C = vc_pred.shape
+            vc_pred = vc_pred.reshape(B, N, int(np.sqrt(V)), int(np.sqrt(V)), C)
+
+            # normalise to [0.5, 1]
+            vc_pred = (vc_pred - vc_pred.min()) / (vc_pred.max() - vc_pred.min()) 
+
+            if vc is not None:
+                vc = (vc - vc.min()) / (vc.max() - vc.min()) 
+
+            B = min(B, 2)
+            N = min(N, 4)
+            
+
+            fig = plt.figure(figsize=(4*N, 2*4*B))
+
+            for b in range(B):
+                for n in range(N):
+                    # Plot vc (ground truth) on top row
+                    plt.subplot(2*B, N, b*2*N + n + 1)
+                    if vc is not None:
+                        plt.imshow(vc[b,n])
+                        plt.title(f'GT Frame {n}')
+                    plt.axis('off')
+
+                    # Plot vc_pred (prediction) on bottom row 
+                    plt.subplot(2*B, N, (b*2+1)*N + n + 1)
+                    plt.imshow(vc_pred[b,n])
+                    plt.title(f'Pred Frame {n}')
+                    plt.axis('off')
+
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.save_dir, f'vc_image_{self.global_step}.png'))
+            plt.close()

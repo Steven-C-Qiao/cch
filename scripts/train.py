@@ -56,7 +56,7 @@ def run_train(exp_dir, cfg_opts=None, resume_from_epoch=None, dev=False, device_
             save_top_k=1,
             save_last=False,
             verbose=True,
-            monitor='loss',
+            monitor='val_loss',
             mode='min'
         ),
     ]
@@ -65,13 +65,18 @@ def run_train(exp_dir, cfg_opts=None, resume_from_epoch=None, dev=False, device_
     logger = TensorBoardLogger(exp_dir, name='lightning_logs')
 
     # Load checkpoint if resuming
-    if resume_from_epoch is not None:
-        checkpoint_path = os.path.join(model_save_dir, f'epoch_{resume_from_epoch:03d}.ckpt')
-        if not os.path.exists(checkpoint_path):
-            raise ValueError(f"Checkpoint not found at {checkpoint_path}")
-        logger.info(f"Resuming from checkpoint: {checkpoint_path}")
-    else:
-        checkpoint_path = None
+    # if resume_from_epoch is not None:
+    #     checkpoint_path = os.path.join(model_save_dir, f'epoch_{resume_from_epoch:03d}.ckpt')
+    #     if not os.path.exists(checkpoint_path):
+    #         raise ValueError(f"Checkpoint not found at {checkpoint_path}")
+    #     # logger.info(f"Resuming from checkpoint: {checkpoint_path}")
+    # else:
+    #     checkpoint_path = None
+
+    checkpoint_path = '/scratches/kyuban/cq244/CCH/cch/exp/exp_009_explicit_loss/saved_models/loss_epoch=033.ckpt'
+    ckpt = torch.load(checkpoint_path, weights_only=False, map_location='cpu')
+    model.load_state_dict(ckpt['state_dict'])
+    logger.log_hyperparams(ckpt['hyper_parameters'])
 
     # Trainer
     trainer = pl.Trainer(
@@ -85,8 +90,9 @@ def run_train(exp_dir, cfg_opts=None, resume_from_epoch=None, dev=False, device_
         gradient_clip_val=1.0,
     )
 
-    checkpoint_path = '/scratches/kyuban/cq244/CCH/cch/exp/exp_009_explicit_loss/saved_models/loss_epoch=004.ckpt'
-    trainer.fit(model, datamodule, ckpt_path=checkpoint_path)
+    # checkpoint_path = '/scratches/kyuban/cq244/CCH/cch/exp/exp_009_explicit_loss/saved_models/loss_epoch=004.ckpt'
+    # trainer.fit(model, datamodule, ckpt_path=checkpoint_path)
+    trainer.fit(model, datamodule)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

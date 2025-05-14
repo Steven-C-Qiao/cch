@@ -35,7 +35,7 @@ class CCHTrainer(pl.LightningModule):
         self.dev = dev
         self.cfg = cfg
         self.normalise = False
-        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 300
+        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 50
  
         self.renderer = SurfaceNormalRenderer(image_size=(224, 224))
 
@@ -125,9 +125,12 @@ class CCHTrainer(pl.LightningModule):
                                          mask=mask,
                                          # pred_dw=dw_pred
                                          )
+        
 
         vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
         vc_pred = rearrange(vc_pred, 'b n h w c -> b n (h w) c', b=B, n=N)
+
+        # import ipdb; ipdb.set_trace()
 
 
         if batch_idx % 200 == 0 and batch_idx > 0:
@@ -145,21 +148,20 @@ class CCHTrainer(pl.LightningModule):
                                          mask.cpu().detach().numpy(),
                                          color=color)
             # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
+            self.visualiser.visualise_vc_as_image(vc_pred.cpu().detach().numpy(), 
+                                                  posed_canonical_color_maps.cpu().detach().numpy(),
+                                                  mask.cpu().detach().numpy())
+            
+        # import ipdb; ipdb.set_trace()
 
+
+        self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        for k, v in loss_dict.items():
+            self.log(f'{split}_{k}', v, on_step=True, on_epoch=True, sync_dist=True)
+        
         # self.metrics_calculator.update(pred_dict, targets_dict, self.cfg.TRAIN.BATCH_SIZE)
-
-        # d_vc = torch.cat(pred_dict['pred_d_vc_list'], dim=0) 
-        # self.log(f'{split}_d_vc_mean_magnitude', torch.mean(torch.abs(d_vc)), on_step=True)
-        # self.log(f'{split}_d_vc_max_magnitude', torch.max(torch.abs(d_vc)), on_step=True)
-        
-        # self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        # for k, v in loss_dict.items():
-        #     self.log(f'{split}_{k}', v, on_step=True, on_epoch=True, sync_dist=True)
-        
         # for metrics in self.metrics_calculator.metrics:
         #     self.log(f'{split}_{metrics}', self.metrics_calculator.metrics_dict[metrics][-1], on_step=True, on_epoch=True, sync_dist=True)
-        self.log('loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-        # self.log('loss_normals', loss_normals, on_step=True, on_epoch=True, sync_dist=True)
 
         return loss 
     
@@ -172,6 +174,9 @@ class CCHTrainer(pl.LightningModule):
         with torch.no_grad():
             t = batch['transl'] # B, N, 3
             vp = batch['v_posed'] # B, N, 6890, 3
+
+            vp = vp - t[:, :, None, :]
+            batch['v_posed'] = vp
 
             batch_size, num_frames = t.shape[:2]
 
@@ -186,7 +191,8 @@ class CCHTrainer(pl.LightningModule):
             w = (self.smpl_model.lbs_weights)[None, None].repeat(batch_size, num_frames, 1, 1)
 
             
-            R, T = sample_cameras(batch_size, num_frames, t)
+            # R, T = sample_cameras(batch_size, num_frames, t)
+            R, T = sample_cameras(batch_size, num_frames)
             R = R.to(self.device)
             T = T.to(self.device)
 
