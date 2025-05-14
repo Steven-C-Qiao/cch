@@ -85,7 +85,8 @@ def run_train(exp_dir, cfg_opts=None, resume_from_epoch=None, dev=False, device_
         gradient_clip_val=1.0,
     )
 
-    trainer.fit(model, datamodule)
+    checkpoint_path = '/scratches/kyuban/cq244/CCH/cch/exp/exp_009_explicit_loss/saved_models/loss_epoch=004.ckpt'
+    trainer.fit(model, datamodule, ckpt_path=checkpoint_path)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

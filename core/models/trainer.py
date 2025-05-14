@@ -136,12 +136,14 @@ class CCHTrainer(pl.LightningModule):
 
         # # Visualise and log
         if batch_idx % self.vis_frequency == 0:
+            color = np.argmax(w_pred.cpu().detach().numpy(), axis=-1)
             self.visualiser.visualise_vp(vp.cpu().detach().numpy(), 
                                          vp_pred.cpu().detach().numpy(), 
                                          mask.cpu().detach().numpy(),
-                                         color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1))
+                                         color=color)
             self.visualiser.visualise_vc(vc_pred.cpu().detach().numpy(), 
-                                         mask.cpu().detach().numpy())
+                                         mask.cpu().detach().numpy(),
+                                         color=color)
             # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
 
         # self.metrics_calculator.update(pred_dict, targets_dict, self.cfg.TRAIN.BATCH_SIZE)

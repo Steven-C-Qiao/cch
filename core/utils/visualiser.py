@@ -99,7 +99,7 @@ class Visualiser(pl.LightningModule):
             plt.savefig(os.path.join(self.save_dir, f'vp_{self.global_step}.png'))
             plt.close()
 
-    def visualise_vc(self, vc_pred, mask=None):
+    def visualise_vc(self, vc_pred, mask=None, color=None):
         """
         Visualise the canonical space
         """
@@ -116,16 +116,24 @@ class Visualiser(pl.LightningModule):
                 
                 # Collect all points across N frames
                 all_points = []
+                all_colors = []
                 for n in range(N):
                     vc_pred_to_scatter = vc_pred[b, n]
+                    if color is not None:
+                        color_masked = color[b, n].flatten()
+                    else:
+                        color_masked = 'blue'
                     if mask is not None:
                         vc_pred_to_scatter = vc_pred_to_scatter[mask[b, n, 0].astype(np.bool).flatten()]
+                        color_masked = color_masked[mask[b, n, 0].astype(np.bool).flatten()]
+
                     all_points.append(vc_pred_to_scatter)
-                
+                    all_colors.append(color_masked)
                 # Combine all points and plot them together
                 all_points = np.concatenate(all_points, axis=0)
+                all_colors = np.concatenate(all_colors, axis=0)
                 ax.scatter(all_points[:,0], all_points[:,1], all_points[:,2],
-                        c='blue', s=0.5, alpha=0.5, label='Canonical Points')
+                        c=all_colors, s=0.5, alpha=0.5, label='Canonical Points')
                 
                 # set look into z direction
                 ax.view_init(elev=10, azim=20, vertical_axis='y')
@@ -138,3 +146,5 @@ class Visualiser(pl.LightningModule):
             plt.close()
                     
                     
+    def visualise_vc_as_image(self, vc_pred, mask=None, color=None):
+        pass
