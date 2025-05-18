@@ -1,22 +1,16 @@
-import os
-import numpy as np
 import torch
-import torch.nn as nn
+import numpy as np
 import torch.optim as optim
 import pytorch_lightning as pl
 
-import matplotlib.pyplot as plt
-from loguru import logger
 from einops import rearrange
 
-
-from pytorch3d.renderer import FoVPerspectiveCameras, look_at_view_transform
-
 from core.configs import paths 
-from core.losses.cch_loss import CCHLoss
 
 from core.models.smpl import SMPL
 from core.models.cch import CCH 
+
+from core.losses.cch_loss import CCHLoss
 
 from core.utils.renderer import SurfaceNormalRenderer 
 from core.utils.sample_utils import sample_cameras
@@ -34,8 +28,7 @@ class CCHTrainer(pl.LightningModule):
         super().__init__()
         self.dev = dev
         self.cfg = cfg
-        self.normalise = False
-        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 50
+        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 1000
  
         self.renderer = SurfaceNormalRenderer(image_size=(224, 224))
 
@@ -81,12 +74,11 @@ class CCHTrainer(pl.LightningModule):
         B, N = batch['pose'].shape[:2]
         vp = batch['v_posed']
         mask = batch['masks']
-        global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
+        # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
         joints = batch['joints']
         normal_images = batch['normal_imgs']
-        coarse_skinning_weights_maps = batch['skinning_weights_maps']
-        posed_canonical_color_maps = batch['canonical_color_maps']
-
+        w_smpl = batch['skinning_weights_maps']
+        vc_gt = batch['canonical_color_maps']
 
 
         # ------------------- forward pass -------------------
@@ -94,66 +86,46 @@ class CCHTrainer(pl.LightningModule):
 
         vc_pred, dw_pred = preds['vc'], preds['w']
 
-        if batch_idx == 0:
-            # Debug: set pred_w to one-hot vectors (one random joint per vertex)
-            B, N, H, W, J = dw_pred.shape
-            random_joints = torch.randint(0, J, (B, N, H, W), device=dw_pred.device)
-            dw_pred = torch.zeros_like(dw_pred)
-            self.dev_pred_w = dw_pred.scatter_(-1, random_joints.unsqueeze(-1), 1.0)
 
-
-        # pred_w = self.dev_pred_w
         # w_pred = dw_pred + coarse_skinning_weights_maps
-        w_pred = coarse_skinning_weights_maps
+        w_pred = w_smpl
 
 
-        parents = self.smpl_model.parents
         vp_pred, joints_pred = general_lbs(
             vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
             pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
             lbs_weights=rearrange(w_pred, 'b n h w c -> (b n) (h w) c'),
             J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
-            parents=parents #parents[None].repeat(B * N, 1)
+            parents=self.smpl_model.parents 
         )
-        joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
+        # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
 
-        loss, loss_dict = self.criterion(v=rearrange(vp, 'b n v c -> (b n) v c'),
-                                         v_pred=vp_pred,
-                                         vc=rearrange(posed_canonical_color_maps, 'b n h w c -> (b n) (h w) c'),
+        loss, loss_dict = self.criterion(vp=rearrange(vp, 'b n v c -> (b n) v c'),
+                                         vp_pred=vp_pred,
+                                         vc=rearrange(vc_gt, 'b n h w c -> (b n) (h w) c'),
                                          vc_pred=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
                                          mask=mask,
-                                         # pred_dw=dw_pred
                                          )
         
 
+        # Visualise and log
         vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
         vc_pred = rearrange(vc_pred, 'b n h w c -> b n (h w) c', b=B, n=N)
-
-        # import ipdb; ipdb.set_trace()
-
-
-        if batch_idx % 200 == 0 and batch_idx > 0:
-            # import ipdb; ipdb.set_trace()
-            pass 
-
-        # # Visualise and log
-        if batch_idx % self.vis_frequency == 0:
-            color = np.argmax(w_pred.cpu().detach().numpy(), axis=-1)
+        if self.global_step % self.vis_frequency == 0:
+            w_argmax = np.argmax(w_pred.cpu().detach().numpy(), axis=-1)
             self.visualiser.visualise_vp(vp.cpu().detach().numpy(), 
                                          vp_pred.cpu().detach().numpy(), 
                                          mask.cpu().detach().numpy(),
-                                         color=color)
+                                         color=w_argmax)
             self.visualiser.visualise_vc(vc_pred.cpu().detach().numpy(), 
                                          mask.cpu().detach().numpy(),
-                                         color=color)
+                                         color=w_argmax)
             # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
             self.visualiser.visualise_vc_as_image(vc_pred.cpu().detach().numpy(), 
-                                                  posed_canonical_color_maps.cpu().detach().numpy(),
+                                                  vc_gt.cpu().detach().numpy(),
                                                   mask.cpu().detach().numpy())
             
-        # import ipdb; ipdb.set_trace()
-
 
         self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         for k, v in loss_dict.items():
@@ -162,6 +134,11 @@ class CCHTrainer(pl.LightningModule):
         # self.metrics_calculator.update(pred_dict, targets_dict, self.cfg.TRAIN.BATCH_SIZE)
         # for metrics in self.metrics_calculator.metrics:
         #     self.log(f'{split}_{metrics}', self.metrics_calculator.metrics_dict[metrics][-1], on_step=True, on_epoch=True, sync_dist=True)
+
+
+        if batch_idx % 200 == 0 and batch_idx > 0:
+            # import ipdb; ipdb.set_trace()
+            pass 
 
         return loss 
     
@@ -228,7 +205,6 @@ class CCHTrainer(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         with torch.no_grad():
             loss = self.training_step(batch, batch_idx, split='val')
-            # Add explicit validation logging
             self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
     
@@ -244,17 +220,32 @@ class CCHTrainer(pl.LightningModule):
     def configure_optimizers(self):
         params = list(self.model.parameters()) + list(self.criterion.parameters())
         optimizer = optim.Adam(params, lr=self.cfg.TRAIN.LR)
-        return optimizer
+        
+        # Add cosine learning rate scheduler
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=self.cfg.TRAIN.NUM_EPOCHS,  # Total number of epochs
+            eta_min=self.cfg.TRAIN.LR * 0.01  # Minimum learning rate (1% of initial LR)
+        )
+        
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1
+            }
+        }
     
     # def on_after_backward(self):
     #     for name, param in self.named_parameters():
     #         if param.grad is None:
     #             print(name)
 
-    def on_after_backward(self):
-        for name, param in self.named_parameters():
-            if param.grad is not None:
-                grad_norm = param.grad.norm().item()
-                if grad_norm > 10:
-                    print(f"Large gradient in {name}: {grad_norm}")
+    # def on_after_backward(self):
+    #     for name, param in self.named_parameters():
+    #         if param.grad is not None:
+    #             grad_norm = param.grad.norm().item()
+    #             if grad_norm > 10:
+    #                 print(f"Large gradient in {name}: {grad_norm}")
     

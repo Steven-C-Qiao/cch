@@ -3,7 +3,7 @@ from yacs.config import CfgNode
 
 _C = CfgNode()
 
-_C.VISUALISE_FREQUENCY = 300
+_C.VISUALISE_FREQUENCY = 1000
 
 # Train
 _C.TRAIN = CfgNode()

@@ -18,7 +18,7 @@ class CanonicalRGBLoss(nn.Module):
             loss = loss * rearrange(mask, 'b n c h w -> (b n) (c h w)')
         return loss.mean()
 
-class PosedPointmapLoss(nn.Module):
+class PosedPointmapChamferLoss(nn.Module):
     """
     Masked chamfer loss for posed points
     """
@@ -44,31 +44,50 @@ class PosedPointmapLoss(nn.Module):
         loss = masked_loss_v_pred_to_v + loss_v_to_v_pred.mean()
 
         return loss, loss_normals
+    
+class ColorMapLoss(nn.Module):
+    """
+    Direct loss for color maps 
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, vc_gt, vc_pred, mask=None):
+        pass
+        
 
 
 class CCHLoss(nn.Module):
+    """
+    vc_gt: (B, 6890, 3)
+    vc_pred: (B, N, H, W, 3)
+    mask: (B, N, H, W)
+    vp: (B, N, 6890, 3)
+    vp_pred: (B, N, H, W, 3)
+    """
     def __init__(self, single_directional=False):
         super().__init__()
-        self.posed_pointmap_loss = PosedPointmapLoss(single_directional)
+        self.posed_pointmap_loss = PosedPointmapChamferLoss(single_directional)
         self.canonical_rgb_loss = CanonicalRGBLoss()
 
-    def forward(self, v, v_pred, vc, vc_pred, mask=None, pred_dw=None):
-        posed_loss, _ = self.posed_pointmap_loss(v, v_pred, mask)
+    def forward(self, vp, vp_pred, vc, vc_pred, mask=None, pred_dw=None):
+        posed_loss, _ = self.posed_pointmap_loss(vp, vp_pred, mask)
         canonical_loss = self.canonical_rgb_loss(vc, vc_pred, mask) * 10.
-
-
         loss_dict = {
             'posed_loss': posed_loss,
             'canonical_loss': canonical_loss,
         }
+
+        import ipdb; ipdb.set_trace()
+        
+        total_loss = posed_loss + canonical_loss
+        
         if pred_dw is not None:
             loss_w = torch.mean(pred_dw ** 2)
             loss_dict['loss_w'] = loss_w
             total_loss += loss_w
 
-        total_loss = posed_loss + canonical_loss
-
-        total_loss = canonical_loss
-        total_loss *= 100.
+        # total_loss = canonical_loss
+        # total_loss *= 100.
         loss_dict['total_loss'] = total_loss
         return total_loss, loss_dict

@@ -3,7 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl 
-
+import matplotlib.colors
 class Visualiser(pl.LightningModule):
     def __init__(self, save_dir, rank=0):
         super().__init__()
@@ -96,7 +96,7 @@ class Visualiser(pl.LightningModule):
                     ax.set_zlim(mid_z - max_range, mid_z + max_range)
 
             plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, f'vp_{self.global_step}.png'))
+            plt.savefig(os.path.join(self.save_dir, f'{self.global_step}_vp.png'))
             plt.close()
 
     def visualise_vc(self, vc_pred, mask=None, color=None):
@@ -142,11 +142,11 @@ class Visualiser(pl.LightningModule):
                 ax.set_box_aspect([1, 1, 1])
                 
             plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, f'vc_{self.global_step}.png'))
+            plt.savefig(os.path.join(self.save_dir, f'{self.global_step}_vc.png'))
             plt.close()
                     
                     
-    def visualise_vc_as_image(self, vc_pred, vc=None, mask=None, color=None):
+    def visualise_vc_as_image(self, vc_pred, vc=None, mask=None, color=None, plot_error_heatmap=True):
         if self.rank == 0:
             B, N, V, C = vc_pred.shape
             vc_pred = vc_pred.reshape(B, N, int(np.sqrt(V)), int(np.sqrt(V)), C)
@@ -160,24 +160,34 @@ class Visualiser(pl.LightningModule):
             B = min(B, 2)
             N = min(N, 4)
             
-
-            fig = plt.figure(figsize=(4*N, 2*4*B))
+            num_rows = 3 if plot_error_heatmap else 2
+            fig = plt.figure(figsize=(4*N, num_rows*4*B))
 
             for b in range(B):
                 for n in range(N):
                     # Plot vc (ground truth) on top row
-                    plt.subplot(2*B, N, b*2*N + n + 1)
+                    plt.subplot(num_rows*B, N, b*num_rows*N + n + 1)
                     if vc is not None:
                         plt.imshow(vc[b,n])
                         plt.title(f'GT Frame {n}')
                     plt.axis('off')
 
                     # Plot vc_pred (prediction) on bottom row 
-                    plt.subplot(2*B, N, (b*2+1)*N + n + 1)
+                    plt.subplot(num_rows*B, N, (b*num_rows+1)*N + n + 1)
                     plt.imshow(vc_pred[b,n])
                     plt.title(f'Pred Frame {n}')
                     plt.axis('off')
 
+                    if plot_error_heatmap:
+                        error_heatmap = np.linalg.norm(vc_pred[b,n] - vc[b,n], axis=-1)
+                        error_heatmap[mask[b,n,0].astype(np.bool)] = 1
+                        error_heatmap[error_heatmap > 0.3] = 0
+                        # Plot error heatmap on bottom row
+                        plt.subplot(num_rows*B, N, (b*num_rows+2)*N + n + 1)
+                        plt.imshow(error_heatmap, cmap='Reds', vmin=0, vmax=0.3)#, norm=matplotlib.colors.LogNorm())
+                        plt.colorbar()
+                        plt.title(f'Error Heatmap Frame {n}')
+                        plt.axis('off')
             plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, f'vc_image_{self.global_step}.png'))
+            plt.savefig(os.path.join(self.save_dir, f'{self.global_step}_vc_image.png'))
             plt.close()
