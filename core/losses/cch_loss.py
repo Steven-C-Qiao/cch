@@ -22,9 +22,9 @@ class PosedPointmapChamferLoss(nn.Module):
     """
     Masked chamfer loss for posed points
     """
-    def __init__(self, single_directional=True):
+    def __init__(self, cfg):
         super().__init__()
-        self.single_directional = single_directional
+        self.single_directional = cfg.LOSS.CHAMFER_SINGLE_DIRECTIONAL
 
     def forward(self, v, v_pred, mask=None):
         loss, loss_normals = chamfer_distance(v_pred, v, 
@@ -43,51 +43,39 @@ class PosedPointmapChamferLoss(nn.Module):
 
         loss = masked_loss_v_pred_to_v + loss_v_to_v_pred.mean()
 
-        return loss, loss_normals
-    
-class ColorMapLoss(nn.Module):
-    """
-    Direct loss for color maps 
-    """
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, vc_gt, vc_pred, mask=None):
-        pass
+        return loss# , loss_normals
         
 
 
 class CCHLoss(nn.Module):
     """
-    vc_gt: (B, 6890, 3)
+    vc_gt: (B, N, H, W, 3)
     vc_pred: (B, N, H, W, 3)
     mask: (B, N, H, W)
     vp: (B, N, 6890, 3)
     vp_pred: (B, N, H, W, 3)
     """
-    def __init__(self, single_directional=False):
+    def __init__(self, cfg):
         super().__init__()
-        self.posed_pointmap_loss = PosedPointmapChamferLoss(single_directional)
+        self.cfg = cfg
+
+        self.posed_pointmap_loss = PosedPointmapChamferLoss(cfg)
         self.canonical_rgb_loss = CanonicalRGBLoss()
 
     def forward(self, vp, vp_pred, vc, vc_pred, mask=None, pred_dw=None):
-        posed_loss, _ = self.posed_pointmap_loss(vp, vp_pred, mask)
-        canonical_loss = self.canonical_rgb_loss(vc, vc_pred, mask) * 10.
-        loss_dict = {
-            'posed_loss': posed_loss,
-            'canonical_loss': canonical_loss,
-        }
+        loss_dict = {}
 
-        import ipdb; ipdb.set_trace()
+        posed_loss = self.posed_pointmap_loss(vp, vp_pred, mask) * self.cfg.LOSS.VP_LOSS_WEIGHT
+        canonical_loss = self.canonical_rgb_loss(vc, vc_pred, mask) * self.cfg.LOSS.VC_LOSS_WEIGHT
+        loss_dict['posed_loss'] = posed_loss
+        loss_dict['canonical_loss'] = canonical_loss
         
         total_loss = posed_loss + canonical_loss
         
         if pred_dw is not None:
             loss_w = torch.mean(pred_dw ** 2)
-            loss_dict['loss_w'] = loss_w
-            total_loss += loss_w
+            loss_dict['w_loss'] = loss_w
+            total_loss += loss_w * self.cfg.LOSS.W_REGULARISER_WEIGHT
 
-        # total_loss = canonical_loss
-        # total_loss *= 100.
         loss_dict['total_loss'] = total_loss
         return total_loss, loss_dict

@@ -34,7 +34,7 @@ class CCHTrainer(pl.LightningModule):
 
         self.smpl_model = SMPL(
             model_path=paths.SMPL,
-            num_betas=cfg.MODEL.NUM_SMPL_BETAS,
+            num_betas=10,
             gender=cfg.MODEL.GENDER
         )
         # smpl_faces = torch.tensor(smpl_model.faces, dtype=torch.int32)
@@ -47,7 +47,7 @@ class CCHTrainer(pl.LightningModule):
             smpl_model=self.smpl_model
         )
 
-        self.criterion = CCHLoss(single_directional=False)
+        self.criterion = CCHLoss(cfg)
         self.visualiser = Visualiser(save_dir=vis_save_dir)
         # self.metrics_calculator = MetricsCalculator()
 
@@ -222,20 +222,24 @@ class CCHTrainer(pl.LightningModule):
         optimizer = optim.Adam(params, lr=self.cfg.TRAIN.LR)
         
         # Add cosine learning rate scheduler
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=self.cfg.TRAIN.NUM_EPOCHS,  # Total number of epochs
-            eta_min=self.cfg.TRAIN.LR * 0.01  # Minimum learning rate (1% of initial LR)
-        )
-        
-        return {
+        if self.cfg.TRAIN.LR_SCHEDULER == 'cosine': 
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=self.cfg.TRAIN.NUM_EPOCHS,  # Total number of epochs
+                eta_min=self.cfg.TRAIN.LR * 0.1  # Minimum learning rate (1% of initial LR)
+            )
+            return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
                 "interval": "epoch",
-                "frequency": 1
+                    "frequency": 1
+                }
             }
-        }
+        else:
+            return optimizer
+        
+        
     
     # def on_after_backward(self):
     #     for name, param in self.named_parameters():
