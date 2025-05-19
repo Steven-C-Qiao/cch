@@ -16,8 +16,22 @@ from core.configs.cch_cfg import get_cch_cfg_defaults
 from core.models.trainer import CCHTrainer
 from core.data.cch_datamodule import CCHDataModule
 
+def set_seed(seed=42):
+    """Set random seed for reproducibility."""
+    import random
+    import numpy as np
+    import torch
+    
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None):
+    set_seed(0)
+    
     # Get config
     cfg = get_cch_cfg_defaults()
     if cfg_opts is not None:
@@ -78,7 +92,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
         logger.info(f"Loading checkpoint: {load_path}")
         ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
         model.load_state_dict(ckpt['state_dict'])
-        logger.log_hyperparams(ckpt['hyper_parameters'])
+        # logger.log_hyperparams(ckpt['hyper_parameters'])
 
     trainer.fit(model, datamodule, ckpt_path=resume_path)
 

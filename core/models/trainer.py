@@ -114,23 +114,21 @@ class CCHTrainer(pl.LightningModule):
         vc_pred = rearrange(vc_pred, 'b n h w c -> b n (h w) c', b=B, n=N)
         if self.global_step % self.vis_frequency == 0:
             w_argmax = np.argmax(w_pred.cpu().detach().numpy(), axis=-1)
-            self.visualiser.visualise_vp(vp.cpu().detach().numpy(), 
-                                         vp_pred.cpu().detach().numpy(), 
-                                         mask.cpu().detach().numpy(),
-                                         color=w_argmax)
-            self.visualiser.visualise_vc(vc_pred.cpu().detach().numpy(), 
-                                         mask.cpu().detach().numpy(),
-                                         color=w_argmax)
             # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
             self.visualiser.visualise_vc_as_image(vc_pred.cpu().detach().numpy(), 
                                                   vc_gt.cpu().detach().numpy(),
                                                   mask.cpu().detach().numpy())
-            
+            self.visualiser.visualise_vp_vc(vp.cpu().detach().numpy(), 
+                                            vc_gt.cpu().detach().numpy(),
+                                            vp_pred.cpu().detach().numpy(),
+                                            vc_pred.cpu().detach().numpy(),
+                                            mask.cpu().detach().numpy(),
+                                            color=w_argmax)           
 
         self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         for k, v in loss_dict.items():
-            self.log(f'{split}_{k}', v, on_step=True, on_epoch=True, sync_dist=True)
-        
+            if k != 'total_loss':
+                self.log(f'{split}_{k}', v, on_step=True, on_epoch=False, sync_dist=True)
         # self.metrics_calculator.update(pred_dict, targets_dict, self.cfg.TRAIN.BATCH_SIZE)
         # for metrics in self.metrics_calculator.metrics:
         #     self.log(f'{split}_{metrics}', self.metrics_calculator.metrics_dict[metrics][-1], on_step=True, on_epoch=True, sync_dist=True)
@@ -246,10 +244,10 @@ class CCHTrainer(pl.LightningModule):
     #         if param.grad is None:
     #             print(name)
 
-    # def on_after_backward(self):
-    #     for name, param in self.named_parameters():
-    #         if param.grad is not None:
-    #             grad_norm = param.grad.norm().item()
-    #             if grad_norm > 10:
-    #                 print(f"Large gradient in {name}: {grad_norm}")
+    def on_after_backward(self):
+        for name, param in self.named_parameters():
+            if param.grad is not None:
+                grad_norm = param.grad.norm().item()
+                if grad_norm > 10:
+                    print(f"Large gradient in {name}: {grad_norm}")
     
