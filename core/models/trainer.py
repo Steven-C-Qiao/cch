@@ -102,7 +102,7 @@ class CCHTrainer(pl.LightningModule):
         # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
 
-        loss, loss_dict = self.criterion(vp=rearrange(vp, 'b n v c -> (b n) v c'),
+        loss, loss_dict = self.criterion(vp=rearrange(batch['sampled_posed_points'], 'b n v c -> (b n) v c'), # rearrange(vp, 'b n v c -> (b n) v c'),
                                          vp_pred=vp_pred,
                                          vc=vc_gt, # rearrange(vc_gt, 'b n h w c -> (b n) (h w) c'),
                                          vc_pred=vc_pred, # rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),

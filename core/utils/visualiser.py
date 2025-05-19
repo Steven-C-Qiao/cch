@@ -181,7 +181,6 @@ class Visualiser(pl.LightningModule):
             B, N, V, C = vc_pred.shape
             vc_pred = vc_pred.reshape(B, N, int(np.sqrt(V)), int(np.sqrt(V)), C)
 
-            # normalise to [0.5, 1]
             vc_pred = (vc_pred - vc_pred.min()) / (vc_pred.max() - vc_pred.min()) 
 
             if vc is not None:
@@ -215,12 +214,12 @@ class Visualiser(pl.LightningModule):
                     if plot_error_heatmap:
                         error_heatmap = np.linalg.norm(vc_pred[b,n] - vc[b,n], axis=-1)
                         error_heatmap *= mask[b,n,0]
-                        error_heatmap[error_heatmap > 0.3] = 0
+                        # error_heatmap[error_heatmap > 0.3] = 0
                         plt.subplot(num_rows*B, N, (b*num_rows+2)*N + n + 1)
 
                         colors = [(1, 1, 1), (1, 0, 0)]  # White to red
                         custom_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('custom', colors)
-                        im = plt.imshow(error_heatmap, cmap=custom_cmap, vmin=0, vmax=0.3)
+                        im = plt.imshow(error_heatmap, cmap=custom_cmap, vmin=0, vmax=np.max(error_heatmap))
                         if n == N-1: 
                             plt.colorbar(im)
                         plt.title(f'Error Heatmap Frame {n}')
@@ -228,7 +227,8 @@ class Visualiser(pl.LightningModule):
 
                     if conf is not None:
                         plt.subplot(num_rows*B, N, (b*num_rows+3)*N + n + 1)
-                        im = plt.imshow(conf[b,n])
+                        conf_masked = conf[b,n] * mask[b,n,0]
+                        im = plt.imshow(conf_masked)
                         plt.title(f'1/conf Frame {n}')
                         if n == N-1: 
                             plt.colorbar(im)

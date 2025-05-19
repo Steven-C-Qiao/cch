@@ -8,6 +8,7 @@ import trimesh
 import logging
 from tqdm import tqdm
 from collections import defaultdict
+from trimesh.sample import sample_surface_even
 
 from loguru import logger
 
@@ -17,6 +18,17 @@ ids = [ '00032', '00096', '00122', '00127', '00134',
         '00145', '00159', '00215', '02474', '03223', 
         '03284', '03331', '03375', '03383', '03394']
 
+
+
+import smplx 
+
+smpl_model = smplx.create(
+    'model_files',
+    gender='neutral',
+    num_betas=10
+)
+smpl_faces = smpl_model.faces
+
 class CapeDataset(Dataset):
     """
     Each subject has a bunch of sequencies
@@ -24,6 +36,7 @@ class CapeDataset(Dataset):
 
     def __init__(self):
         self.ids = ids
+        self.smpl_faces = smpl_faces
         self.num_frames = 4
         # get sequence ids from seq_list_0xxxx.txt
         self.all_seqs = []
@@ -80,12 +93,6 @@ class CapeDataset(Dataset):
                     idx = np.where(valid_frames_indices==removed_start)[0].item()
                 except:
                     continue # this happens when all the rest of the frames are removed
-                    # print(np.where(valid_frames_indices==removed_start))
-                    # print(id, sequence_name, removed_frames, all_removed, i)
-                    # # print(valid_frames_indices)
-                    # print(removed_start)
-                    # print(removed_end)
-                    # assert False 
                 valid_frames_indices[idx:] += removed_end - removed_start + 1
 
         # randomly sample frames
@@ -93,25 +100,10 @@ class CapeDataset(Dataset):
 
         ret = defaultdict(list)
         for i in sampled_frames_indices:
-            # Load npz data
             try:
                 fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{i:06d}.npz')
                 data = np.load(fpath)
             except:
-                # CAPE seq_list has missing frames. Sample another frame when this happens
-                # fpath = 'foo.bar'
-                # while os.path.exists(fpath) is False:
-                #     new_idx = np.random.choice(valid_frames_indices, 1, replace=False)
-                #     fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{new_idx[0]:06d}.npz')
-
-                # try: # Some frames are corrupted, so loading here still might fail
-                #     data = np.load(fpath)
-                # except:
-                #     fpath = 'foo.bar'
-                #     continue
-                # print(id, sequence_name, removed_frames, all_removed, idx, len(all_removed))
-                # print(sampled_frames_indices)
-                # print(valid_frames_indices)
                 data = None
                 while data is None:
                     new_idx = np.random.choice(valid_frames_indices, 1, replace=False) # sample a new random frame
@@ -125,6 +117,14 @@ class CapeDataset(Dataset):
             ret['v_cano'].append(torch.from_numpy(data['v_cano']).float())
             ret['pose'].append(torch.from_numpy(data['pose']).float())
             ret['v_posed'].append(torch.from_numpy(data['v_posed']).float())
+            
+            # Sample from vp for chamfer
+            posed_mesh = trimesh.Trimesh(
+                vertices=data['v_posed'],
+                faces=self.smpl_faces
+            )
+            sampled_points, _ = sample_surface_even(posed_mesh, 6890)  # Sample 2048 points
+            ret['sampled_posed_points'].append(torch.from_numpy(sampled_points).float())
 
         # Convert lists to tensors
         ret = {k: torch.stack(v) for k, v in ret.items()}
@@ -138,6 +138,7 @@ class CapeDataset(Dataset):
 
 
 
+        # Load the first frame of the sequence, and use its v_cano as the canonical mesh
         i=1
         frame = f'{i:06d}'
         fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{frame}.npz')
@@ -145,10 +146,10 @@ class CapeDataset(Dataset):
             i+=1
             frame = f'{i:06d}'
             fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{frame}.npz')
-        # print(fpath)
-        # Load the first frame of the sequence, and use its v_cano as the canonical mesh
         data = np.load(fpath)
         ret['first_frame_v_cano'] = torch.from_numpy(data['v_cano']).float()
+
+        
 
         return ret
 

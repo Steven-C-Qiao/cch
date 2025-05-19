@@ -3,8 +3,6 @@ import torch.nn as nn
 from pytorch3d.loss import chamfer_distance
 
 from einops import rearrange
-from trimesh.sample import sample_surface_even
-
 
 class CanonicalRGBConfLoss(nn.Module):
     """
@@ -13,7 +11,6 @@ class CanonicalRGBConfLoss(nn.Module):
     def __init__(self, alpha=1.0):
         self.alpha = alpha
         super().__init__()
-
 
     def get_conf_log(self, x):
         return x, torch.log(x)
@@ -27,7 +24,8 @@ class CanonicalRGBConfLoss(nn.Module):
         conf_loss = loss * conf - self.alpha * log_conf
 
         if mask is not None:
-            conf_loss = conf_loss * rearrange(mask, 'b n c h w -> (b n) (c h w)')
+            conf_loss = conf_loss * mask.squeeze()
+
 
         return conf_loss.mean()
 
@@ -80,7 +78,7 @@ class CCHLoss(nn.Module):
         loss_dict = {}
 
         posed_loss = self.posed_pointmap_loss(vp, vp_pred, mask) * self.cfg.LOSS.VP_LOSS_WEIGHT
-        canonical_loss = self.canonical_rgb_loss(vc, vc_pred, conf=conf) * self.cfg.LOSS.VC_LOSS_WEIGHT
+        canonical_loss = self.canonical_rgb_loss(vc, vc_pred, conf=conf, mask=mask) * self.cfg.LOSS.VC_LOSS_WEIGHT
         loss_dict['posed_loss'] = posed_loss
         loss_dict['canonical_loss'] = canonical_loss
         
