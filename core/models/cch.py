@@ -21,7 +21,7 @@ class CCH(nn.Module):
         self.canonical_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
         
         # use inv_log since now producing updates to the coarse_smpl_skinning_weights 
-        self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1")
+        # self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1")
 
 
         # self.count_parameters()
@@ -36,9 +36,9 @@ class CCH(nn.Module):
 
         aggregated_tokens_list, patch_start_idx = self.aggregator(images) 
 
-        with torch.cuda.amp.autocast(enabled=False):
-            vc, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
-            w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+        # with torch.cuda.amp.autocast(enabled=False):
+        vc, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+            # w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
 
             # normalise skinning weights across joints 
             # No softmax now as using inv_log activation
@@ -49,8 +49,8 @@ class CCH(nn.Module):
         pred = {
             'vc': vc,
             'vc_conf': vc_conf,
-            'w': w,
-            'w_conf': w_conf
+            # 'w': w,
+            # 'w_conf': w_conf
         }
         return pred 
 

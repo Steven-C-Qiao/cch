@@ -3,33 +3,20 @@ import torch.nn as nn
 from pytorch3d.loss import chamfer_distance
 
 from einops import rearrange
-from trimesh.sample import sample_surface_even
 
 
-class CanonicalRGBConfLoss(nn.Module):
+class CanonicalRGBLoss(nn.Module):
     """
     Masked L2 loss for canonical color maps
     """
-    def __init__(self, alpha=1.0):
-        self.alpha = alpha
+    def __init__(self):
         super().__init__()
 
-
-    def get_conf_log(self, x):
-        return x, torch.log(x)
-
-    def forward(self, vc, vc_pred, conf=None, mask=None):
-
-        conf, log_conf = self.get_conf_log(conf)
-        
-        loss = torch.norm(vc - vc_pred, dim=-1) 
-
-        conf_loss = loss * conf - self.alpha * log_conf
-
+    def forward(self, vc, vc_pred, mask=None):
+        loss = torch.mean((vc - vc_pred) ** 2)
         if mask is not None:
-            conf_loss = conf_loss * rearrange(mask, 'b n c h w -> (b n) (c h w)')
-
-        return conf_loss.mean()
+            loss = loss * rearrange(mask, 'b n c h w -> (b n) (c h w)')
+        return loss.mean()
 
 class PosedPointmapChamferLoss(nn.Module):
     """
@@ -64,7 +51,6 @@ class CCHLoss(nn.Module):
     """
     vc_gt: (B, N, H, W, 3)
     vc_pred: (B, N, H, W, 3)
-    conf: (B, N, H, W) in [0, 1]
     mask: (B, N, H, W)
     vp: (B, N, 6890, 3)
     vp_pred: (B, N, H, W, 3)
@@ -74,13 +60,13 @@ class CCHLoss(nn.Module):
         self.cfg = cfg
 
         self.posed_pointmap_loss = PosedPointmapChamferLoss(cfg)
-        self.canonical_rgb_loss = CanonicalRGBConfLoss()
+        self.canonical_rgb_loss = CanonicalRGBLoss()
 
-    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, pred_dw=None):
+    def forward(self, vp, vp_pred, vc, vc_pred, mask=None, pred_dw=None):
         loss_dict = {}
 
         posed_loss = self.posed_pointmap_loss(vp, vp_pred, mask) * self.cfg.LOSS.VP_LOSS_WEIGHT
-        canonical_loss = self.canonical_rgb_loss(vc, vc_pred, conf=conf) * self.cfg.LOSS.VC_LOSS_WEIGHT
+        canonical_loss = self.canonical_rgb_loss(vc, vc_pred, mask) * self.cfg.LOSS.VC_LOSS_WEIGHT
         loss_dict['posed_loss'] = posed_loss
         loss_dict['canonical_loss'] = canonical_loss
         

@@ -84,7 +84,8 @@ class CCHTrainer(pl.LightningModule):
         # ------------------- forward pass -------------------
         preds = self(normal_images)
 
-        vc_pred, dw_pred = preds['vc'], preds['w']
+        vc_pred, vc_conf = preds['vc'], preds['vc_conf']
+        # w_pred, w_conf = preds['w'], preds['w_conf']
 
 
         # w_pred = dw_pred + coarse_skinning_weights_maps
@@ -103,8 +104,9 @@ class CCHTrainer(pl.LightningModule):
 
         loss, loss_dict = self.criterion(vp=rearrange(vp, 'b n v c -> (b n) v c'),
                                          vp_pred=vp_pred,
-                                         vc=rearrange(vc_gt, 'b n h w c -> (b n) (h w) c'),
-                                         vc_pred=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
+                                         vc=vc_gt, # rearrange(vc_gt, 'b n h w c -> (b n) (h w) c'),
+                                         vc_pred=vc_pred, # rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
+                                         conf=vc_conf, # rearrange(vc_conf, 'b n h w -> (b n) (h w)'),
                                          mask=mask,
                                          )
         
@@ -117,12 +119,13 @@ class CCHTrainer(pl.LightningModule):
             # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
             self.visualiser.visualise_vc_as_image(vc_pred.cpu().detach().numpy(), 
                                                   vc_gt.cpu().detach().numpy(),
-                                                  mask.cpu().detach().numpy())
+                                                  mask=mask.cpu().detach().numpy(),
+                                                  conf=vc_conf.cpu().detach().numpy())
             self.visualiser.visualise_vp_vc(vp.cpu().detach().numpy(), 
                                             vc_gt.cpu().detach().numpy(),
                                             vp_pred.cpu().detach().numpy(),
                                             vc_pred.cpu().detach().numpy(),
-                                            mask.cpu().detach().numpy(),
+                                            mask=mask.cpu().detach().numpy(),
                                             color=w_argmax)           
 
         self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
@@ -244,10 +247,10 @@ class CCHTrainer(pl.LightningModule):
     #         if param.grad is None:
     #             print(name)
 
-    def on_after_backward(self):
-        for name, param in self.named_parameters():
-            if param.grad is not None:
-                grad_norm = param.grad.norm().item()
-                if grad_norm > 10:
-                    print(f"Large gradient in {name}: {grad_norm}")
+    # def on_after_backward(self):
+    #     for name, param in self.named_parameters():
+    #         if param.grad is not None:
+    #             grad_norm = param.grad.norm().item()
+    #             if grad_norm > 10:
+    #                 print(f"Large gradient in {name}: {grad_norm}")
     

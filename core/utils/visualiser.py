@@ -176,7 +176,7 @@ class Visualiser(pl.LightningModule):
             plt.close()
                     
                     
-    def visualise_vc_as_image(self, vc_pred, vc=None, mask=None, color=None, plot_error_heatmap=True):
+    def visualise_vc_as_image(self, vc_pred, vc=None, mask=None, color=None, conf=None, plot_error_heatmap=True):
         if self.rank == 0:
             B, N, V, C = vc_pred.shape
             vc_pred = vc_pred.reshape(B, N, int(np.sqrt(V)), int(np.sqrt(V)), C)
@@ -187,10 +187,14 @@ class Visualiser(pl.LightningModule):
             if vc is not None:
                 vc = (vc - vc.min()) / (vc.max() - vc.min()) 
 
+            if conf is not None:
+                conf = 1 / conf 
+
             B = min(B, 2)
             N = min(N, 4)
             
             num_rows = 3 if plot_error_heatmap else 2
+            num_rows += 1 if conf is not None else 0
             fig = plt.figure(figsize=(4*N, num_rows*4*B))
 
             for b in range(B):
@@ -221,6 +225,16 @@ class Visualiser(pl.LightningModule):
                             plt.colorbar(im)
                         plt.title(f'Error Heatmap Frame {n}')
                         plt.axis('off')
+
+                    if conf is not None:
+                        plt.subplot(num_rows*B, N, (b*num_rows+3)*N + n + 1)
+                        im = plt.imshow(conf[b,n])
+                        plt.title(f'1/conf Frame {n}')
+                        if n == N-1: 
+                            plt.colorbar(im)
+                        plt.axis('off')
+                        
+                        
             plt.tight_layout()
             plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_colormaps.png'))
             plt.close()

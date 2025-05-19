@@ -80,11 +80,12 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator='gpu',
         devices=device_ids, 
-        strategy=DDPStrategy(find_unused_parameters=True) if not dev else 'auto',
+        # strategy=DDPStrategy(find_unused_parameters=True) if not dev else 'auto',
+        strategy=DDPStrategy() if not dev else 'auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
         log_every_n_steps=100,
-        gradient_clip_val=1.0,
+        gradient_clip_val=5.0,
     )
 
 
