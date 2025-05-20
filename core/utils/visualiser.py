@@ -240,7 +240,7 @@ class Visualiser(pl.LightningModule):
             plt.close()
 
 
-    def visualise_vp_vc(self, vp, vc, vp_pred, vc_pred, mask=None, color=None, no_annotations=True):
+    def visualise_vp_vc(self, vp, vc, vp_pred, vc_pred, mask=None, color=None, no_annotations=True, vertex_visibility=None):
         if self.rank == 0:
             B, N, V, C = vp.shape
 
@@ -258,6 +258,7 @@ class Visualiser(pl.LightningModule):
                     vc_pred_to_scatter = vc_pred[b, n]
                     vp_pred_to_scatter = vp_pred[b, n]
                     vp_to_scatter = vp[b, n]
+                    vc_to_scatter = vc[b, n]
 
                     if mask is not None:
                         vp_pred_to_scatter = vp_pred_to_scatter[mask[b, n, 0].astype(np.bool).flatten()]
@@ -269,12 +270,19 @@ class Visualiser(pl.LightningModule):
 
                     # ---------------- add subplot ----------------
                     ax = fig.add_subplot(B, N+1, b*(N+1) + n + 1, projection='3d')
-                    
+
+
+                    if vertex_visibility is not None:
+                        vp_to_scatter = vp_to_scatter[vertex_visibility[b, n].astype(np.bool)]
+
                     ax.scatter(vp_to_scatter[:,0], vp_to_scatter[:,1], vp_to_scatter[:,2], 
-                            c='gray', s=0.05, alpha=0.1, label='Ground Truth')
+                            c='red', s=0.2, alpha=0.5, label='Ground Truth')
                     
-                    ax.scatter(vp_pred_to_scatter[:,0], vp_pred_to_scatter[:,1], vp_pred_to_scatter[:,2],
-                            c=color_masked, s=0.2, alpha=0.5, label='Predicted')
+                    # ax.scatter(vp_to_scatter[:,0], vp_to_scatter[:,1], vp_to_scatter[:,2], 
+                    #         c='gray', s=0.05, alpha=0.5, label='Ground Truth')
+                    
+                    # ax.scatter(vp_pred_to_scatter[:,0], vp_pred_to_scatter[:,1], vp_pred_to_scatter[:,2],
+                    #         c=color_masked, s=0.08, alpha=0.5, label='Predicted')
 
 
                     ax.view_init(elev=10, azim=20, vertical_axis='y')

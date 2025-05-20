@@ -30,6 +30,33 @@ class SimpleShader(nn.Module):
         self.blend_params = blend_params if blend_params is not None else BlendParams()
 
     def forward(self, fragments, meshes, **kwargs) -> torch.Tensor:
+        """
+        pix_to_face: LongTensor of shape (N, image_size, image_size, faces_per_pixel) 
+                     giving the indices of the nearest faces at each pixel, sorted in ascending z-order.
+        """
+        # ------------------- vertex visibility -------------------
+        pix_to_face = fragments.pix_to_face
+        # (F, 3) where F is the total number of faces across all the meshes in the batch
+        packed_faces = meshes.faces_packed() 
+        # (V, 3) where V is the total number of verts across all the meshes in the batch
+        packed_verts = meshes.verts_packed() 
+        vertex_visibility_map = torch.zeros(packed_verts.shape[0])   # (V,)
+
+        # Indices of unique visible faces
+        visible_faces = pix_to_face.unique()[1:]   # (num_visible_faces )
+
+        # Get Indices of unique visible verts using the vertex indices in the faces
+        visible_verts_idx = packed_faces[visible_faces]    # (num_visible_faces,  3)
+        unique_visible_verts_idx = torch.unique(visible_verts_idx)   # (num_visible_verts, )
+
+        # Update visibility indicator to 1 for all visible vertices 
+        vertex_visibility_map[unique_visible_verts_idx] = 1.0
+
+        vertex_visibility_map = vertex_visibility_map.view(pix_to_face.shape[0], -1)
+        self.vertex_visibility = vertex_visibility_map
+
+
+        # ------------------- blending -------------------
         blend_params = kwargs.get("blend_params", self.blend_params)
         texels = meshes.sample_textures(fragments)
         
@@ -131,6 +158,10 @@ class SurfaceNormalRenderer(pl.LightningModule):
         normals = images[..., :3].cpu().numpy()
         ret['normals'] = rearrange(normals, '(b n) h w c -> b n h w c', b=B, n=N)
 
+        # Store vertex visibility information
+        vertex_visibility = self.renderer.shader.vertex_visibility
+        ret['vertex_visibility'] = rearrange(vertex_visibility, '(b n) v -> b n v', b=B, n=N)
+
         # ------------------- masks -------------------
         mask = images[..., 3:4].cpu().numpy()  # Extract alpha channel as mask
         ret['masks'] = rearrange(mask, '(b n) h w c -> b n h w c', b=B, n=N)
@@ -208,15 +239,16 @@ if __name__ == "__main__":
     mask = ret['masks']
     color_map = ret['color_maps']
     canonical_color_map = ret['canonical_color_maps']
+    vertex_visibility = ret['vertex_visibility'] # B, N, V
+    
     w = ret['skinning_weights_maps'] # B, N, H, W, 24
-
     w = w.argmax(axis=-1)
     w = (w - w.min()) / (w.max() - w.min())
 
     
 
     n_subplots = normals.shape[1]
-    fig, axs = plt.subplots(5, n_subplots, figsize=(n_subplots * 4, 12))
+    fig, axs = plt.subplots(6, n_subplots, figsize=(n_subplots * 4, 12))
     for i in range(n_subplots):
         axs[0, i].imshow(normals[0, i])
         axs[1, i].imshow(mask[0, i], cmap='gray')

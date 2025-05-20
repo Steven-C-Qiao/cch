@@ -126,7 +126,8 @@ class CCHTrainer(pl.LightningModule):
                                             vp_pred.cpu().detach().numpy(),
                                             vc_pred.cpu().detach().numpy(),
                                             mask=mask.cpu().detach().numpy(),
-                                            color=w_argmax)           
+                                            vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
+                                            color=w_argmax)        
 
         self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         for k, v in loss_dict.items():
@@ -200,6 +201,7 @@ class CCHTrainer(pl.LightningModule):
             batch['masks'] = masks
             batch['skinning_weights_maps'] = skinning_weights_maps
             batch['canonical_color_maps'] = canonical_color_maps
+            batch['vertex_visibility'] = ret['vertex_visibility']
         return batch 
     
 
