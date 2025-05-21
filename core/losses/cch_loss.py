@@ -47,7 +47,7 @@ class PosedPointmapChamferLoss(nn.Module):
         loss_v_to_v_pred = loss[1]
         
         if mask is not None:
-            masked_loss_v_pred_to_v = loss_v_pred_to_v * rearrange(mask, 'b n c h w -> (b n) (c h w)')
+            masked_loss_v_pred_to_v = loss_v_pred_to_v * rearrange(mask, 'b n h w -> (b n) (h w)')
             masked_loss_v_pred_to_v = masked_loss_v_pred_to_v.mean()
         else:
             masked_loss_v_pred_to_v = loss_v_pred_to_v.mean()

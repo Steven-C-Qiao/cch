@@ -38,7 +38,7 @@ class Visualiser(pl.LightningModule):
             
             # Save figure
             plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, f'{self.global_step}_normal_images.png'))
+            plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_normal_images.png'))
             plt.close()
 
 
@@ -172,7 +172,7 @@ class Visualiser(pl.LightningModule):
                     ax.zaxis.line.set_color('none')
                 
             plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, f'{self.global_step}_vc.png'))
+            plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_vc.png'))
             plt.close()
                     
                     
@@ -213,7 +213,7 @@ class Visualiser(pl.LightningModule):
 
                     if plot_error_heatmap:
                         error_heatmap = np.linalg.norm(vc_pred[b,n] - vc[b,n], axis=-1)
-                        error_heatmap *= mask[b,n,0]
+                        error_heatmap *= mask[b,n]
                         # error_heatmap[error_heatmap > 0.3] = 0
                         plt.subplot(num_rows*B, N, (b*num_rows+2)*N + n + 1)
 
@@ -227,7 +227,7 @@ class Visualiser(pl.LightningModule):
 
                     if conf is not None:
                         plt.subplot(num_rows*B, N, (b*num_rows+3)*N + n + 1)
-                        conf_masked = conf[b,n] * mask[b,n,0]
+                        conf_masked = conf[b,n] * mask[b,n]
                         im = plt.imshow(conf_masked)
                         plt.title(f'1/conf Frame {n}')
                         if n == N-1: 
@@ -240,17 +240,44 @@ class Visualiser(pl.LightningModule):
             plt.close()
 
 
-    def visualise_vp_vc(self, vp, vc, vp_pred, vc_pred, mask=None, color=None, no_annotations=True, vertex_visibility=None):
-        if self.rank == 0:
-            B, N, V, C = vp.shape
+    def visualise_vp_vc(self, vp, vc, vp_pred, vc_pred, bg_mask=None, color=None, vertex_visibility=None, conf_mask=None,
+                        no_annotations=True):
+        """
+        Visualise per-frame posed vertices and joined canonical points
 
+        Args:
+            vp: (B, N, 6890, 3) CAPE scan vertices
+            vc: (B, N, H, W, 3) per-frame canonical pointmap
+            vp_pred: (B, N, H * W, 3) predicted per-frame LBS posed vertices
+            vc_pred: (B, N, H, W, 3) predicted per-frame canonical pointmap
+            bg_mask: (B, N, H, W) background mask
+            color: (B, N, H, W) argmax of skinning weights
+            vertex_visibility: (B, N, 6890) vp visibility
+            conf_mask: (B, N, H, W) 
+            no_annotations: bool
+        """
+        if self.rank == 0:
+            s = 0.04
+            B, N, V, C = vp.shape
             B = min(B, 2)
             N = min(N, 4)
-            fig = plt.figure(figsize=(4*(N+1), 4*B))
+
+            if conf_mask is not None and bg_mask is not None:
+                mask = (bg_mask * conf_mask ).astype(np.bool)
+            elif conf_mask is not None:
+                mask = conf_mask.astype(np.bool)
+            elif bg_mask is not None:
+                mask = bg_mask.astype(np.bool)
+            else:
+                mask = None
+
+            fig = plt.figure(figsize=(4*(N+2), 4*B))
 
             for b in range(B):
                 all_points = []
                 all_colors = []
+                vc_to_scatter = vc[b].reshape(-1, 3)
+
                 for n in range(N):
                     color_masked = color[b, n].flatten() if color is not None else 'red'
                         
@@ -258,31 +285,30 @@ class Visualiser(pl.LightningModule):
                     vc_pred_to_scatter = vc_pred[b, n]
                     vp_pred_to_scatter = vp_pred[b, n]
                     vp_to_scatter = vp[b, n]
-                    vc_to_scatter = vc[b, n]
 
                     if mask is not None:
-                        vp_pred_to_scatter = vp_pred_to_scatter[mask[b, n, 0].astype(np.bool).flatten()]
-                        vc_pred_to_scatter = vc_pred_to_scatter[mask[b, n, 0].astype(np.bool).flatten()]
-                        color_masked = color_masked[mask[b, n, 0].astype(np.bool).flatten()]
-
+                        vp_pred_to_scatter = vp_pred_to_scatter[mask[b, n].astype(np.bool).flatten()]
+                        vc_pred_to_scatter = vc_pred_to_scatter[mask[b, n].astype(np.bool).flatten()]
+                        color_masked = color_masked[mask[b, n].astype(np.bool).flatten()]
+                        
                     all_points.append(vc_pred_to_scatter)
                     all_colors.append(color_masked)
 
                     # ---------------- add subplot ----------------
-                    ax = fig.add_subplot(B, N+1, b*(N+1) + n + 1, projection='3d')
+                    ax = fig.add_subplot(B, N+2, b*(N+2) + n + 1, projection='3d')
 
 
                     if vertex_visibility is not None:
                         vp_to_scatter = vp_to_scatter[vertex_visibility[b, n].astype(np.bool)]
 
-                    ax.scatter(vp_to_scatter[:,0], vp_to_scatter[:,1], vp_to_scatter[:,2], 
-                            c='red', s=0.2, alpha=0.5, label='Ground Truth')
-                    
                     # ax.scatter(vp_to_scatter[:,0], vp_to_scatter[:,1], vp_to_scatter[:,2], 
-                    #         c='gray', s=0.05, alpha=0.5, label='Ground Truth')
+                    #         c='red', s=0.2, alpha=0.5, label='Ground Truth')
                     
-                    # ax.scatter(vp_pred_to_scatter[:,0], vp_pred_to_scatter[:,1], vp_pred_to_scatter[:,2],
-                    #         c=color_masked, s=0.08, alpha=0.5, label='Predicted')
+                    ax.scatter(vp_to_scatter[:,0], vp_to_scatter[:,1], vp_to_scatter[:,2], 
+                            c='gray', s=0.75*s, alpha=0.5, label='Ground Truth')
+                    
+                    ax.scatter(vp_pred_to_scatter[:,0], vp_pred_to_scatter[:,1], vp_pred_to_scatter[:,2],
+                            c=color_masked, s=s, alpha=0.5, label='Predicted')
 
 
                     ax.view_init(elev=10, azim=20, vertical_axis='y')
@@ -303,15 +329,47 @@ class Visualiser(pl.LightningModule):
                     # ax.set_title(f'Batch {b}, Frame {n}')
                     # ax.legend()
 
-                ax = fig.add_subplot(B, N+1, b*(N+1) + N + 1, projection='3d')
+                ax = fig.add_subplot(B, N+2, b*(N+2) + N + 1, projection='3d')
 
                 all_points = np.concatenate(all_points, axis=0)
                 all_colors = np.concatenate(all_colors, axis=0)
                 ax.scatter(all_points[:,0], all_points[:,1], all_points[:,2],
-                        c=all_colors, s=0.1, alpha=0.5, label='Canonical Points')
+                        c=all_colors, s=s, alpha=0.3, label='Canonical Points')
                 ax.view_init(elev=10, azim=20, vertical_axis='y')
                 ax.set_box_aspect([1, 1, 1])
-            
+
+                max_range = np.array([
+                    vp[b,n,:,0].max() - vp[b,n,:,0].min(),
+                    vp[b,n,:,1].max() - vp[b,n,:,1].min(),
+                    vp[b,n,:,2].max() - vp[b,n,:,2].min()
+                ]).max() / 2.0
+                mid_x = (vp[b,n,:,0].max() + vp[b,n,:,0].min()) * 0.5
+                mid_y = (vp[b,n,:,1].max() + vp[b,n,:,1].min()) * 0.5
+                mid_z = (vp[b,n,:,2].max() + vp[b,n,:,2].min()) * 0.5
+                ax.set_xlim(mid_x - max_range, mid_x + max_range)
+                ax.set_ylim(mid_y - max_range, mid_y + max_range)
+                ax.set_zlim(mid_z - max_range, mid_z + max_range)
+
+
+                
+
+                ax = fig.add_subplot(B, N+2, b*(N+2) + N + 2, projection='3d')
+                ax.scatter(vc_to_scatter[:,0], vc_to_scatter[:,1], vc_to_scatter[:,2],
+                        c='gray', s=s, alpha=0.5, label='Canonical Points')
+                ax.view_init(elev=10, azim=20, vertical_axis='y')
+                ax.set_box_aspect([1, 1, 1])
+                
+                max_range = np.array([
+                    vp[b,n,:,0].max() - vp[b,n,:,0].min(),
+                    vp[b,n,:,1].max() - vp[b,n,:,1].min(),
+                    vp[b,n,:,2].max() - vp[b,n,:,2].min()
+                ]).max() / 2.0
+                mid_x = (vp[b,n,:,0].max() + vp[b,n,:,0].min()) * 0.5
+                mid_y = (vp[b,n,:,1].max() + vp[b,n,:,1].min()) * 0.5
+                mid_z = (vp[b,n,:,2].max() + vp[b,n,:,2].min()) * 0.5
+                ax.set_xlim(mid_x - max_range, mid_x + max_range)
+                ax.set_ylim(mid_y - max_range, mid_y + max_range)
+                ax.set_zlim(mid_z - max_range, mid_z + max_range)
             if no_annotations:
                 for ax in fig.axes:
                     ax.grid(False)
@@ -328,6 +386,7 @@ class Visualiser(pl.LightningModule):
                     ax.set_yticks([])
                     ax.set_zticks([])
 
-            plt.tight_layout()
+            plt.tight_layout(pad=0.01)  # Reduce padding between subplots
             plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_vp_vc.png'), dpi=300)
+
             plt.close()

@@ -73,7 +73,7 @@ class CCHTrainer(pl.LightningModule):
 
         B, N = batch['pose'].shape[:2]
         vp = batch['v_posed']
-        mask = batch['masks']
+        mask = batch['masks'].squeeze()
         # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
         joints = batch['joints']
         normal_images = batch['normal_imgs']
@@ -87,6 +87,9 @@ class CCHTrainer(pl.LightningModule):
         vc_pred, vc_conf = preds['vc'], preds['vc_conf']
         # w_pred, w_conf = preds['w'], preds['w_conf']
 
+        conf_threshold = 0.08
+        conf_mask = (1/vc_conf) < conf_threshold
+
 
         # w_pred = dw_pred + coarse_skinning_weights_maps
         w_pred = w_smpl
@@ -99,6 +102,7 @@ class CCHTrainer(pl.LightningModule):
             J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
             parents=self.smpl_model.parents 
         )
+        # vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
         # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
 
@@ -125,7 +129,8 @@ class CCHTrainer(pl.LightningModule):
                                             vc_gt.cpu().detach().numpy(),
                                             vp_pred.cpu().detach().numpy(),
                                             vc_pred.cpu().detach().numpy(),
-                                            mask=mask.cpu().detach().numpy(),
+                                            bg_mask=mask.cpu().detach().numpy(),
+                                            conf_mask=conf_mask.cpu().detach().numpy(),
                                             vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
                                             color=w_argmax)        
 
