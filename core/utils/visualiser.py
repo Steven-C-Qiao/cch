@@ -186,9 +186,6 @@ class Visualiser(pl.LightningModule):
             if vc is not None:
                 vc = (vc - vc.min()) / (vc.max() - vc.min()) 
 
-            if conf is not None:
-                conf = 1 / conf 
-
             B = min(B, 2)
             N = min(N, 4)
             
@@ -226,6 +223,8 @@ class Visualiser(pl.LightningModule):
                         plt.axis('off')
 
                     if conf is not None:
+                        conf = 1 / conf 
+
                         plt.subplot(num_rows*B, N, (b*num_rows+3)*N + n + 1)
                         conf_masked = conf[b,n] * mask[b,n]
                         im = plt.imshow(conf_masked)
@@ -294,7 +293,7 @@ class Visualiser(pl.LightningModule):
                     all_points.append(vc_pred_to_scatter)
                     all_colors.append(color_masked)
 
-                    # ---------------- add subplot ----------------
+                    # ---------------- vp ----------------
                     ax = fig.add_subplot(B, N+2, b*(N+2) + n + 1, projection='3d')
 
 
@@ -329,6 +328,7 @@ class Visualiser(pl.LightningModule):
                     # ax.set_title(f'Batch {b}, Frame {n}')
                     # ax.legend()
 
+                # ---------------- joined vc ----------------
                 ax = fig.add_subplot(B, N+2, b*(N+2) + N + 1, projection='3d')
 
                 all_points = np.concatenate(all_points, axis=0)
@@ -350,26 +350,17 @@ class Visualiser(pl.LightningModule):
                 ax.set_ylim(mid_y - max_range, mid_y + max_range)
                 ax.set_zlim(mid_z - max_range, mid_z + max_range)
 
-
-                
-
+                # ---------------- joined vc gt ----------------
                 ax = fig.add_subplot(B, N+2, b*(N+2) + N + 2, projection='3d')
                 ax.scatter(vc_to_scatter[:,0], vc_to_scatter[:,1], vc_to_scatter[:,2],
                         c='gray', s=s, alpha=0.5, label='Canonical Points')
                 ax.view_init(elev=10, azim=20, vertical_axis='y')
                 ax.set_box_aspect([1, 1, 1])
                 
-                max_range = np.array([
-                    vp[b,n,:,0].max() - vp[b,n,:,0].min(),
-                    vp[b,n,:,1].max() - vp[b,n,:,1].min(),
-                    vp[b,n,:,2].max() - vp[b,n,:,2].min()
-                ]).max() / 2.0
-                mid_x = (vp[b,n,:,0].max() + vp[b,n,:,0].min()) * 0.5
-                mid_y = (vp[b,n,:,1].max() + vp[b,n,:,1].min()) * 0.5
-                mid_z = (vp[b,n,:,2].max() + vp[b,n,:,2].min()) * 0.5
                 ax.set_xlim(mid_x - max_range, mid_x + max_range)
                 ax.set_ylim(mid_y - max_range, mid_y + max_range)
                 ax.set_zlim(mid_z - max_range, mid_z + max_range)
+
             if no_annotations:
                 for ax in fig.axes:
                     ax.grid(False)

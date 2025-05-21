@@ -30,6 +30,7 @@ _C.LOSS.CHAMFER_SINGLE_DIRECTIONAL = False
 # Input Data
 _C.DATA = CfgNode()
 _C.DATA.IMG_SIZE = 256
+_C.DATA.NORMALISE = True
 
 def get_cch_cfg_defaults():
     return _C.clone()

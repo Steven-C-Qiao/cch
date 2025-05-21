@@ -28,6 +28,7 @@ class CCHTrainer(pl.LightningModule):
         super().__init__()
         self.dev = dev
         self.cfg = cfg
+        self.normalise = cfg.DATA.NORMALISE
         self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 1000
  
         self.renderer = SurfaceNormalRenderer(image_size=(224, 224))
@@ -62,10 +63,10 @@ class CCHTrainer(pl.LightningModule):
 
     def training_step(self, batch, batch_idx, split='train'):
         if not self.dev: # more randomness in process_inputs, naive set first batch doesn't work 
-            batch = self.process_inputs(batch, batch_idx)
+            batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
         if batch_idx == 0:
             if self.dev:
-                batch = self.process_inputs(batch, batch_idx)
+                batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
             self.first_batch = batch
             self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
         if self.dev:    
@@ -151,7 +152,7 @@ class CCHTrainer(pl.LightningModule):
     
 
 
-    def process_inputs(self, batch, batch_idx):
+    def process_inputs(self, batch, batch_idx, normalise=True):
         """
         Batch of size B contains N frames of the same person. For each frame, sample a random camera pose and render.
         """
@@ -163,6 +164,13 @@ class CCHTrainer(pl.LightningModule):
             batch['v_posed'] = vp
 
             batch_size, num_frames = t.shape[:2]
+
+            if normalise:
+                vc = batch['first_frame_v_cano'] # B, 6890, 3
+                subject_height = (vc[..., 1].max(dim=-1).values - vc[..., 1].min(dim=-1).values)
+
+                batch['first_frame_v_cano'] = vc / subject_height[:, None, None] # B, 6890, 3
+                batch['v_posed'] = batch['v_posed'] / subject_height[:, None, None, None] # B, N, 6890, 3
 
 
             smpl_output = self.smpl_model(
