@@ -38,13 +38,12 @@ class CCH(nn.Module):
 
         # with torch.cuda.amp.autocast(enabled=False):
         vc, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
-            # w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+        # w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
 
-            # normalise skinning weights across joints 
-            # No softmax now as using inv_log activation
-            # w = F.softmax(w, dim=-1)
+        # normalise skinning weights across joints 
+        # No softmax now as using inv_log activation
+        # w = F.softmax(w, dim=-1)
 
-            # TODO: Pose blend shapes 
 
         pred = {
             'vc': vc,

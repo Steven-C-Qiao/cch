@@ -64,7 +64,7 @@ class CCHTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx, split='train'):
         if not self.dev: # more randomness in process_inputs, naive set first batch doesn't work 
             batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
-        if batch_idx == 0:
+        if self.global_step == 0:
             if self.dev:
                 batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
             self.first_batch = batch
@@ -90,7 +90,6 @@ class CCHTrainer(pl.LightningModule):
 
         conf_threshold = 0.08
         conf_mask = (1/vc_conf) < conf_threshold
-
 
         # w_pred = dw_pred + coarse_skinning_weights_maps
         w_pred = w_smpl
@@ -152,7 +151,7 @@ class CCHTrainer(pl.LightningModule):
     
 
 
-    def process_inputs(self, batch, batch_idx, normalise=True):
+    def process_inputs(self, batch, batch_idx, normalise=False):
         """
         Batch of size B contains N frames of the same person. For each frame, sample a random camera pose and render.
         """
@@ -171,6 +170,7 @@ class CCHTrainer(pl.LightningModule):
 
                 batch['first_frame_v_cano'] = vc / subject_height[:, None, None] # B, 6890, 3
                 batch['v_posed'] = batch['v_posed'] / subject_height[:, None, None, None] # B, N, 6890, 3
+                
 
 
             smpl_output = self.smpl_model(
@@ -179,6 +179,9 @@ class CCHTrainer(pl.LightningModule):
                 global_orient = torch.zeros((batch_size, 3)).to(self.device)
             )
             joints = smpl_output.joints[:, :24]
+
+            if normalise:
+                joints = joints / subject_height[:, None, None]
 
             w = (self.smpl_model.lbs_weights)[None, None].repeat(batch_size, num_frames, 1, 1)
 
@@ -221,15 +224,16 @@ class CCHTrainer(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         with torch.no_grad():
             loss = self.training_step(batch, batch_idx, split='val')
-            self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+            # self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
     
     def on_validation_epoch_end(self):
-        names = []
-        vals = []
-        for name, param in self.criterion.named_parameters():
-            names.append(name.split('.')[-1])
-            vals.append(torch.exp(-param.data.clone()).item())
+        pass 
+        # names = []
+        # vals = []
+        # for name, param in self.criterion.named_parameters():
+        #     names.append(name.split('.')[-1])
+        #     vals.append(torch.exp(-param.data.clone()).item())
         # logger.info(f'Current homosced weights: {list(zip(names, vals))}')
 
 
