@@ -23,10 +23,10 @@ class CCH(nn.Module):
         if cfg.MODEL.SKINNING_WEIGHTS:
             self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1")
             # Initialize the final layer weights and biases to zero
-            if hasattr(self.skinning_head.scratch.output_conv2[-1], 'weight'):
-                nn.init.zeros_(self.skinning_head.scratch.output_conv2[-1].weight)
-            if hasattr(self.skinning_head.scratch.output_conv2[-1], 'bias'):
-                nn.init.zeros_(self.skinning_head.scratch.output_conv2[-1].bias)
+            # if hasattr(self.skinning_head.scratch.output_conv2[-1], 'weight'):
+            #     nn.init.zeros_(self.skinning_head.scratch.output_conv2[-1].weight)
+            # if hasattr(self.skinning_head.scratch.output_conv2[-1], 'bias'):
+            #     nn.init.zeros_(self.skinning_head.scratch.output_conv2[-1].bias)
         else:
             self.skinning_head = None
 

@@ -54,7 +54,19 @@ class PosedPointmapChamferLoss(nn.Module):
 
         loss = masked_loss_v_pred_to_v + loss_v_to_v_pred.mean()
 
-        return loss# , loss_normals
+        return loss, masked_loss_v_pred_to_v
+    
+class RegulariserLoss(nn.Module):
+    """
+    Regulariser loss for skinning weights
+    """
+    def __init__(self):
+        super().__init__()
+        
+    def forward(self, dw_pred):
+        loss1 = torch.mean(torch.abs(torch.sum(dw_pred, dim=-1)))
+        loss2 = torch.mean(dw_pred ** 2)
+        return loss1 + loss2
         
 
 
@@ -73,21 +85,23 @@ class CCHLoss(nn.Module):
 
         self.posed_pointmap_loss = PosedPointmapChamferLoss(cfg)
         self.canonical_rgb_loss = CanonicalRGBConfLoss()
-
+        self.regulariser_loss = RegulariserLoss()
     def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, dw_pred=None):
         loss_dict = {}
 
-        posed_loss = self.posed_pointmap_loss(vp, vp_pred, mask) * self.cfg.LOSS.VP_LOSS_WEIGHT
+        posed_loss, chamfer_vp_pred_to_vp = self.posed_pointmap_loss(vp, vp_pred, mask) 
+        posed_loss *= self.cfg.LOSS.VP_LOSS_WEIGHT
         canonical_loss = self.canonical_rgb_loss(vc, vc_pred, conf=conf, mask=mask) * self.cfg.LOSS.VC_LOSS_WEIGHT
         loss_dict['posed_loss'] = posed_loss
+        loss_dict['chamfer_vp_pred_to_vp'] = chamfer_vp_pred_to_vp
         loss_dict['canonical_loss'] = canonical_loss
         
         total_loss = posed_loss + canonical_loss
         
         if dw_pred is not None:
-            loss_dw = torch.mean(dw_pred ** 2)
+            loss_dw = self.regulariser_loss(dw_pred) * self.cfg.LOSS.W_REGULARISER_WEIGHT
             loss_dict['dw_reg_loss'] = loss_dw
-            total_loss += loss_dw * self.cfg.LOSS.W_REGULARISER_WEIGHT
+            total_loss += loss_dw
 
         loss_dict['total_loss'] = total_loss
         return total_loss, loss_dict

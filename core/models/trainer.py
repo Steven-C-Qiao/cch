@@ -120,19 +120,17 @@ class CCHTrainer(pl.LightningModule):
         conf_mask = (1/vc_conf) < conf_threshold
 
         # Visualise and log
-        vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
-        vc_pred = rearrange(vc_pred, 'b n h w c -> b n (h w) c', b=B, n=N)
         if self.global_step % self.vis_frequency == 0:
             w_argmax = np.argmax(w_pred.cpu().detach().numpy(), axis=-1)
             # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
-            self.visualiser.visualise_vc_as_image(vc_pred.cpu().detach().numpy(), 
+            self.visualiser.visualise_vc_as_image(rearrange(vc_pred, 'b n h w c -> b n (h w) c', b=B, n=N).cpu().detach().numpy(), 
                                                   vc_gt.cpu().detach().numpy(),
                                                   mask=mask.cpu().detach().numpy(),
                                                   conf=vc_conf.cpu().detach().numpy())
             self.visualiser.visualise_vp_vc(vp.cpu().detach().numpy(), 
                                             vc_gt.cpu().detach().numpy(),
-                                            vp_pred.cpu().detach().numpy(),
-                                            vc_pred.cpu().detach().numpy(),
+                                            rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N).cpu().detach().numpy(),
+                                            rearrange(vc_pred, 'b n h w c -> b n (h w) c', b=B, n=N).cpu().detach().numpy(),
                                             bg_mask=mask.cpu().detach().numpy(),
                                             conf_mask=conf_mask.cpu().detach().numpy(),
                                             vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
@@ -142,7 +140,12 @@ class CCHTrainer(pl.LightningModule):
         for k, v in loss_dict.items():
             if k != 'total_loss':
                 self.log(f'{split}_{k}', v, on_step=True, on_epoch=False, sync_dist=True)
-        # self.metrics_calculator.update(pred_dict, targets_dict, self.cfg.TRAIN.BATCH_SIZE)
+
+        vc_avg_err = torch.linalg.norm(vc_gt - vc_pred, dim=-1) * mask 
+        vc_avg_err = vc_avg_err.sum() / mask.sum()
+        self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True)
+
+        # self.metrics_calculator.update(vp, vp_pred, mask, self.cfg.TRAIN.BATCH_SIZE)
         # for metrics in self.metrics_calculator.metrics:
         #     self.log(f'{split}_{metrics}', self.metrics_calculator.metrics_dict[metrics][-1], on_step=True, on_epoch=True, sync_dist=True)
 
@@ -268,6 +271,19 @@ class CCHTrainer(pl.LightningModule):
     #     for name, param in self.named_parameters():
     #         if param.grad is None:
     #             print(name)
+
+    #     # Check if skinning weights are enabled in config
+    #     if self.cfg.MODEL.SKINNING_WEIGHTS:
+    #         # Get the last layer of skinning_head's output_conv2
+    #         last_layer = self.model.skinning_head.scratch.output_conv2[-1]
+            
+    #         if hasattr(last_layer, 'weight') and last_layer.weight.grad is not None:
+    #             grad_norm = last_layer.weight.grad.norm().item()
+    #             print(f"Skinning head last layer weight gradient norm: {grad_norm}")
+                
+    #         if hasattr(last_layer, 'bias') and last_layer.bias.grad is not None:
+    #             grad_norm = last_layer.bias.grad.norm().item()
+    #             print(f"Skinning head last layer bias gradient norm: {grad_norm}")
 
     # def on_after_backward(self):
     #     for name, param in self.named_parameters():
