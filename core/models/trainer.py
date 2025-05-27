@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import torch.optim as optim
 import pytorch_lightning as pl
-
+import torch.nn.functional as F
 from einops import rearrange
 
 from core.configs import paths 
@@ -29,7 +29,7 @@ class CCHTrainer(pl.LightningModule):
         self.dev = dev
         self.cfg = cfg
         self.normalise = cfg.DATA.NORMALISE
-        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 1000
+        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 100
  
         self.renderer = SurfaceNormalRenderer(image_size=(224, 224))
 
@@ -88,17 +88,18 @@ class CCHTrainer(pl.LightningModule):
         vc_pred, vc_conf = preds['vc'], preds['vc_conf']
         # w_pred, w_conf = preds['w'], preds['w_conf']
 
-        conf_threshold = 0.08
-        conf_mask = (1/vc_conf) < conf_threshold
 
-        # w_pred = dw_pred + coarse_skinning_weights_maps
-        w_pred = w_smpl
-
+        if self.cfg.MODEL.SKINNING_WEIGHTS:
+            dw_pred, w_conf = preds['w'], preds['w_conf']
+            w_pred = w_smpl + dw_pred
+        else:
+            w_pred = w_smpl
+            w_conf = None
 
         vp_pred, joints_pred = general_lbs(
             vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
             pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
-            lbs_weights=rearrange(w_pred, 'b n h w c -> (b n) (h w) c'),
+            lbs_weights=rearrange(w_pred, 'b n h w j -> (b n) (h w) j'),
             J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
             parents=self.smpl_model.parents 
         )
@@ -112,8 +113,11 @@ class CCHTrainer(pl.LightningModule):
                                          vc_pred=vc_pred, # rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
                                          conf=vc_conf, # rearrange(vc_conf, 'b n h w -> (b n) (h w)'),
                                          mask=mask,
+                                         dw_pred=dw_pred
                                          )
         
+        conf_threshold = 0.08
+        conf_mask = (1/vc_conf) < conf_threshold
 
         # Visualise and log
         vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
@@ -142,10 +146,9 @@ class CCHTrainer(pl.LightningModule):
         # for metrics in self.metrics_calculator.metrics:
         #     self.log(f'{split}_{metrics}', self.metrics_calculator.metrics_dict[metrics][-1], on_step=True, on_epoch=True, sync_dist=True)
 
-
-        if batch_idx % 200 == 0 and batch_idx > 0:
+        if batch_idx % 10 == 0 and batch_idx > 0:
             # import ipdb; ipdb.set_trace()
-            pass 
+            pass
 
         return loss 
     

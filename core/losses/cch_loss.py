@@ -74,7 +74,7 @@ class CCHLoss(nn.Module):
         self.posed_pointmap_loss = PosedPointmapChamferLoss(cfg)
         self.canonical_rgb_loss = CanonicalRGBConfLoss()
 
-    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, pred_dw=None):
+    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, dw_pred=None):
         loss_dict = {}
 
         posed_loss = self.posed_pointmap_loss(vp, vp_pred, mask) * self.cfg.LOSS.VP_LOSS_WEIGHT
@@ -84,10 +84,10 @@ class CCHLoss(nn.Module):
         
         total_loss = posed_loss + canonical_loss
         
-        if pred_dw is not None:
-            loss_w = torch.mean(pred_dw ** 2)
-            loss_dict['w_loss'] = loss_w
-            total_loss += loss_w * self.cfg.LOSS.W_REGULARISER_WEIGHT
+        if dw_pred is not None:
+            loss_dw = torch.mean(dw_pred ** 2)
+            loss_dict['dw_reg_loss'] = loss_dw
+            total_loss += loss_dw * self.cfg.LOSS.W_REGULARISER_WEIGHT
 
         loss_dict['total_loss'] = total_loss
         return total_loss, loss_dict

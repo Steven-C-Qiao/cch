@@ -97,6 +97,8 @@ def activate_head(out, activation="norm_exp", conf_activation="expp1"):
         pts3d = torch.sigmoid(xyz)
     elif activation == "linear":
         pts3d = xyz
+    elif activation == "softmax":
+        pts3d = F.softmax(xyz, dim=-1)
     else:
         raise ValueError(f"Unknown activation: {activation}")
 

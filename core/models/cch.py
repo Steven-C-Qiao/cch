@@ -19,9 +19,16 @@ class CCH(nn.Module):
 
         self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="conv")
         self.canonical_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
-        
-        # use inv_log since now producing updates to the coarse_smpl_skinning_weights 
-        # self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1")
+
+        if cfg.MODEL.SKINNING_WEIGHTS:
+            self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1")
+            # Initialize the final layer weights and biases to zero
+            if hasattr(self.skinning_head.scratch.output_conv2[-1], 'weight'):
+                nn.init.zeros_(self.skinning_head.scratch.output_conv2[-1].weight)
+            if hasattr(self.skinning_head.scratch.output_conv2[-1], 'bias'):
+                nn.init.zeros_(self.skinning_head.scratch.output_conv2[-1].bias)
+        else:
+            self.skinning_head = None
 
 
         # self.count_parameters()
@@ -38,7 +45,11 @@ class CCH(nn.Module):
 
         # with torch.cuda.amp.autocast(enabled=False):
         vc, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
-        # w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+        if self.skinning_head is not None:
+            w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+        else:
+            w = None
+            w_conf = None
 
         # normalise skinning weights across joints 
         # No softmax now as using inv_log activation
@@ -48,8 +59,8 @@ class CCH(nn.Module):
         pred = {
             'vc': vc,
             'vc_conf': vc_conf,
-            # 'w': w,
-            # 'w_conf': w_conf
+            'w': w,
+            'w_conf': w_conf
         }
         return pred 
 
