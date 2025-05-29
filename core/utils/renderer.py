@@ -260,3 +260,5 @@ if __name__ == "__main__":
         ax.axis('off')
     plt.savefig('tinkering/test_renderer.png')
     plt.show()
+
+    import ipdb; ipdb.set_trace()

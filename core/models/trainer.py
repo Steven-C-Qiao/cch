@@ -145,6 +145,8 @@ class CCHTrainer(pl.LightningModule):
         vc_avg_err = vc_avg_err.sum() / mask.sum()
         self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True)
 
+        self.log(f'{split}_dwpred_max', dw_pred.max(), on_step=True, on_epoch=True, sync_dist=True)
+
         # self.metrics_calculator.update(vp, vp_pred, mask, self.cfg.TRAIN.BATCH_SIZE)
         # for metrics in self.metrics_calculator.metrics:
         #     self.log(f'{split}_{metrics}', self.metrics_calculator.metrics_dict[metrics][-1], on_step=True, on_epoch=True, sync_dist=True)
