@@ -19,7 +19,7 @@ _C.TRAIN.LR_SCHEDULER = 'cosine'
 _C.MODEL = CfgNode()
 _C.MODEL.GENDER = 'neutral'
 _C.MODEL.SMPL_PATH = 'model_files/smpl'
-_C.MODEL.SKINNING_WEIGHTS = True
+_C.MODEL.SKINNING_WEIGHTS = False
 
 # Loss
 _C.LOSS = CfgNode()
@@ -32,6 +32,10 @@ _C.LOSS.CHAMFER_SINGLE_DIRECTIONAL = False
 _C.DATA = CfgNode()
 _C.DATA.IMG_SIZE = 256
 _C.DATA.NORMALISE = True
+_C.DATA.DIST_STD = 0.4
+_C.DATA.ELEV_STD = 10
+_C.DATA.AT_STD = 0.2
+_C.DATA.DIST_MEAN = 2.5
 
 def get_cch_cfg_defaults():
     return _C.clone()

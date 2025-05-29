@@ -17,8 +17,6 @@ from core.utils.sample_utils import sample_cameras
 from core.utils.general_lbs import general_lbs
 from core.utils.visualiser import Visualiser
 
-# from metrics.metrics_calculator import MetricsCalculator
-
 class CCHTrainer(pl.LightningModule):
     def __init__(self, 
                  cfg, 
@@ -50,7 +48,6 @@ class CCHTrainer(pl.LightningModule):
 
         self.criterion = CCHLoss(cfg)
         self.visualiser = Visualiser(save_dir=vis_save_dir)
-        # self.metrics_calculator = MetricsCalculator()
 
         self.save_hyperparameters(ignore=['smpl_model'])
         
@@ -68,7 +65,7 @@ class CCHTrainer(pl.LightningModule):
             if self.dev:
                 batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
             self.first_batch = batch
-            self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
+            # self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
         if self.dev:    
             batch = self.first_batch
 
@@ -77,16 +74,14 @@ class CCHTrainer(pl.LightningModule):
         mask = batch['masks'].squeeze()
         # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
         joints = batch['joints']
-        normal_images = batch['normal_imgs']
+        normal_maps = batch['normal_imgs']
         w_smpl = batch['skinning_weights_maps']
-        vc_gt = batch['canonical_color_maps']
+        vc = batch['canonical_color_maps']
 
 
         # ------------------- forward pass -------------------
-        preds = self(normal_images)
-
+        preds = self(normal_maps)
         vc_pred, vc_conf = preds['vc'], preds['vc_conf']
-        # w_pred, w_conf = preds['w'], preds['w_conf']
 
 
         if self.cfg.MODEL.SKINNING_WEIGHTS:
@@ -95,6 +90,8 @@ class CCHTrainer(pl.LightningModule):
         else:
             w_pred = w_smpl
             w_conf = None
+            dw_pred = None
+
 
         vp_pred, joints_pred = general_lbs(
             vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
@@ -103,53 +100,43 @@ class CCHTrainer(pl.LightningModule):
             J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
             parents=self.smpl_model.parents 
         )
-        # vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
+        vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
         # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
 
-        loss, loss_dict = self.criterion(vp=rearrange(batch['sampled_posed_points'], 'b n v c -> (b n) v c'), # rearrange(vp, 'b n v c -> (b n) v c'),
+        loss, loss_dict = self.criterion(vp=batch['sampled_posed_points'],
                                          vp_pred=vp_pred,
-                                         vc=vc_gt, # rearrange(vc_gt, 'b n h w c -> (b n) (h w) c'),
-                                         vc_pred=vc_pred, # rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
-                                         conf=vc_conf, # rearrange(vc_conf, 'b n h w -> (b n) (h w)'),
+                                         vc=vc,
+                                         vc_pred=vc_pred, 
+                                         conf=vc_conf,
                                          mask=mask,
-                                         dw_pred=dw_pred
-                                         )
-        
-        conf_threshold = 0.08
-        conf_mask = (1/vc_conf) < conf_threshold
+                                         dw_pred=dw_pred)
 
         # Visualise and log
         if self.global_step % self.vis_frequency == 0:
-            w_argmax = np.argmax(w_pred.cpu().detach().numpy(), axis=-1)
-            # self.logger.experiment.add_figure(f'{split}_pred', self.visualiser.fig, self.global_step)
-            self.visualiser.visualise_vc_as_image(rearrange(vc_pred, 'b n h w c -> b n (h w) c', b=B, n=N).cpu().detach().numpy(), 
-                                                  vc_gt.cpu().detach().numpy(),
-                                                  mask=mask.cpu().detach().numpy(),
-                                                  conf=vc_conf.cpu().detach().numpy())
-            self.visualiser.visualise_vp_vc(vp.cpu().detach().numpy(), 
-                                            vc_gt.cpu().detach().numpy(),
-                                            rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N).cpu().detach().numpy(),
-                                            rearrange(vc_pred, 'b n h w c -> b n (h w) c', b=B, n=N).cpu().detach().numpy(),
-                                            bg_mask=mask.cpu().detach().numpy(),
-                                            conf_mask=conf_mask.cpu().detach().numpy(),
-                                            vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
-                                            color=w_argmax)        
+            self.visualiser.visualise(normal_maps=normal_maps.cpu().detach().numpy(),
+                                      vp=vp.cpu().detach().numpy(),
+                                      vc=vc.cpu().detach().numpy(),
+                                      vp_pred=vp_pred.cpu().detach().numpy(),
+                                      vc_pred=vc_pred.cpu().detach().numpy(),
+                                      conf=vc_conf.cpu().detach().numpy(),
+                                      mask=mask.cpu().detach().numpy(),
+                                      vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
+                                      color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
+                                      no_annotations=True,
+                                      plot_error_heatmap=True)
 
         self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         for k, v in loss_dict.items():
             if k != 'total_loss':
                 self.log(f'{split}_{k}', v, on_step=True, on_epoch=False, sync_dist=True)
 
-        vc_avg_err = torch.linalg.norm(vc_gt - vc_pred, dim=-1) * mask 
+        vc_avg_err = torch.linalg.norm(vc - vc_pred, dim=-1) * mask 
         vc_avg_err = vc_avg_err.sum() / mask.sum()
         self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True)
 
-        self.log(f'{split}_dwpred_max', dw_pred.max(), on_step=True, on_epoch=True, sync_dist=True)
-
-        # self.metrics_calculator.update(vp, vp_pred, mask, self.cfg.TRAIN.BATCH_SIZE)
-        # for metrics in self.metrics_calculator.metrics:
-        #     self.log(f'{split}_{metrics}', self.metrics_calculator.metrics_dict[metrics][-1], on_step=True, on_epoch=True, sync_dist=True)
+        if dw_pred is not None:
+            self.log(f'{split}_dwpred_max', dw_pred.max(), on_step=True, on_epoch=True, sync_dist=True)
 
         if batch_idx % 10 == 0 and batch_idx > 0:
             # import ipdb; ipdb.set_trace()
@@ -195,7 +182,7 @@ class CCHTrainer(pl.LightningModule):
 
             
             # R, T = sample_cameras(batch_size, num_frames, t)
-            R, T = sample_cameras(batch_size, num_frames)
+            R, T = sample_cameras(batch_size, num_frames, self.cfg.DATA)
             R = R.to(self.device)
             T = T.to(self.device)
 

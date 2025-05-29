@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl 
 import matplotlib.colors
+from einops import rearrange
+
 class Visualiser(pl.LightningModule):
     def __init__(self, save_dir, rank=0):
         super().__init__()
@@ -18,8 +20,9 @@ class Visualiser(pl.LightningModule):
             B, N = normal_images.shape[:2]
             B = min(B, 2)
             N = min(N, 4)
-            # Convert to numpy and move channels to last dimension
-            normal_images = normal_images.permute(0, 1, 3, 4, 2).cpu().detach().numpy()
+
+            
+            normal_images = np.transpose(normal_images, (0, 1, 3, 4, 2))
 
             # Create a grid of subplots
             fig, axes = plt.subplots(B, N, figsize=(4*N, 4*B))
@@ -40,146 +43,13 @@ class Visualiser(pl.LightningModule):
             plt.tight_layout()
             plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_normal_images.png'))
             plt.close()
-
-
-    def visualise_vp(self, vp, vp_pred, mask=None, color=None, no_annotations=True):
+      
+    def visualise_vc_as_image(self, vc_pred, vc=None, mask=None, conf=None, plot_error_heatmap=True):
         if self.rank == 0:
-            B, N, V, C = vp.shape
+            B, N, H, W, C = vc_pred.shape
 
             B = min(B, 2)
             N = min(N, 4)
-            fig = plt.figure(figsize=(4*N, 4*B))
-
-            for b in range(B):
-                for n in range(N):
-                    vp_pred_to_scatter = vp_pred[b, n]
-                    if color is not None:
-                        color_masked = color[b, n].flatten()
-                    else:
-                        color_masked = 'red'
-                    if mask is not None:
-                        vp_pred_to_scatter = vp_pred_to_scatter[mask[b, n, 0].astype(np.bool).flatten()]
-                        color_masked = color_masked[mask[b, n, 0].astype(np.bool).flatten()]
-
-
-                    # Create 3D subplot
-                    ax = fig.add_subplot(B, N, b*N + n + 1, projection='3d')
-                    
-                    # Plot ground truth vertices in blue
-                    ax.scatter(vp[b,n,:,0], vp[b,n,:,1], vp[b,n,:,2], 
-                            c='gray', s=0.05, alpha=0.1, label='Ground Truth')
-                    
-                    # Plot predicted vertices in red
-                    ax.scatter(vp_pred_to_scatter[:,0], vp_pred_to_scatter[:,1], vp_pred_to_scatter[:,2],
-                            c=color_masked, s=0.5, alpha=0.5, label='Predicted')
-
-                    # ax.set_title(f'Batch {b}, Frame {n}')
-                    # ax.legend()
-
-                    # set look into z direction
-                    ax.view_init(elev=10, azim=20, vertical_axis='y')
-                    
-                    # Set equal aspect ratio
-                    ax.set_box_aspect([1, 1, 1])
-                    
-                    # Set equal tick ratios
-                    max_range = np.array([
-                        vp[b,n,:,0].max() - vp[b,n,:,0].min(),
-                        vp[b,n,:,1].max() - vp[b,n,:,1].min(),
-                        vp[b,n,:,2].max() - vp[b,n,:,2].min()
-                    ]).max() / 2.0
-                    mid_x = (vp[b,n,:,0].max() + vp[b,n,:,0].min()) * 0.5
-                    mid_y = (vp[b,n,:,1].max() + vp[b,n,:,1].min()) * 0.5
-                    mid_z = (vp[b,n,:,2].max() + vp[b,n,:,2].min()) * 0.5
-                    ax.set_xlim(mid_x - max_range, mid_x + max_range)
-                    ax.set_ylim(mid_y - max_range, mid_y + max_range)
-                    ax.set_zlim(mid_z - max_range, mid_z + max_range)
-
-                    if no_annotations:
-                        ax.grid(False)
-                        ax.xaxis.pane.fill = False
-                        ax.yaxis.pane.fill = False
-                        ax.zaxis.pane.fill = False
-                        ax.xaxis.pane.set_edgecolor('none')
-                        ax.yaxis.pane.set_edgecolor('none') 
-                        ax.zaxis.pane.set_edgecolor('none')
-                        ax.xaxis.line.set_color('none')
-                        ax.yaxis.line.set_color('none')
-                        ax.zaxis.line.set_color('none')
-                        ax.set_xticks([])
-                        ax.set_yticks([])
-                        ax.set_zticks([])
-
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, f'{self.global_step}_vp.png'), dpi=300)
-            plt.close()
-
-    def visualise_vc(self, vc_pred, mask=None, color=None, no_annotations=False):
-        """
-        Visualise the canonical space
-        """
-        if self.rank == 0:
-            B, N, V, C = vc_pred.shape
-
-            B = min(B, 2)
-            N = min(N, 4)
-            
-            fig = plt.figure(figsize=(4*B, 4*1))
-
-            for b in range(B):
-                ax = fig.add_subplot(1, B, b + 1, projection='3d')
-                
-                # Collect all points across N frames
-                all_points = []
-                all_colors = []
-                for n in range(N):
-                    vc_pred_to_scatter = vc_pred[b, n]
-                    if color is not None:
-                        color_masked = color[b, n].flatten()
-                    else:
-                        color_masked = 'blue'
-                    if mask is not None:
-                        vc_pred_to_scatter = vc_pred_to_scatter[mask[b, n, 0].astype(np.bool).flatten()]
-                        color_masked = color_masked[mask[b, n, 0].astype(np.bool).flatten()]
-
-                    all_points.append(vc_pred_to_scatter)
-                    all_colors.append(color_masked)
-                # Combine all points and plot them together
-                all_points = np.concatenate(all_points, axis=0)
-                all_colors = np.concatenate(all_colors, axis=0)
-                ax.scatter(all_points[:,0], all_points[:,1], all_points[:,2],
-                        c=all_colors, s=0.5, alpha=0.5, label='Canonical Points')
-                
-                # set look into z direction
-                ax.view_init(elev=10, azim=20, vertical_axis='y')
-
-                # Remove all visual elements except points
-                ax.set_box_aspect([1, 1, 1])
-                if no_annotations:
-                    ax.grid(False)
-                    ax.xaxis.pane.fill = False
-                    ax.yaxis.pane.fill = False
-                    ax.zaxis.pane.fill = False
-                    ax.xaxis.pane.set_edgecolor('none')
-                    ax.yaxis.pane.set_edgecolor('none') 
-                    ax.zaxis.pane.set_edgecolor('none')
-                    ax.set_xticks([])
-                    ax.set_yticks([])
-                    ax.set_zticks([])
-                    # Remove the axis lines
-                    ax.xaxis.line.set_color('none')
-                    ax.yaxis.line.set_color('none')
-                    ax.zaxis.line.set_color('none')
-                
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_vc.png'))
-            plt.close()
-                    
-                    
-    def visualise_vc_as_image(self, vc_pred, vc=None, mask=None, color=None, conf=None, plot_error_heatmap=True):
-        if self.rank == 0:
-            B, N, V, C = vc_pred.shape
-            vc_pred = vc_pred.reshape(B, N, int(np.sqrt(V)), int(np.sqrt(V)), C)
 
             if conf is not None:
                 conf = 1 / conf 
@@ -188,7 +58,6 @@ class Visualiser(pl.LightningModule):
             if plot_error_heatmap:
                 error_heatmap = np.linalg.norm(vc_pred - vc, axis=-1)
                 error_heatmap *= mask
-
 
             
             if vc is not None:
@@ -203,12 +72,8 @@ class Visualiser(pl.LightningModule):
                 vc_pred = (vc_pred - norm_min) / (norm_max - norm_min) 
                 vc_pred[~mask.astype(bool)] = 1
 
-                # clip 
                 vc_pred = np.clip(vc_pred, 0, 1)
 
-
-            B = min(B, 2)
-            N = min(N, 4)
             
             num_rows = 3 if plot_error_heatmap else 2
             num_rows += 1 if conf is not None else 0
@@ -274,9 +139,9 @@ class Visualiser(pl.LightningModule):
 
         Args:
             vp: (B, N, 6890, 3) CAPE scan vertices
-            vc: (B, N, H, W, 3) per-frame canonical pointmap
             vp_pred: (B, N, H * W, 3) predicted per-frame LBS posed vertices
-            vc_pred: (B, N, H, W, 3) predicted per-frame canonical pointmap
+            vc: (B, N, H, W, 3) per-frame canonical pointmap
+            vc_pred: (B, N, H * W, 3) predicted per-frame canonical pointmap
             bg_mask: (B, N, H, W) background mask
             color: (B, N, H, W) argmax of skinning weights
             vertex_visibility: (B, N, 6890) vp visibility
@@ -327,9 +192,6 @@ class Visualiser(pl.LightningModule):
 
                     if vertex_visibility is not None:
                         vp_to_scatter = vp_to_scatter[vertex_visibility[b, n].astype(np.bool)]
-
-                    # ax.scatter(vp_to_scatter[:,0], vp_to_scatter[:,1], vp_to_scatter[:,2], 
-                    #         c='red', s=0.2, alpha=0.5, label='Ground Truth')
                     
                     ax.scatter(vp_to_scatter[:,0], vp_to_scatter[:,1], vp_to_scatter[:,2], 
                             c='gray', s=0.75*s, alpha=0.5, label='Ground Truth')
@@ -409,3 +271,57 @@ class Visualiser(pl.LightningModule):
             plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_vp_vc.png'), dpi=300)
 
             plt.close()
+
+
+
+    def visualise(self, 
+                  normal_maps=None,
+                  vp=None, 
+                  vc=None, 
+                  vp_pred=None, 
+                  vc_pred=None, 
+                  conf=None, 
+                  mask=None, 
+                  color=None, 
+                  vertex_visibility=None, 
+                  no_annotations=True,
+                  plot_error_heatmap=True):
+        """
+        Visualise normal images, canonical pointmaps, and posed vertices
+
+        Args:
+            normal_maps: (B, N, H, W, 3)
+            vp: (B, N, 6890, 3)
+            vp_pred: (B, N, H * W, 3)
+            vc: (B, N, H, W, 3)
+            vc_pred: (B, N, H, W, 3)
+            conf: (B, N, H, W)
+            mask: (B, N, H, W)
+            color: (B, N, H, W)
+            vertex_visibility: (B, N, 6890)
+        """
+        
+        if self.rank != 0:
+            return None 
+        
+        if conf is not None:
+            conf_threshold = 0.08
+            conf_mask = (1/conf) < conf_threshold
+        
+        self.visualise_input_normal_imgs(normal_maps)
+
+        self.visualise_vc_as_image(vc_pred=vc_pred, 
+                                   vc=vc, 
+                                   mask=mask, 
+                                   conf=conf, 
+                                   plot_error_heatmap=plot_error_heatmap)
+        
+        self.visualise_vp_vc(vp=vp, 
+                             vc=vc, 
+                             vp_pred=vp_pred, 
+                             vc_pred=rearrange(vc_pred, 'b n h w c -> b n (h w) c'), 
+                             bg_mask=mask, 
+                             color=color, 
+                             vertex_visibility=vertex_visibility, 
+                             conf_mask=conf_mask, 
+                             no_annotations=no_annotations)
