@@ -37,7 +37,7 @@ class Visualiser(pl.LightningModule):
             for b in range(B):
                 for n in range(N):
                     axes[b,n].imshow(normal_images[b,n])
-                    axes[b,n].axis('off')
+                    # axes[b,n].axis('off')
             
             # Save figure
             plt.tight_layout()

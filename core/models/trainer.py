@@ -123,7 +123,7 @@ class CCHTrainer(pl.LightningModule):
                                       mask=mask.cpu().detach().numpy(),
                                       vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
                                       color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
-                                      no_annotations=True,
+                                      no_annotations=False,
                                       plot_error_heatmap=True)
 
         self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
@@ -141,6 +141,8 @@ class CCHTrainer(pl.LightningModule):
         if batch_idx % 10 == 0 and batch_idx > 0:
             # import ipdb; ipdb.set_trace()
             pass
+
+        import ipdb; ipdb.set_trace()
 
         return loss 
     

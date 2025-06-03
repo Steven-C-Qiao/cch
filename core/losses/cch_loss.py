@@ -72,10 +72,14 @@ class RegulariserLoss(nn.Module):
     def __init__(self):
         super().__init__()
         
-    def forward(self, dw_pred):
-        loss1 = torch.mean(torch.abs(torch.sum(dw_pred, dim=-1)))
-        loss2 = torch.mean(dw_pred ** 2)
-        return loss1 + loss2
+    def forward(self, dw_pred, mask=None):
+        loss1 = torch.abs(torch.sum(dw_pred, dim=-1))
+        loss2 = dw_pred ** 2
+
+        if mask is not None:
+            loss1 = loss1 * mask
+            loss2 = loss2 * mask[..., None]
+        return loss1.mean() + loss2.mean()
         
 
 
@@ -114,7 +118,7 @@ class CCHLoss(nn.Module):
         total_loss = posed_loss + canonical_loss
         
         if dw_pred is not None:
-            loss_dw = self.regulariser_loss(dw_pred) * self.cfg.LOSS.W_REGULARISER_WEIGHT
+            loss_dw = self.regulariser_loss(dw_pred, mask) * self.cfg.LOSS.W_REGULARISER_WEIGHT
             loss_dict['dw_reg_loss'] = loss_dw
             total_loss += loss_dw
 

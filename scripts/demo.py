@@ -125,9 +125,9 @@ def main(sapiens_normal_model, cch_model, img_dir_path):
 
         surface_normals = []
         seg_masks = []
+        images = []
 
         for img_fname in tqdm(img_fnames):
-
             image_path = os.path.join(img_dir_path, img_fname)
             image = Image.open(image_path)
             
@@ -149,7 +149,50 @@ def main(sapiens_normal_model, cch_model, img_dir_path):
             if image.mode == 'RGBA':
                 image = image.convert('RGB')
             
-            normal_map, seg_mask = sapiens_normal_model.process_image(image, "1b", "part-seg-1b")
+            normal_map, seg_mask = sapiens_normal_model.process_image(image, "1b", "part-seg-1b") # (1, 3, H, W)
+
+            # Convert seg_mask to numpy for finding bounding box
+            seg_mask_np = seg_mask.squeeze().cpu().numpy()[0]
+            
+            # Find bounding box of the human
+            rows = np.any(seg_mask_np, axis=1)
+            cols = np.any(seg_mask_np, axis=0)
+            y_min, y_max = np.where(rows)[0][[0, -1]]
+            x_min, x_max = np.where(cols)[0][[0, -1]]
+            
+            # Add some padding around the bounding box (10% of the box size)
+            height, width = seg_mask_np.shape
+            pad_y = int((y_max - y_min) * 0.1)
+            pad_x = int((x_max - x_min) * 0.1)
+            
+            y_min = max(0, y_min - pad_y)
+            y_max = min(height, y_max + pad_y)
+            x_min = max(0, x_min - pad_x)
+            x_max = min(width, x_max + pad_x)
+            
+            # Crop the image and normal map
+            image = image.crop((x_min, y_min, x_max, y_max))
+            normal_map = normal_map[:, :, y_min:y_max, x_min:x_max]
+            seg_mask = seg_mask[:, :, y_min:y_max, x_min:x_max]
+            
+            # Pad to make square
+            h, w = y_max - y_min, x_max - x_min
+            if h > w:
+                pad_left = (h - w) // 2
+                pad_right = h - w - pad_left
+                image = transforms.Pad((pad_left, 0, pad_right, 0), fill=0)(image)
+                normal_map = F.pad(normal_map, (pad_left, pad_right, 0, 0), mode='replicate')
+                seg_mask = F.pad(seg_mask, (pad_left, pad_right, 0, 0), mode='constant', value=0)
+            elif w > h:
+                pad_top = (w - h) // 2
+                pad_bottom = w - h - pad_top
+                image = transforms.Pad((0, pad_top, 0, pad_bottom), fill=0)(image)
+                normal_map = F.pad(normal_map, (0, 0, pad_top, pad_bottom), mode='replicate')
+                seg_mask = F.pad(seg_mask, (0, 0, pad_top, pad_bottom), mode='constant', value=0)
+
+            image = image.resize((224, 224), Image.BILINEAR)
+            normal_map = F.interpolate(normal_map, size=(224, 224), mode='bilinear', align_corners=False)
+            seg_mask = F.interpolate(seg_mask.float(), size=(224, 224), mode='nearest').bool()
 
             #invert x color
             normal_map[:, 0, ...] *= -1
@@ -159,6 +202,9 @@ def main(sapiens_normal_model, cch_model, img_dir_path):
 
             surface_normals.append(normal_map) # as per my renderer convention [0, 1]
             seg_masks.append(seg_mask.squeeze())
+            images.append(np.array(image))
+
+
             normal_map = (normal_map * 255).cpu().detach().numpy().astype(np.uint8).transpose(1, 2, 0)
             normal_map = normal_map[:, :, ::-1]
 
@@ -168,31 +214,38 @@ def main(sapiens_normal_model, cch_model, img_dir_path):
             
             save_path = os.path.join(save_dir, f"{os.path.splitext(img_fname)[0]}_normal.png")
 
-            vis_image = np.concatenate([image, normal_map], axis=1)
+            vis_image = np.concatenate([np.array(image), normal_map], axis=1)
             cv2.imwrite(save_path, vis_image)
 
 
         surface_normals = torch.stack(surface_normals).to(device)
         seg_masks = torch.stack(seg_masks).to(device)
         # Calculate padding amount to make width match height
-        _, _, H, W = surface_normals.shape
-        pad_amount = (H - W) // 2
-        pad_left = pad_amount
-        pad_right = H - W - pad_left
+        # _, _, H, W = surface_normals.shape
+        # pad_amount = (H - W) // 2
+        # pad_left = pad_amount
+        # pad_right = H - W - pad_left
 
         print(f'surface_normals.shape: {surface_normals.shape}, seg_masks.shape: {seg_masks.shape}')
         
-        # Pad width to match height
-        surface_normals = F.pad(surface_normals, (pad_left, pad_right, 0, 0), mode='replicate')
-        seg_masks = F.pad(seg_masks, (pad_left, pad_right, 0, 0), mode='constant', value=0)
+        # # Pad width to match height
+        # surface_normals = F.pad(surface_normals, (pad_left, pad_right, 0, 0), mode='replicate')
+        # seg_masks = F.pad(seg_masks, (pad_left, pad_right, 0, 0), mode='constant', value=0)
         
         # Resize to 224x224
-        surface_normals = F.interpolate(surface_normals, size=(224, 224), mode='bilinear', align_corners=False)
-        seg_masks = F.interpolate(seg_masks.float(), size=(224, 224), mode='nearest').bool()
+        # surface_normals = F.interpolate(surface_normals, size=(224, 224), mode='bilinear', align_corners=False)
+        # seg_masks = F.interpolate(seg_masks.float(), size=(224, 224), mode='nearest').bool()
 
         cch_output = cch_model(surface_normals)
 
         vc = cch_output['vc'].squeeze() # (4, 224, 224, 3)
+        conf = cch_output['vc_conf'].squeeze() # (4, 224, 224)
+
+        conf = conf.cpu().detach().numpy()
+
+        conf_threshold = 0.08
+        conf = 1 / conf
+        conf_mask = (conf) < conf_threshold
 
 
 
@@ -201,10 +254,20 @@ def main(sapiens_normal_model, cch_model, img_dir_path):
         surface_normals = surface_normals.permute(0, 2, 3, 1).cpu().detach().numpy()
 
 
+
+        # normalise 
+        mask = seg_masks 
+
+        aux_mask = seg_masks & conf_mask
+        vc_copy = vc.copy()
+        vc_copy[~aux_mask] = 0
+        norm_min, norm_max = vc_copy.min(), vc_copy.max()
+
+
         # 3d scatter plot for vc
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
-        vc_to_scatter = vc.reshape(-1, 3)[seg_masks.astype(np.bool).flatten()]
+        vc_to_scatter = vc.reshape(-1, 3)[aux_mask.flatten()]
         ax.scatter(vc_to_scatter[..., 0], vc_to_scatter[..., 1], vc_to_scatter[..., 2], s=0.1, alpha=0.5)
 
 
@@ -227,25 +290,37 @@ def main(sapiens_normal_model, cch_model, img_dir_path):
 
         save_dir = os.path.join(os.path.dirname(img_dir_path), "vis")
         os.makedirs(save_dir, exist_ok=True)
+
         plt.savefig(os.path.join(save_dir, "vc_scatter.png"))
+        # plt.show()
 
         plt.close()
 
-        # normalise 
-        vc[~seg_masks] = 0
 
-        norm_min, norm_max = vc.min(), vc.max()
+
         vc = (vc - norm_min) / (norm_max - norm_min)
-        # vc[~seg_masks] = 1
+        vc = np.clip(vc, 0, 1)
+        vc[~mask] = 1
 
+        conf[~mask] = 0
 
-        fig = plt.figure(figsize=(4*4, 4*2))
+        fig = plt.figure(figsize=(4*4, 4*4))
+
+        colors = [(1, 1, 1), (1, 0.5, 0)]  # White to orange
+        import matplotlib
+        custom_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('custom', colors)
 
         for i in range(4):
-            plt.subplot(2, 4, i+1)
+            plt.subplot(4, 4, i+1)
+            plt.imshow(images[i])
+            plt.subplot(4, 4, i+5)
             plt.imshow(vc[i])
-            plt.subplot(2, 4, i+5)
+            plt.subplot(4, 4, i+9)
             plt.imshow(surface_normals[i])
+            plt.subplot(4, 4, i+13)
+            im = plt.imshow(conf[i], cmap=custom_cmap)
+            if i == 15:
+                plt.colorbar(im)
         plt.savefig(os.path.join(save_dir, "colormaps.png"))
         import ipdb; ipdb.set_trace()
         print('')

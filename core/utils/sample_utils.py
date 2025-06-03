@@ -5,9 +5,11 @@ def sample_cameras(batch_size, num_views, cfg):
     azim = torch.tensor([[0, 90, 180, 270]])
     azim_noise = torch.rand(batch_size, num_views) * 30 - 15
     azim = (azim + azim_noise).view(-1)
-    azim = azim[torch.randperm(azim.shape[0])]
-
-    # azim = torch.rand(batch_size * num_views) * 360
+    
+    # Randomly permute azimuth angles for each batch
+    azim = azim.view(batch_size, num_views)
+    perm = torch.randperm(num_views)
+    azim = azim[:, perm].view(-1)
 
     elev = torch.randn(batch_size * num_views) * cfg.ELEV_STD
     dist = torch.randn(batch_size * num_views) * cfg.DIST_STD + cfg.DIST_MEAN
