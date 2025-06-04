@@ -85,12 +85,11 @@ class CCHTrainer(pl.LightningModule):
 
 
         if self.cfg.MODEL.SKINNING_WEIGHTS:
-            dw_pred, w_conf = preds['w'], preds['w_conf']
-            w_pred = w_smpl + dw_pred
+            w_pred, w_conf = preds['w'], preds['w_conf']
+            # w_pred = w_smpl + dw_pred
         else:
             w_pred = w_smpl
             w_conf = None
-            dw_pred = None
 
 
         vp_pred, joints_pred = general_lbs(
@@ -110,7 +109,8 @@ class CCHTrainer(pl.LightningModule):
                                          vc_pred=vc_pred, 
                                          conf=vc_conf,
                                          mask=mask,
-                                         dw_pred=dw_pred)
+                                         w_pred=w_pred,
+                                         w_smpl=w_smpl)
 
         # Visualise and log
         if self.global_step % self.vis_frequency == 0:
@@ -123,26 +123,27 @@ class CCHTrainer(pl.LightningModule):
                                       mask=mask.cpu().detach().numpy(),
                                       vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
                                       color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
-                                      no_annotations=False,
+                                      no_annotations=True,
                                       plot_error_heatmap=True)
 
-        self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
         for k, v in loss_dict.items():
             if k != 'total_loss':
-                self.log(f'{split}_{k}', v, on_step=True, on_epoch=False, sync_dist=True)
+                self.log(f'{split}_{k}', v, on_step=True, on_epoch=False, sync_dist=True, rank_zero_only=True)
 
         vc_avg_err = torch.linalg.norm(vc - vc_pred, dim=-1) * mask 
         vc_avg_err = vc_avg_err.sum() / mask.sum()
-        self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True)
+        self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
 
-        if dw_pred is not None:
-            self.log(f'{split}_dwpred_max', dw_pred.max(), on_step=True, on_epoch=True, sync_dist=True)
+        # if w_pred is not None:
+        #     self.log(f'{split}_wpred_max', w_pred.max(), on_step=True, on_epoch=True, sync_dist=True)
 
         if batch_idx % 10 == 0 and batch_idx > 0:
             # import ipdb; ipdb.set_trace()
             pass
 
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
+        # print(loss_dict)
 
         return loss 
     

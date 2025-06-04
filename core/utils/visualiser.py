@@ -102,13 +102,9 @@ class Visualiser(pl.LightningModule):
 
                         colors = [(1, 1, 1), (1, 0, 0)]  # White to red
                         custom_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('custom', colors)
-                        try:
-                            im = plt.imshow(error_heatmap[b,n], cmap=custom_cmap, 
-                                            norm=matplotlib.colors.LogNorm(vmin=1e-3, vmax=max(np.max(error_heatmap[b,n]), 10)))
-                        except:
-                            print(f'Error heatmap is too large for frame {n}')
-                            print(np.max(error_heatmap[b,n]))
-                            import ipdb; ipdb.set_trace()
+                        im = plt.imshow(error_heatmap[b,n], cmap=custom_cmap, 
+                                        norm=matplotlib.colors.LogNorm(vmin=1e-3, vmax=np.max(error_heatmap[b,n])))
+
                         if n == N-1:
                             plt.colorbar(im)
                         plt.title(f'Error Heatmap Frame {n}')

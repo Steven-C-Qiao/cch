@@ -85,7 +85,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
         log_every_n_steps=100,
-        gradient_clip_val=5.0,
+        gradient_clip_val=1.0,
     )
 
 

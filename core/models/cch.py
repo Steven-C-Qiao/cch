@@ -53,7 +53,7 @@ class CCH(nn.Module):
 
         # normalise skinning weights across joints 
         # No softmax now as using inv_log activation
-        # w = F.softmax(w, dim=-1)
+        w = F.softmax(w, dim=-1)
 
 
         pred = {

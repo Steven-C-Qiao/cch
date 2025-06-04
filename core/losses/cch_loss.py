@@ -54,6 +54,9 @@ class PosedPointmapChamferLoss(nn.Module):
 
         loss_v_pred_to_v = loss[0]
         loss_v_to_v_pred = loss[1]
+
+        loss_v_pred_to_v = torch.clamp(loss_v_pred_to_v, max=100)
+        loss_v_to_v_pred = torch.clamp(loss_v_to_v_pred, max=100)
         
         if mask is not None:
             masked_loss_v_pred_to_v = loss_v_pred_to_v * mask
@@ -65,21 +68,38 @@ class PosedPointmapChamferLoss(nn.Module):
 
         return loss, masked_loss_v_pred_to_v
     
-class RegulariserLoss(nn.Module):
+# class RegulariserLoss(nn.Module):
+#     """
+#     Regulariser loss for skinning weights
+#     """
+#     def __init__(self):
+#         super().__init__()
+        
+#     def forward(self, dw_pred, mask=None):
+#         loss1 = torch.abs(torch.sum(dw_pred, dim=-1))
+#         loss2 = dw_pred ** 2
+
+#         if mask is not None:
+#             loss1 = loss1 * mask
+#             loss2 = loss2 * mask[..., None]
+#         return loss1.mean() + loss2.mean()
+        
+
+class SkinningWeightLoss(nn.Module):
     """
-    Regulariser loss for skinning weights
+    Loss for skinning weights
     """
     def __init__(self):
         super().__init__()
-        
-    def forward(self, dw_pred, mask=None):
-        loss1 = torch.abs(torch.sum(dw_pred, dim=-1))
-        loss2 = dw_pred ** 2
 
-        if mask is not None:
-            loss1 = loss1 * mask
-            loss2 = loss2 * mask[..., None]
-        return loss1.mean() + loss2.mean()
+    def forward(self, w_smpl, w_pred, mask=None):
+        loss = torch.nn.functional.mse_loss(w_pred, w_smpl, reduction='none')
+
+        # if mask is not None:
+            # loss = loss * mask[..., None]
+            
+        return loss.mean()
+        
         
 
 
@@ -98,10 +118,10 @@ class CCHLoss(nn.Module):
 
         self.posed_pointmap_loss = PosedPointmapChamferLoss(cfg)
         self.canonical_rgb_loss = CanonicalRGBConfLoss()
-        self.regulariser_loss = RegulariserLoss()
+        self.skinning_weight_loss = SkinningWeightLoss()
 
 
-    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, dw_pred=None):
+    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, w_pred=None, w_smpl=None):
         loss_dict = {}
 
         posed_loss, chamfer_vp_pred_to_vp = self.posed_pointmap_loss(rearrange(vp, 'b n v c -> (b n) v c'), 
@@ -117,10 +137,10 @@ class CCHLoss(nn.Module):
         
         total_loss = posed_loss + canonical_loss
         
-        if dw_pred is not None:
-            loss_dw = self.regulariser_loss(dw_pred, mask) * self.cfg.LOSS.W_REGULARISER_WEIGHT
-            loss_dict['dw_reg_loss'] = loss_dw
-            total_loss += loss_dw
+        if w_pred is not None:
+            loss_w = self.skinning_weight_loss(w_smpl, w_pred, mask) * self.cfg.LOSS.W_REGULARISER_WEIGHT
+            loss_dict['w_reg_loss'] = loss_w
+            total_loss += loss_w
 
         loss_dict['total_loss'] = total_loss
         return total_loss, loss_dict
