@@ -34,3 +34,13 @@ class CCHDataModule(pl.LightningDataModule):
             num_workers=self.cfg.TRAIN.NUM_WORKERS,
             pin_memory=self.cfg.TRAIN.PIN_MEMORY
         ) 
+    
+    def test_dataloader(self):
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.cfg.TRAIN.BATCH_SIZE,
+            shuffle=False,
+            drop_last=True,
+            num_workers=self.cfg.TRAIN.NUM_WORKERS,
+            pin_memory=self.cfg.TRAIN.PIN_MEMORY
+        )

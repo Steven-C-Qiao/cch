@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 import torch.optim as optim
@@ -284,3 +285,134 @@ class CCHTrainer(pl.LightningModule):
     #             if grad_norm > 10:
     #                 print(f"Large gradient in {name}: {grad_norm}")
     
+    def test_step(self, batch, batch_idx):
+        split = 'test'
+        if not self.dev: # more randomness in process_inputs, naive set first batch doesn't work 
+            batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
+        if self.global_step == 0:
+            if self.dev:
+                batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
+            self.first_batch = batch
+            # self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
+        if self.dev:    
+            batch = self.first_batch
+
+        B, N = batch['pose'].shape[:2]
+        vp = batch['v_posed']
+        mask = batch['masks'].squeeze()
+        # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
+        joints = batch['joints']
+        normal_maps = batch['normal_imgs']
+        w_smpl = batch['skinning_weights_maps']
+        vc = batch['canonical_color_maps']
+
+
+        # ------------------- forward pass -------------------
+        preds = self(normal_maps)
+        vc_pred, vc_conf = preds['vc'], preds['vc_conf']
+
+
+        if self.cfg.MODEL.SKINNING_WEIGHTS:
+            w_pred, w_conf = preds['w'], preds['w_conf']
+            # w_pred = w_smpl + w_pred
+        else:
+            w_pred = w_smpl
+            w_conf = None
+
+
+        vp_pred, joints_pred = general_lbs(
+            vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
+            pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
+            lbs_weights=rearrange(w_pred, 'b n h w j -> (b n) (h w) j'),
+            J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
+            parents=self.smpl_model.parents 
+        )
+        vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
+        # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
+
+
+        loss, loss_dict = self.criterion(vp=batch['sampled_posed_points'],
+                                         vp_pred=vp_pred,
+                                         vc=vc,
+                                         vc_pred=vc_pred, 
+                                         conf=vc_conf,
+                                         mask=mask,
+                                         w_pred=w_pred,
+                                         w_smpl=w_smpl)
+
+        # Visualise and log
+        if self.global_step % self.vis_frequency == 0:
+            self.visualiser.visualise(normal_maps=normal_maps.cpu().detach().numpy(),
+                                      vp=vp.cpu().detach().numpy(),
+                                      vc=vc.cpu().detach().numpy(),
+                                      vp_pred=vp_pred.cpu().detach().numpy(),
+                                      vc_pred=vc_pred.cpu().detach().numpy(),
+                                      conf=vc_conf.cpu().detach().numpy(),
+                                      mask=mask.cpu().detach().numpy(),
+                                      vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
+                                      color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
+                                      no_annotations=True,
+                                      plot_error_heatmap=True)
+
+        self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
+        for k, v in loss_dict.items():
+            if k != 'total_loss':
+                self.log(f'{split}_{k}', v, on_step=True, on_epoch=False, sync_dist=True, rank_zero_only=True)
+
+        vc_avg_err = torch.linalg.norm(vc - vc_pred, dim=-1) * mask 
+        vc_avg_err = vc_avg_err.sum() / mask.sum()
+        self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
+
+        # if w_pred is not None:
+        #     self.log(f'{split}_wpred_max', w_pred.max(), on_step=True, on_epoch=True, sync_dist=True)
+
+        if batch_idx % 10 == 0 and batch_idx > 0:
+            # import ipdb; ipdb.set_trace()
+            pass
+
+        # import ipdb; ipdb.set_trace()
+        # print(loss_dict)
+
+
+         
+
+        # save a bunch of stuff for scenepic visualisation later
+        scenepic_dir = os.path.join(self.visualiser.save_dir, 'scenepic')
+        if not os.path.exists(scenepic_dir):
+            os.makedirs(scenepic_dir)
+
+        # save vp 
+        vp_np = vp.detach().cpu().numpy()
+        np.save(os.path.join(scenepic_dir, f'vp_{self.global_step}.npy'), vp_np)
+
+        # save vp_pred 
+        vp_pred_np = vp_pred.detach().cpu().numpy()
+        np.save(os.path.join(scenepic_dir, f'vp_pred_{self.global_step}.npy'), vp_pred_np)
+
+        # save vc_pred 
+        vc_pred_np = vc_pred.detach().cpu().numpy()
+        np.save(os.path.join(scenepic_dir, f'vc_pred_{self.global_step}.npy'), vc_pred_np)
+
+        # save vc 
+        vc_np = vc.detach().cpu().numpy()
+        np.save(os.path.join(scenepic_dir, f'vc_{self.global_step}.npy'), vc_np)
+
+        # save color 
+        color_np = np.argmax(w_pred.detach().cpu().numpy(), axis=-1)
+        np.save(os.path.join(scenepic_dir, f'color_{self.global_step}.npy'), color_np)
+
+        # save normal_maps 
+        normal_maps_np = normal_maps.detach().cpu().numpy()
+        np.save(os.path.join(scenepic_dir, f'normal_maps_{self.global_step}.npy'), normal_maps_np)
+
+        # save masks 
+        masks_np = mask.detach().cpu().numpy()
+        np.save(os.path.join(scenepic_dir, f'masks_{self.global_step}.npy'), masks_np)
+
+        # save vertex_visibility 
+        vertex_visibility_np = batch['vertex_visibility'].detach().cpu().numpy()
+        np.save(os.path.join(scenepic_dir, f'vertex_visibility_{self.global_step}.npy'), vertex_visibility_np)
+        
+        import ipdb; ipdb.set_trace()
+
+        return loss 

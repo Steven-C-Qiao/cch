@@ -1,4 +1,8 @@
 *.png
+*.gif
+*.html
+*.ipynb
+*.js
 
 __pycache__
 
@@ -7,3 +11,4 @@ vggt/
 exp/
 CameraHMR/
 demo/
+

@@ -1,186 +1,148 @@
 import os
-import numpy as np
 import torch
-import torch.nn.functional as F
-from PIL import Image
-from torchvision import transforms
-from tqdm import tqdm
-import cv2
+import argparse
+
+from loguru import logger
+
+import pytorch_lightning as pl
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.strategies import DDPStrategy
+from pytorch_lightning import seed_everything
+
+import sys
+sys.path.append('.')
+
+from core.configs.cch_cfg import get_cch_cfg_defaults
+from core.models.trainer import CCHTrainer
+from core.data.cch_datamodule import CCHDataModule
 
 
-
-class Config:
-    CHECKPOINTS_DIR = "/scratch/cq244/Sculpture/model_files" #os.path.join(ASSETS_DIR, "checkpoints")
-    CHECKPOINTS = {
-        "1b": "/scratches/kyuban/cq244/CCH/sapiens/torchscript/normal/checkpoints/sapiens_1b/sapiens_1b_normal_render_people_epoch_115_torchscript.pt2" # "sapiens_1b_normal_render_people_epoch_115_torchscript.pt2",
-    }
-    SEG_CHECKPOINTS = {
-        "fg-bg-1b": "sapiens_1b_seg_foreground_epoch_8_torchscript.pt2",
-    }
-    PART_SEG_CHECKPOINTS = {
-        "1b": "/scratches/kyuban/cq244/CCH/sapiens/torchscript/seg/checkpoints/sapiens_1b/sapiens_1b_goliath_best_goliath_mIoU_7994_epoch_151_torchscript.pt2"
-    }
-
-
-class SapiensNormal:
-    def __init__(self, device):
-
-        self.mean = [123.5 / 255, 116.5 / 255, 103.5 / 255]
-        self.std = [58.5 / 255, 57.0 / 255, 57.5 / 255]
-
-        self.transform_fn = transforms.Compose([
-            transforms.Resize((1024, 768)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=self.mean, std=self.std),
-        ])
-        self.device = device
-
-        ckpt_path = "/scratches/kyuban/cq244/CCH/sapiens/torchscript/normal/checkpoints/sapiens_1b/sapiens_1b_normal_render_people_epoch_115_torchscript.pt2"
-        self.model = torch.jit.load(ckpt_path)
-        self.model.eval()
-        self.model.to(self.device)
-
-    def process_image(self, image: Image.Image):
-        input_tensor = self.transform_fn(image).unsqueeze(0).to(self.device)
-        output = self.model(input_tensor)
-
-        ret = F.interpolate(output, size=(image.height, image.width), mode="bilinear", align_corners=False)
-        return ret
-
-class ModelManager:
-    @staticmethod
-    def load_model(checkpoint_name, device):
-        if checkpoint_name is None:
-            return None
-        checkpoint_path = os.path.join(Config.CHECKPOINTS_DIR, checkpoint_name)
-        model = torch.jit.load(checkpoint_path)
-        model.eval()
-        model.to(device)
-        return model
-
-    @staticmethod
-    @torch.inference_mode()
-    def run_model(model, input_tensor, height, width):
-        output = model(input_tensor)
-        return F.interpolate(output, size=(height, width), mode="bilinear", align_corners=False)
-
-
-class ImageProcessor:
-    def __init__(self, device):
-
-        self.mean = [123.5 / 255, 116.5 / 255, 103.5 / 255]
-        self.std = [58.5 / 255, 57.0 / 255, 57.5 / 255]
-
-        self.transform_fn = transforms.Compose([
-            transforms.Resize((1024, 768)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=self.mean, std=self.std),
-        ])
-        self.device = device
-
-    def process_image(self, image: Image.Image, part_seg_model_name: str, seg_model_name: str):
-
-        # Load models here instead of storing them as class attributes
-        part_seg_model = ModelManager.load_model(Config.PART_SEG_CHECKPOINTS[part_seg_model_name], self.device)
-        input_tensor = self.transform_fn(image).unsqueeze(0).to(self.device)
-
-        # Run part segmentation
-        part_seg_logits = ModelManager.run_model(part_seg_model, input_tensor, image.height, image.width)
-
-        # Run bg segmentation
-        if seg_model_name != "no-bg-removal":
-            seg_model = ModelManager.load_model(Config.SEG_CHECKPOINTS[seg_model_name], self.device)
-            seg_output = ModelManager.run_model(seg_model, input_tensor, image.height, image.width)
-            # seg_mask = (seg_output.argmax(dim=1) > 0).unsqueeze(0).repeat(1, 3, 1, 1)
-
-        # import ipdb; ipdb.set_trace()
-        # part_seg_logits[seg_mask == 0] = 0.0
-        # part_seg_logits = part_seg_logits.to(self.device)
-
-        return part_seg_logits, seg_output
-
-
-def main(segmentor, path_to_dir):
-    # Get all subdirectories in the path
-    # subdirs = [d for d in os.listdir(path_to_dir) if os.path.isdir(os.path.join(path_to_dir, d))]
+def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None):
+    seed_everything(42)
     
-    # Sort subdirectories numerically
-    # subdirs.sort(key=lambda x: int(x))
-    
-    subdirs = np.arange(1003, 1096)
+    # Get config
+    cfg = get_cch_cfg_defaults()
+    if cfg_opts is not None:
+        cfg.merge_from_list(cfg_opts)
 
-    for subdir in tqdm(subdirs):
-        subdir = str(subdir)
-        opt1_subdir_path = os.path.join(path_to_dir, subdir, f"{subdir}_3Dapp/{subdir}")
-        opt2_subdir_path = os.path.join(path_to_dir, subdir, f"ID_3Dapp/{subdir}")
-        subdir_path = opt1_subdir_path if os.path.exists(opt1_subdir_path) else opt2_subdir_path
-        # if subdir != "1006":
-        #     continue
+    if dev:
+        cfg.TRAIN.BATCH_SIZE = 2
 
+    # Create directories
+    model_save_dir = os.path.join(exp_dir, 'saved_models')
+    if not os.path.exists(model_save_dir):
+        os.makedirs(model_save_dir)
 
-        for i in range(4):
-            image_path = os.path.join(subdir_path, f"0{i}.png")
-            # try:
-            image = Image.open(image_path)
-            if image.mode == 'RGBA':
-                image = image.convert('RGB')
-            else:
-                assert False, f"Image {image_path} is not RGBA"
-
-            print(f"Processing image {image_path}")
-
-            part_seg_output, seg_output = segmentor.process_image(image, "1b", "fg-bg-1b")
-
-            # Use part_seg output as mask, bg_model is not stable
-            part_seg = part_seg_output.argmax(dim=1).squeeze(0).cpu().detach().numpy()
-            part_seg = (part_seg > 1).astype(np.uint8)[..., None]
-
-            masked_img = np.array(image) * part_seg
-
-
-            save_dir = os.path.join(path_to_dir, subdir, f"{subdir}_segmented")
-            os.makedirs(save_dir, exist_ok=True)
-
-            cv2.imwrite(os.path.join(save_dir, f"{subdir}_0{i}.png"), cv2.cvtColor(masked_img, cv2.COLOR_RGB2BGR))
-
-            # import matplotlib.pyplot as plt
-            # plt.imshow(masked_img)
-            # plt.show()
-            # import ipdb; ipdb.set_trace()
-
-            # mask = seg_output.clone()[0, 1] # foreground logits
-            # # set mask to 1 if it's in the top 20%, 0 otherwise
-            # mask = (mask > mask.quantile(0.825)).float()
-            
-
-            # # seg_mask is 1, 2, 768, 768
-            # import matplotlib.pyplot as plt
-            # fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
-            # im1 = ax1.imshow(seg_output.squeeze(0)[0].cpu().detach().numpy(), label="channel 1")
-            # im2 = ax2.imshow(seg_output.squeeze(0)[1].cpu().detach().numpy(), label="channel 2")
-            # im3 = ax3.imshow(mask.squeeze().cpu().detach().numpy(), label="seg_output")
-            # # im3 = ax3.imshow(part_seg_output.squeeze(0).cpu().detach().numpy(), label="part_seg_output")
-            # fig.colorbar(im1, ax=ax1)
-            # fig.colorbar(im2, ax=ax2)
-            # fig.colorbar(im3, ax=ax3)
-            # plt.show()
-            # plt.close()
-            # import ipdb; ipdb.set_trace()
+    vis_save_dir = os.path.join(exp_dir, 'vis')
+    if not os.path.exists(vis_save_dir):
+        os.makedirs(vis_save_dir)
 
 
 
-            # seg_mask = (seg_mask.squeeze(0).cpu().detach().numpy() * 255).astype(np.uint8).transpose(1, 2, 0)
-            # cv2.imwrite(os.path.join(save_dir, f"{subdir}_0{i}_seg_mask.png"), seg_mask)
+    model = CCHTrainer(
+        cfg=cfg,
+        dev=dev,
+        vis_save_dir=vis_save_dir
+    )
+
+    datamodule = CCHDataModule(cfg)
 
 
-if __name__ == "__main__":
-    model_name = "fg-bg-1b"
-    # path_to_dir = "/scratch/cq244/Sculpture/demo/Addinbrokes_3DO_substudy"
-    path_to_dir = "/scratches/kyuban/cq244/datasets/3DO_substudy/3DO"
 
-    # save_dir = "/scratch/cq244/Sculpture/demo/Addinbrokes_3DO_substudy_segmented"
-    # os.makedirs(save_dir, exist_ok=True)
+    # Callbacks
+    checkpoint_callbacks = [
+        ModelCheckpoint(
+            dirpath=model_save_dir,
+            filename='val_loss_{epoch:03d}',
+            save_top_k=1,
+            save_last=True,
+            verbose=True,
+            monitor='val_loss',
+            mode='min'
+        ),
+    ]
 
+    tensorboard_logger = TensorBoardLogger(exp_dir, name='lightning_logs')
+
+    trainer = pl.Trainer(
+        max_epochs=cfg.TRAIN.NUM_EPOCHS,
+        accelerator='gpu',
+        devices=device_ids, 
+        # strategy=DDPStrategy(find_unused_parameters=True) if not dev else 'auto',
+        strategy=DDPStrategy() if not dev else 'auto',
+        callbacks=checkpoint_callbacks,
+        logger=tensorboard_logger,
+        log_every_n_steps=100,
+        gradient_clip_val=1.0,
+    )
+
+
+    if load_path is not None:
+        logger.info(f"Loading checkpoint: {load_path}")
+        ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
+        model.load_state_dict(ckpt['state_dict'], strict=False)
+        # logger.log_hyperparams(ckpt['hyper_parameters'])
+
+    trainer.test(model, datamodule, ckpt_path=resume_path)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--experiment_dir', 
+        '-E', 
+        type=str,
+        help='Path to directory where logs and checkpoints are saved.'
+    )
+    parser.add_argument(
+        '--cfg_opts', 
+        '-O', 
+        nargs='*', 
+        default=None,
+        help='Command line options to modify experiment config e.g. ''-O TRAIN.NUM_EPOCHS 120'' '
+                'will change number of training epochs to 120 in the config.'
+    )
+    parser.add_argument(
+        '--resume_training_states', 
+        '-R', 
+        type=str, 
+        default=None,
+        help='Load training state. For resuming.'
+    )
+    parser.add_argument(
+        '--load_from_ckpt', 
+        '-L', 
+        type=str, 
+        default=None,
+        help='Path to checkpoint. Load for finetuning'
+    )
+    parser.add_argument(
+        "--gpus", 
+        type=str, 
+        default='0,1', 
+        help="Comma-separated list of GPU indices to use. E.g., '0,1,2'"
+    )    
+    parser.add_argument(
+        "--dev", 
+        action="store_true"
+    )  
+    args = parser.parse_args()
+
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    segmentor = ImageProcessor(device)
-    main(segmentor, path_to_dir)
+    logger.info(f'Device: {device}')
+
+    device_ids = list(map(int, args.gpus.split(",")))
+    logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")
+
+    assert ((args.resume_training_states is not None) * (args.load_from_ckpt is not None) == 0), 'Specify either resume_training_states or load_from_ckpt, not both'
+
+    run_train(
+        exp_dir=args.experiment_dir,
+        cfg_opts=args.cfg_opts,
+        dev=args.dev,
+        device_ids=device_ids,
+        resume_path=args.resume_training_states,
+        load_path=args.load_from_ckpt
+    )
