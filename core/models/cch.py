@@ -21,7 +21,7 @@ class CCH(nn.Module):
         self.canonical_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
 
         if cfg.MODEL.SKINNING_WEIGHTS:
-            self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1")
+            self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3)
             # Initialize the final layer weights and biases to zero
             # if hasattr(self.skinning_head.scratch.output_conv2[-1], 'weight'):
             #     nn.init.zeros_(self.skinning_head.scratch.output_conv2[-1].weight)
@@ -46,13 +46,11 @@ class CCH(nn.Module):
         # with torch.cuda.amp.autocast(enabled=False):
         vc, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
         if self.skinning_head is not None:
-            w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+            w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, 
+                                           additional_conditioning=vc) # rearrange(vc, 'b n h w c -> (b n) c h w'))
         else:
-            w = None
-            w_conf = None
+            w, w_conf = None, None
 
-        # normalise skinning weights across joints 
-        # No softmax now as using inv_log activation
         w = F.softmax(w, dim=-1)
 
 

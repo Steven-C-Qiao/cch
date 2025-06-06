@@ -10,7 +10,7 @@
 
 import os
 from typing import List, Dict, Tuple, Union
-
+from einops import rearrange
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -53,6 +53,7 @@ class DPTHead(nn.Module):
         pos_embed: bool = True,
         feature_only: bool = False,
         down_ratio: int = 1,
+        additional_conditioning_dim: int = 0,
     ) -> None:
         super(DPTHead, self).__init__()
         self.patch_size = patch_size
@@ -62,6 +63,11 @@ class DPTHead(nn.Module):
         self.feature_only = feature_only
         self.down_ratio = down_ratio
         self.intermediate_layer_idx = intermediate_layer_idx
+        self.additional_conditioning_dim = additional_conditioning_dim
+
+        if additional_conditioning_dim > 0:
+            self.additional_conditioning_proj = nn.Linear(additional_conditioning_dim, 
+                                                          2 * additional_conditioning_dim)
 
         self.norm = nn.LayerNorm(dim_in)
 
@@ -117,7 +123,7 @@ class DPTHead(nn.Module):
             self.scratch.output_conv1 = nn.Conv2d(
                 head_features_1, head_features_1 // 2, kernel_size=3, stride=1, padding=1
             )
-            conv2_in_channels = head_features_1 // 2
+            conv2_in_channels = head_features_1 // 2 + 2*self.additional_conditioning_dim
 
             self.scratch.output_conv2 = nn.Sequential(
                 nn.Conv2d(conv2_in_channels, head_features_2, kernel_size=3, stride=1, padding=1),
@@ -131,6 +137,7 @@ class DPTHead(nn.Module):
         images: torch.Tensor,
         patch_start_idx: int,
         frames_chunk_size: int = 8,
+        additional_conditioning: torch.Tensor = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Forward pass through the DPT head, supports processing by chunking frames.
@@ -141,6 +148,7 @@ class DPTHead(nn.Module):
                 Used to separate patch tokens from other tokens (e.g., camera or register tokens).
             frames_chunk_size (int, optional): Number of frames to process in each chunk.
                 If None or larger than S, all frames are processed at once. Default: 8.
+            additional_conditioning (Tensor, optional): Additional conditioning tensor with shape [B, S, C, H, W].
 
         Returns:
             Tensor or Tuple[Tensor, Tensor]:
@@ -151,7 +159,7 @@ class DPTHead(nn.Module):
 
         # If frames_chunk_size is not specified or greater than S, process all frames at once
         if frames_chunk_size is None or frames_chunk_size >= S:
-            return self._forward_impl(aggregated_tokens_list, images, patch_start_idx)
+            return self._forward_impl(aggregated_tokens_list, images, patch_start_idx, additional_conditioning=additional_conditioning)
 
         # Otherwise, process frames in chunks to manage memory usage
         assert frames_chunk_size > 0
@@ -159,6 +167,7 @@ class DPTHead(nn.Module):
         # Process frames in batches
         all_preds = []
         all_conf = []
+
 
         for frames_start_idx in range(0, S, frames_chunk_size):
             frames_end_idx = min(frames_start_idx + frames_chunk_size, S)
@@ -189,6 +198,7 @@ class DPTHead(nn.Module):
         patch_start_idx: int,
         frames_start_idx: int = None,
         frames_end_idx: int = None,
+        additional_conditioning: torch.Tensor = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Implementation of the forward pass through the DPT head.
@@ -201,7 +211,7 @@ class DPTHead(nn.Module):
             patch_start_idx (int): Starting index for patch tokens.
             frames_start_idx (int, optional): Starting index for frames to process.
             frames_end_idx (int, optional): Ending index for frames to process.
-
+            additional_conditioning (Tensor, optional): Additional conditioning tensor with shape [B, S, C, H, W].
         Returns:
             Tensor or Tuple[Tensor, Tensor]: Feature maps or (predictions, confidence).
         """
@@ -251,9 +261,17 @@ class DPTHead(nn.Module):
 
         if self.feature_only:
             return out.view(B, S, *out.shape[1:])
+        
+
+        if additional_conditioning is not None:
+            additional_conditioning = self.additional_conditioning_proj(additional_conditioning)
+            additional_conditioning = rearrange(additional_conditioning, 'b n h w c-> (b n) c h w')
+            out = torch.cat([out, additional_conditioning], dim=1)
+
 
         out = self.scratch.output_conv2(out)
         preds, conf = activate_head(out, activation=self.activation, conf_activation=self.conf_activation)
+        
 
         preds = preds.view(B, S, *preds.shape[1:])
         conf = conf.view(B, S, *conf.shape[1:])
@@ -299,6 +317,7 @@ class DPTHead(nn.Module):
 
         out = self.scratch.refinenet1(out, layer_1_rn)
         del layer_1_rn, layer_1
+
 
         out = self.scratch.output_conv1(out)
         return out
