@@ -18,6 +18,15 @@ ids = [ '00032', '00096', '00122', '00127', '00134',
         '00145', '00159', '00215', '02474', '03223', 
         '03284', '03331', '03375', '03383', '03394']
 
+corrupted_frames = [
+    'sequences/00032/shortlong_pose_model/shortlong_pose_model.000047.npz',
+    'sequences/03394/longlong_ROM_lower/longlong_ROM_lower.000100.npz',
+    'sequences/00215/poloshort_basketball/poloshort_basketball.000061.npz',
+    'sequences/00096/shirtshort_chicken_wings/shirtshort_chicken_wings.000108.npz',
+    'sequences/00122/shortshort_punching/shortshort_punching.000147.npz',
+    'sequences/02474/longlong_ROM_lower/longlong_ROM_lower.000354.npz',
+    'sequences/02474/longlong_rotate_hips/longlong_rotate_hips.000245.npz',
+]
 
 
 import smplx 
@@ -101,6 +110,8 @@ class CapeDataset(Dataset):
         ret = defaultdict(list)
         for i in sampled_frames_indices:
             try:
+                # if f'sequences/{id}/{sequence_name}/{sequence_name}.{i:06d}.npz' in corrupted_frames:
+                #     continue
                 fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{i:06d}.npz')
                 data = np.load(fpath)
             except:

@@ -8,32 +8,21 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.strategies import DDPStrategy
+from pytorch_lightning import seed_everything
 
 import sys
 sys.path.append('.')
 
-from core.configs.cch_cfg import get_cch_cfg_defaults
-from core.models.trainer import CCHTrainer
-from core.data.cch_datamodule import CCHDataModule
+from hmr.hmr_cfg import get_hmr_cfg_defaults
+from hmr.hmr_trainer import HMRTrainer
+from hmr.smpl_datamodule import SmplDataModule
 
-def set_seed(seed=42):
-    """Set random seed for reproducibility."""
-    import random
-    import numpy as np
-    import torch
-    
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
 
 def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None):
-    set_seed(1)
+    seed_everything(42)
     
     # Get config
-    cfg = get_cch_cfg_defaults()
+    cfg = get_hmr_cfg_defaults()
     if cfg_opts is not None:
         cfg.merge_from_list(cfg_opts)
 
@@ -49,17 +38,13 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
     if not os.path.exists(vis_save_dir):
         os.makedirs(vis_save_dir)
 
-
-
-    model = CCHTrainer(
+    model = HMRTrainer(
         cfg=cfg,
         dev=dev,
         vis_save_dir=vis_save_dir
     )
 
-    datamodule = CCHDataModule(cfg)
-
-
+    datamodule = SmplDataModule(cfg)
 
     # Callbacks
     checkpoint_callbacks = [
@@ -72,24 +57,6 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
             monitor='val_loss',
             mode='min'
         ),
-        ModelCheckpoint(
-            dirpath=model_save_dir,
-            filename='val_vc_avg_dist_{epoch:03d}',
-            save_top_k=1,
-            save_last=True,
-            verbose=True,
-            monitor='val_vc_avg_dist',
-            mode='min'
-        ),
-        ModelCheckpoint(
-            dirpath=model_save_dir,
-            filename='val_posed_loss_{epoch:03d}',
-            save_top_k=1,
-            save_last=True,
-            verbose=True,
-            monitor='val_posed_loss',
-            mode='min'
-        ),
     ]
 
     tensorboard_logger = TensorBoardLogger(exp_dir, name='lightning_logs')
@@ -98,8 +65,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator='gpu',
         devices=device_ids, 
-        # strategy=DDPStrategy(find_unused_parameters=True) if not dev else 'auto',
-        strategy=DDPStrategy() if not dev else 'auto',
+        strategy='auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
         log_every_n_steps=100,
@@ -111,7 +77,6 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
         logger.info(f"Loading checkpoint: {load_path}")
         ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
         model.load_state_dict(ckpt['state_dict'], strict=False)
-        # logger.log_hyperparams(ckpt['hyper_parameters'])
 
     trainer.fit(model, datamodule, ckpt_path=resume_path)
 

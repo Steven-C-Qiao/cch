@@ -45,13 +45,18 @@ class CCH(nn.Module):
 
         # with torch.cuda.amp.autocast(enabled=False):
         vc, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+
+        # add a clipping to vc for stability 
+        vc = torch.clamp(vc, -2, 2)
+
+
         if self.skinning_head is not None:
             w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, 
                                            additional_conditioning=vc) # rearrange(vc, 'b n h w c -> (b n) c h w'))
+            w = F.softmax(w, dim=-1)
         else:
             w, w_conf = None, None
 
-        w = F.softmax(w, dim=-1)
 
 
         pred = {

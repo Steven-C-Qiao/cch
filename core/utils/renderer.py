@@ -155,7 +155,7 @@ class SurfaceNormalRenderer(pl.LightningModule):
         images = self.renderer(mesh)
         
         # Get normal maps and alpha channel
-        normals = images[..., :3].cpu().numpy()
+        normals = images[..., :3]#.cpu().numpy()
         ret['normals'] = rearrange(normals, '(b n) h w c -> b n h w c', b=B, n=N)
 
         # Store vertex visibility information
@@ -163,7 +163,7 @@ class SurfaceNormalRenderer(pl.LightningModule):
         ret['vertex_visibility'] = rearrange(vertex_visibility, '(b n) v -> b n v', b=B, n=N)
 
         # ------------------- masks -------------------
-        mask = images[..., 3:4].cpu().numpy()  # Extract alpha channel as mask
+        mask = images[..., 3:4]#.cpu().numpy()  # Extract alpha channel as mask
         ret['masks'] = rearrange(mask, '(b n) h w c -> b n h w c', b=B, n=N)
 
         # ------------------- color maps -------------------
@@ -171,7 +171,7 @@ class SurfaceNormalRenderer(pl.LightningModule):
 
         mesh.textures = TexturesVertex(verts_features=colors) # render a color map 
         images = self.renderer(mesh)
-        color_map = images[..., :3].cpu().numpy()
+        color_map = images[..., :3] #.cpu().numpy()
         ret['color_maps'] = rearrange(color_map, '(b n) h w c -> b n h w c', b=B, n=N)
 
 
@@ -180,7 +180,7 @@ class SurfaceNormalRenderer(pl.LightningModule):
             skinning_weights = rearrange(skinning_weights, 'b n v k -> (b n) v k')
             mesh.textures = TexturesVertex(verts_features=skinning_weights)
             images = self.renderer(mesh)
-            skinning_weights_map = images[..., :-1].cpu().numpy()
+            skinning_weights_map = images[..., :-1]#.cpu().numpy()
             ret['skinning_weights_maps'] = rearrange(skinning_weights_map, '(b n) h w c -> b n h w c', b=B, n=N)
 
         # ------------------- canonical color maps -------------------
@@ -188,7 +188,7 @@ class SurfaceNormalRenderer(pl.LightningModule):
         if first_frame_v_cano is not None:
             mesh.textures = TexturesVertex(verts_features=first_frame_v_cano)
             images = self.renderer(mesh)
-            canonical_color_map = images[..., :3].cpu().numpy()
+            canonical_color_map = images[..., :3]#.cpu().numpy()
             ret['canonical_color_maps'] = rearrange(canonical_color_map, '(b n) h w c -> b n h w c', b=B, n=N)
 
         return ret

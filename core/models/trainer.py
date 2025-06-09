@@ -60,93 +60,104 @@ class CCHTrainer(pl.LightningModule):
         self.visualiser.set_global_rank(self.global_rank)
 
     def training_step(self, batch, batch_idx, split='train'):
-        if not self.dev: # more randomness in process_inputs, naive set first batch doesn't work 
-            batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
-        if self.global_step == 0:
-            if self.dev:
+        try:
+            if not self.dev:
                 batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
-            self.first_batch = batch
-            # self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
-        if self.dev:    
-            batch = self.first_batch
+            if self.global_step == 0:
+                if self.dev:
+                    batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
+                self.first_batch = batch
+                # self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
+            if self.dev:    
+                batch = self.first_batch
 
-        B, N = batch['pose'].shape[:2]
-        vp = batch['v_posed']
-        mask = batch['masks'].squeeze()
-        # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
-        joints = batch['joints']
-        normal_maps = batch['normal_imgs']
-        w_smpl = batch['skinning_weights_maps']
-        vc = batch['canonical_color_maps']
-
-
-        # ------------------- forward pass -------------------
-        preds = self(normal_maps)
-        vc_pred, vc_conf = preds['vc'], preds['vc_conf']
+            B, N = batch['pose'].shape[:2]
+            vp = batch['v_posed']
+            mask = batch['masks'].squeeze()
+            # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
+            joints = batch['joints']
+            normal_maps = batch['normal_imgs']
+            w_smpl = batch['skinning_weights_maps']
+            vc = batch['canonical_color_maps']
 
 
-        if self.cfg.MODEL.SKINNING_WEIGHTS:
-            w_pred, w_conf = preds['w'], preds['w_conf']
-            # w_pred = w_smpl + dw_pred
-        else:
-            w_pred = w_smpl
-            w_conf = None
+            # ------------------- forward pass -------------------
+            preds = self(normal_maps)
+            vc_pred, vc_conf = preds['vc'], preds['vc_conf']
 
 
-        vp_pred, joints_pred = general_lbs(
-            vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
-            pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
-            lbs_weights=rearrange(w_pred, 'b n h w j -> (b n) (h w) j'),
-            J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
-            parents=self.smpl_model.parents 
-        )
-        vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
-        # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
+            if self.cfg.MODEL.SKINNING_WEIGHTS:
+                w_pred, w_conf = preds['w'], preds['w_conf']
+                # w_pred = w_smpl + dw_pred
+            else:
+                w_pred = w_smpl
+                w_conf = None
 
 
-        loss, loss_dict = self.criterion(vp=batch['sampled_posed_points'],
-                                         vp_pred=vp_pred,
-                                         vc=vc,
-                                         vc_pred=vc_pred, 
-                                         conf=vc_conf,
-                                         mask=mask,
-                                         w_pred=w_pred,
-                                         w_smpl=w_smpl)
+            vp_pred, joints_pred = general_lbs(
+                vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
+                pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
+                lbs_weights=rearrange(w_pred, 'b n h w j -> (b n) (h w) j'),
+                J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
+                parents=self.smpl_model.parents 
+            )
+            vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
+            # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
-        # Visualise and log
-        if self.global_step % self.vis_frequency == 0:
-            self.visualiser.visualise(normal_maps=normal_maps.cpu().detach().numpy(),
-                                      vp=vp.cpu().detach().numpy(),
-                                      vc=vc.cpu().detach().numpy(),
-                                      vp_pred=vp_pred.cpu().detach().numpy(),
-                                      vc_pred=vc_pred.cpu().detach().numpy(),
-                                      conf=vc_conf.cpu().detach().numpy(),
-                                      mask=mask.cpu().detach().numpy(),
-                                      vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
-                                      color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
-                                      no_annotations=True,
-                                      plot_error_heatmap=True)
 
-        self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
-        for k, v in loss_dict.items():
-            if k != 'total_loss':
-                self.log(f'{split}_{k}', v, on_step=True, on_epoch=False, sync_dist=True, rank_zero_only=True)
+            loss, loss_dict = self.criterion(vp=batch['sampled_posed_points'],
+                                             vp_pred=vp_pred,
+                                             vc=vc,
+                                             vc_pred=vc_pred, 
+                                             conf=vc_conf,
+                                             mask=mask,
+                                             w_pred=w_pred,
+                                             w_smpl=w_smpl)
 
-        vc_avg_err = torch.linalg.norm(vc - vc_pred, dim=-1) * mask 
-        vc_avg_err = vc_avg_err.sum() / mask.sum()
-        self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
+            # Visualise and log
+            if self.global_step % self.vis_frequency == 0:
+                self.visualiser.visualise(normal_maps=normal_maps.cpu().detach().numpy(),
+                                          vp=vp.cpu().detach().numpy(),
+                                          vc=vc.cpu().detach().numpy(),
+                                          vp_pred=vp_pred.cpu().detach().numpy(),
+                                          vc_pred=vc_pred.cpu().detach().numpy(),
+                                          conf=vc_conf.cpu().detach().numpy(),
+                                          mask=mask.cpu().detach().numpy(),
+                                          vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
+                                          color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
+                                          no_annotations=True,
+                                          plot_error_heatmap=True)
 
-        # if w_pred is not None:
-        #     self.log(f'{split}_wpred_max', w_pred.max(), on_step=True, on_epoch=True, sync_dist=True)
+            self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
+            for k, v in loss_dict.items():
+                if k != 'total_loss':
+                    self.log(f'{split}_{k}', v, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
 
-        if batch_idx % 10 == 0 and batch_idx > 0:
+            vc_avg_err = torch.linalg.norm(vc - vc_pred, dim=-1) * mask 
+            vc_avg_err = vc_avg_err.sum() / mask.sum()
+            self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
+
+            # if w_pred is not None:
+            #     self.log(f'{split}_wpred_max', w_pred.max(), on_step=True, on_epoch=True, sync_dist=True)
+
+            if batch_idx % 10 == 0 and batch_idx > 0:
+                # import ipdb; ipdb.set_trace()
+                pass
+
             # import ipdb; ipdb.set_trace()
-            pass
+            # print(loss_dict)
 
-        # import ipdb; ipdb.set_trace()
-        # print(loss_dict)
-
-        return loss 
+            return loss 
+        except RuntimeError as e:
+            if "NCCL" in str(e):
+                print(f"NCCL error on GPU {self.global_rank}: {str(e)}")
+                if torch.distributed.is_initialized():
+                    torch.distributed.barrier()
+                # Clear CUDA cache
+                torch.cuda.empty_cache()
+                # Retry the step
+                return self.training_step(batch, batch_idx, split)
+            raise
     
 
 
@@ -196,17 +207,10 @@ class CCHTrainer(pl.LightningModule):
                                 T, 
                                 skinning_weights=w,
                                 first_frame_v_cano=batch['first_frame_v_cano'])
-            normal_imgs = torch.tensor(ret['normals'], 
-                                       dtype=torch.float32).permute(0, 1, 4, 2, 3).to(self.device)
-            
-            masks = torch.tensor(ret['masks'], 
-                                dtype=torch.float32).permute(0, 1, 4, 2, 3).to(self.device)
-            
-            skinning_weights_maps = torch.tensor(ret['skinning_weights_maps'], 
-                                                dtype=torch.float32).to(self.device)
-            
-            canonical_color_maps = torch.tensor(ret['canonical_color_maps'], 
-                                                dtype=torch.float32).to(self.device)
+            normal_imgs = ret['normals'].permute(0, 1, 4, 2, 3)
+            masks = ret['masks'].permute(0, 1, 4, 2, 3)
+            skinning_weights_maps = ret['skinning_weights_maps']
+            canonical_color_maps = ret['canonical_color_maps']
             
             
             batch['normal_imgs'] = normal_imgs
