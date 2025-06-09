@@ -125,7 +125,7 @@ class CapeDataset(Dataset):
                         continue
 
             ret['transl'].append(torch.from_numpy(data['transl']).float())
-            ret['v_cano'].append(torch.from_numpy(data['v_cano']).float())
+            ret['v_cano'].append(torch.from_numpy(data['v_cano']).float()) # NOTE Questionable, this is different for each frame 
             ret['pose'].append(torch.from_numpy(data['pose']).float())
             ret['v_posed'].append(torch.from_numpy(data['v_posed']).float())
             

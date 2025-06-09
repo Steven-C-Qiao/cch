@@ -74,11 +74,12 @@ class HMRTrainer(pl.LightningModule):
         self.visualiser.set_global_rank(self.global_rank)
 
     def training_step(self, batch, batch_idx, split='train'):
+        process_func = self.process_inputs if self.cfg.DATA.TYPE == 'smpl' else self.process_cape_inputs
         if not self.dev: # more randomness in process_inputs, naive set first batch doesn't work 
-            batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
+            batch = process_func(batch, batch_idx, normalise=self.normalise)
         if self.global_step == 0:
             if self.dev:
-                batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
+                batch = process_func(batch, batch_idx, normalise=self.normalise)
             self.first_batch = batch
             # self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
         if self.dev:    
@@ -118,17 +119,17 @@ class HMRTrainer(pl.LightningModule):
             global_orient=torch.zeros(B, 3).to(self.device),
             pose2rot=True
         )
-        vc_pred = t_smpl_pred_output.vertices
+        vc_pred = t_smpl_pred_output.vertices.repeat_interleave(N, dim=0) # NOTE questionable, this is different for each frame 
 
         loss, loss_dict = self.criterion(vp=batch['v_posed'].view(-1, 6890, 3),
                                          vc=batch['v_cano'].view(-1, 6890, 3),
                                          vp_pred=vp_pred.view(-1, 6890, 3),
                                          vc_pred=vc_pred)
-        self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         for k, v in loss_dict.items():
             if k != 'total_loss':
-                self.log(f'{split}_{k}', v, on_step=True, on_epoch=False)
+                self.log(f'{split}_{k}', v, on_step=True, on_epoch=False, sync_dist=True)
 
         metrics = self.metrics(vp_pred.view(-1, 6890, 3), 
                                 vc_pred.view(-1, 6890, 3), 
@@ -139,52 +140,14 @@ class HMRTrainer(pl.LightningModule):
         self.chamfer_loss.append(metrics['chamfer_loss'].item())
         self.chamfer_loss_t.append(metrics['chamfer_loss_t'].item())
 
-        if self.test_step_count % 1000 == 0:
+        if self.global_step % 1000 == 0 and self.global_rank == 0:
             self.visualise(vp_pred.cpu().detach().numpy(), 
                         vc_pred.cpu().detach().numpy(), 
                         vp.cpu().detach().numpy(), 
                         vc.cpu().detach().numpy())
-            self.test_step_count += 1
+        # self.test_step_count += 1
         return loss 
 
-    def on_train_epoch_end(self):
-        print(f'pve: {np.mean(self.pve)}')
-        print(f'pve_t: {np.mean(self.pve_t)}')
-        print(f'chamfer_loss: {np.mean(self.chamfer_loss)}')
-        print(f'chamfer_loss_t: {np.mean(self.chamfer_loss_t)}')
-
-        import ipdb; ipdb.set_trace()
-
-        print(f'logged pve: {self.trainer.callback_metrics["pve"]}')
-        print(f'logged pve_t: {self.trainer.callback_metrics["pve_t"]}')
-        print(f'logged chamfer_loss: {self.trainer.callback_metrics["chamfer_loss"]}')
-        print(f'logged chamfer_loss_t: {self.trainer.callback_metrics["chamfer_loss_t"]}')
-
-        self.pve = []
-        self.pve_t = []
-        self.chamfer_loss = []
-        self.chamfer_loss_t = []
-
-        return None 
-    
-    def on_test_epoch_end(self):
-        print(f'pve: {np.mean(self.pve)}')
-        print(f'pve_t: {np.mean(self.pve_t)}')
-        print(f'chamfer_loss: {np.mean(self.chamfer_loss)}')
-        print(f'chamfer_loss_t: {np.mean(self.chamfer_loss_t)}')
-
-        import ipdb; ipdb.set_trace()
-
-
-        print(f'logged pve: {self.trainer.callback_metrics["pve"]}')
-        print(f'logged pve_t: {self.trainer.callback_metrics["pve_t"]}')
-        print(f'logged chamfer_loss: {self.trainer.callback_metrics["chamfer_loss"]}')
-        print(f'logged chamfer_loss_t: {self.trainer.callback_metrics["chamfer_loss_t"]}')
-
-
-        import ipdb; ipdb.set_trace()
-        return None 
-    
 
 
     def process_inputs(self, batch, batch_idx, normalise=False):
@@ -240,6 +203,42 @@ class HMRTrainer(pl.LightningModule):
             batch['masks'] = masks
             batch['skinning_weights_maps'] = skinning_weights_maps
             # batch['canonical_color_maps'] = canonical_color_maps
+        return batch 
+    
+
+    def process_cape_inputs(self, batch, batch_idx, normalise=False):
+        with torch.no_grad():
+            t = batch['transl'] # B, N, 3
+            vp = batch['v_posed'] # B, N, 6890, 3
+
+            vp = vp - t[:, :, None, :]
+            batch['v_posed'] = vp
+
+            batch_size, num_frames = t.shape[:2]
+
+            if normalise:
+                vc = batch['first_frame_v_cano'] # B, 6890, 3
+                subject_height = (vc[..., 1].max(dim=-1).values - vc[..., 1].min(dim=-1).values)
+
+                batch['first_frame_v_cano'] = vc / subject_height[:, None, None] # B, 6890, 3
+                batch['v_posed'] = batch['v_posed'] / subject_height[:, None, None, None] # B, N, 6890, 3
+
+            R, T = sample_cameras(batch_size, num_frames, self.cfg.DATA)
+            R = R.to(self.device)
+            T = T.to(self.device)
+
+            # render normal images
+            ret = self.renderer(vp, 
+                                R, 
+                                T)
+            normal_imgs = ret['normals'].permute(0, 1, 4, 2, 3)
+            masks = ret['masks'].permute(0, 1, 4, 2, 3)
+            
+            
+            batch['normal_imgs'] = normal_imgs
+            batch['R'] = R
+            batch['T'] = T
+            batch['masks'] = masks
         return batch 
     
 
@@ -421,20 +420,20 @@ class HMRTrainer(pl.LightningModule):
         # PVE
         pve = torch.norm(vp_pred - vp, dim=-1)
         pve = pve.mean()
-        self.log('pve', pve, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('pve', pve, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # PVE-T
         pve_t = torch.norm(vc_pred - vc, dim=-1)
         pve_t = pve_t.mean()
-        self.log('pve_t', pve_t, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('pve_t', pve_t, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
 
         # chamfer 
         chamfer_loss, _ = chamfer_distance(vp_pred, vp)
-        self.log('chamfer_loss', chamfer_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('chamfer_loss', chamfer_loss, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
 
         # chamfer_t
         chamfer_loss_t, _ = chamfer_distance(vc_pred, vc)
-        self.log('chamfer_loss_t', chamfer_loss_t, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('chamfer_loss_t', chamfer_loss_t, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
 
         # import ipdb; ipdb.set_trace()
 
