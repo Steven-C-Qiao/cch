@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl 
 import matplotlib.colors
+import scenepic as sp 
 from einops import rearrange
 
 class Visualiser(pl.LightningModule):
@@ -321,3 +322,106 @@ class Visualiser(pl.LightningModule):
                              vertex_visibility=vertex_visibility, 
                              conf_mask=conf_mask, 
                              no_annotations=no_annotations)
+        
+        self.visualise_scenepic(vp=vp, 
+                                vc=vc, 
+                                vp_pred=vp_pred, 
+                                vc_pred=rearrange(vc_pred, 'b n h w c -> b n (h w) c'), 
+                                color=color, 
+                                masks=mask, 
+                                vertex_visibility=vertex_visibility)
+        
+
+    def visualise_scenepic(self, vp, vc, vp_pred, vc_pred, color, masks, vertex_visibility):
+        viridis = plt.colormaps.get_cmap('viridis')
+
+        scene = sp.Scene()
+
+
+        # ----------------------- vc pred -----------------------
+        positions = []
+        colors = []
+        for view in range(4):
+            vc_plot = vc_pred[id, view, masks[id, view].astype(np.bool)].reshape(-1, 3)
+            vc_plot[..., 0] += 2.0
+            positions.append(vc_plot)
+            colors.append(color[id, view, masks[id, view].astype(np.bool)].flatten())
+
+        positions = np.concatenate(positions, axis=0)
+        colors = np.concatenate(colors, axis=0)
+        colors_normalized = colors / colors.max()
+        colors_rgb = viridis(colors_normalized)[:, :3] 
+
+        mesh_vc_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vc_pred")
+        mesh_vc_pred.add_sphere() 
+        mesh_vc_pred.apply_transform(sp.Transforms.Scale(0.005)) 
+        mesh_vc_pred.enable_instancing(positions = positions, colors = colors_rgb) 
+
+
+        # ----------------------- vc gt -----------------------
+        positions = []
+        for view in range(4):
+            vc_gt = vc[id, view, masks[id, view].astype(np.bool)].reshape(-1, 3)
+            vc_gt[..., 0] += 2.0
+            positions.append(vc_gt)
+        positions = np.concatenate(positions, axis=0)
+
+        mesh_vc_gt = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vc_gt")
+        mesh_vc_gt.add_sphere() 
+        mesh_vc_gt.apply_transform(sp.Transforms.Scale(0.005)) 
+        mesh_vc_gt.enable_instancing(positions = positions) 
+
+
+
+        # ----------------------- vp pred -----------------------
+        positions = []
+        colors = []
+
+        for view in range(4):
+            vp_plot = vp_pred[id, view, masks[id, view].astype(np.bool).flatten()]
+            vp_plot[..., 0] += 0.8 * view - 1.6
+            positions.append(vp_plot)
+            colors.append(color[id, view, masks[id, view].astype(np.bool)].flatten())
+
+
+        positions = np.concatenate(positions, axis=0)
+        colors = np.concatenate(colors, axis=0)
+
+
+        colors_normalized = colors / colors.max()
+        colors_rgb = viridis(colors_normalized)[:, :3] 
+
+        mesh_vp_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vp_pred")
+        mesh_vp_pred.add_sphere() 
+        mesh_vp_pred.apply_transform(sp.Transforms.Scale(0.005)) 
+        mesh_vp_pred.enable_instancing(positions = positions, colors = colors_rgb) 
+
+
+        # ----------------------- vp gt -----------------------
+        positions = []
+        for view in range(4):
+            vp_gt_plot = vp[id, view, vertex_visibility[id, view].astype(np.bool).flatten()]
+            vp_gt_plot[..., 0] += 0.8 * view - 1.6
+            positions.append(vp_gt_plot)
+        positions = np.concatenate(positions, axis=0)
+
+        mesh_vp_gt = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vp_gt")
+        mesh_vp_gt.add_sphere() 
+        mesh_vp_gt.apply_transform(sp.Transforms.Scale(0.005)) 
+        mesh_vp_gt.enable_instancing(positions = positions) 
+
+
+        # ----------------------- canvas -----------------------
+        golden_ratio = (1 + np.sqrt(5)) / 2
+        canvas = scene.create_canvas_3d(width = 1600, height = 1600 / golden_ratio, shading=sp.Shading(bg_color=sp.Colors.White))
+        frame = canvas.create_frame()
+
+        frame.add_mesh(mesh_vp_pred)
+        frame.add_mesh(mesh_vp_gt)
+
+        frame.add_mesh(mesh_vc_pred)
+        frame.add_mesh(mesh_vc_gt)
+
+        path = os.path.join(self.save_dir, f'{self.global_step:06d}_sp.png')
+
+        scene.save_as_html(path)

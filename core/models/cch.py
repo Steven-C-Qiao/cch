@@ -10,7 +10,7 @@ from core.models.cch_aggregator import Aggregator
 
 
 class CCH(nn.Module):
-    def __init__(self, cfg, smpl_model, img_size=224, patch_size=14, embed_dim=384):
+    def __init__(self, cfg, smpl_model, img_size=224, patch_size=14, embed_dim=384, predict_smpl_topology=True):
         """
         Given a batch of normal images, predict pixel-aligned canonical space position and uv coordinates
         """
@@ -22,14 +22,11 @@ class CCH(nn.Module):
 
         if cfg.MODEL.SKINNING_WEIGHTS:
             self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3)
-            # Initialize the final layer weights and biases to zero
-            # if hasattr(self.skinning_head.scratch.output_conv2[-1], 'weight'):
-            #     nn.init.zeros_(self.skinning_head.scratch.output_conv2[-1].weight)
-            # if hasattr(self.skinning_head.scratch.output_conv2[-1], 'bias'):
-            #     nn.init.zeros_(self.skinning_head.scratch.output_conv2[-1].bias)
         else:
             self.skinning_head = None
 
+        # if predict_smpl_topology:
+        #     self.mesh_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1", feature_only=True)
 
         # self.count_parameters()
 
@@ -56,6 +53,15 @@ class CCH(nn.Module):
             w = F.softmax(w, dim=-1)
         else:
             w, w_conf = None, None
+
+        # if self.mesh_head is not None:
+        #     mesh_pred = self.mesh_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, 
+        #                                additional_conditioning=vc)
+        # else:
+        #     mesh_pred = None
+
+
+        # import ipdb; ipdb.set_trace()
 
 
 
