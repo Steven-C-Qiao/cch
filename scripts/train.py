@@ -1,6 +1,8 @@
 import os
 import torch
 import argparse
+import glob
+from pathlib import Path
 
 from loguru import logger
 
@@ -36,6 +38,22 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
     cfg = get_cch_cfg_defaults()
     if cfg_opts is not None:
         cfg.merge_from_list(cfg_opts)
+
+    # Try to load hyperparameters from latest version if no checkpoint is provided
+    if resume_path is None and load_path is None:
+        lightning_logs_dir = os.path.join(exp_dir, 'lightning_logs')
+        if os.path.exists(lightning_logs_dir):
+            version_dirs = sorted(glob.glob(os.path.join(lightning_logs_dir, 'version_*')))
+            if version_dirs:
+                latest_version = version_dirs[-1]
+                hparams_file = os.path.join(latest_version, 'hparams.yaml')
+                if os.path.exists(hparams_file):
+                    logger.info(f"Loading hyperparameters from: {hparams_file}")
+                    # Load and update config with saved hyperparameters
+                    saved_hparams = pl.utilities.parsing.load_hparams_from_yaml(hparams_file)
+                    if hasattr(saved_hparams, 'cfg'):
+                        cfg.merge_from_other_cfg(saved_hparams.cfg)
+                        logger.info("Successfully loaded hyperparameters from previous run")
 
     if dev:
         cfg.TRAIN.BATCH_SIZE = 2

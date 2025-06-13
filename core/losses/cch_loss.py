@@ -121,7 +121,7 @@ class CCHLoss(nn.Module):
         self.skinning_weight_loss = SkinningWeightLoss()
 
 
-    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, w_pred=None, w_smpl=None):
+    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, w_pred=None, w_smpl=None, dvc_pred=None, dvc_conf=None):
         loss_dict = {}
 
         posed_loss, chamfer_vp_pred_to_vp = self.posed_pointmap_loss(rearrange(vp, 'b n v c -> (b n) v c'), 
@@ -141,6 +141,13 @@ class CCHLoss(nn.Module):
             loss_w = self.skinning_weight_loss(w_smpl, w_pred, mask) * self.cfg.LOSS.W_REGULARISER_WEIGHT
             loss_dict['w_reg_loss'] = loss_w
             total_loss += loss_w
+
+        if dvc_pred is not None:
+            # l2 loss for dvc_pred
+            dvc_loss = torch.norm(dvc_pred, dim=-1)
+            dvc_loss = dvc_loss.mean() * self.cfg.LOSS.DVC_LOSS_WEIGHT
+            loss_dict['dvc_loss'] = dvc_loss
+            total_loss += dvc_loss
 
         loss_dict['total_loss'] = total_loss
         return total_loss, loss_dict

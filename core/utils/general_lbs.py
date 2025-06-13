@@ -115,13 +115,13 @@ if __name__ == '__main__':
     lbs_weights = smpl_model.lbs_weights
 
 
-    BETA_PATH = '/scratches/kyuban/cq244/datasets/CAPE/minimal_body_shape/00032/00032_param.pkl'
+    BETA_PATH = '/scratches/kyuban/cq244/datasets/CAPE/minimal_body_shape/00134/00134_param.pkl'
     with open(BETA_PATH, 'rb') as f:
         beta_data = pickle.load(f)
     shape = torch.from_numpy(beta_data['betas']).float()[None]
 
 
-    CAPE_PATH = '/scratches/kyuban/cq244/datasets/CAPE/sequences/00032/longshort_ATUsquat/longshort_ATUsquat.000200.npz'
+    CAPE_PATH = '/scratches/kyuban/cq244/datasets/CAPE/sequences/00134/longlong_athletics_trial1/longlong_athletics_trial1.000150.npz'
     data = np.load(CAPE_PATH)
 
     for k, v in data.items():
@@ -140,12 +140,15 @@ if __name__ == '__main__':
     template_verts = smpl_model(body_pose=torch.zeros_like(body_pose),
                                 betas=shape,
                                 global_orient=torch.zeros_like(global_orient))
-    verts_cano = template_verts.vertices.cpu().detach().numpy()
+    verts_cano = template_verts.vertices#.cpu().detach().numpy()
     template_J = template_verts.joints[:, :24]
 
     # given v_cano, general_lbs should pose v_cano back to v_posed
-    lbs_v_posed, lbs_J_posed = general_lbs(pose, template_J, v_cano, lbs_weights[None], parents)
+    # lbs_v_posed, lbs_J_posed = general_lbs(pose, template_J, v_cano, lbs_weights[None], parents)
+    lbs_v_posed, lbs_J_posed = general_lbs(pose, template_J, verts_cano, lbs_weights[None], parents)
 
+
+    verts_cano = verts_cano.cpu().detach().numpy()
     diff = torch.norm(v_posed - lbs_v_posed, dim=-1).squeeze()
     print(diff.abs().max())
 

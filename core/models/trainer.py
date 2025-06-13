@@ -97,9 +97,13 @@ class CCHTrainer(pl.LightningModule):
                 w_pred, w_conf = preds['w'], preds['w_conf']
                 # w_pred = w_smpl + dw_pred
             else:
-                w_pred = w_smpl
-                w_conf = None
+                w_pred, w_conf = w_smpl, None
 
+            if self.cfg.MODEL.POSE_CORRECTIVES:
+                dvc_pred, dvc_conf = preds['dvc'], preds['dvc_conf']
+                vc_pred = vc_pred + dvc_pred
+            else:
+                dvc_pred, dvc_conf = None, None
 
             vp_pred, joints_pred = general_lbs(
                 vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
@@ -112,28 +116,34 @@ class CCHTrainer(pl.LightningModule):
             # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
 
-            loss, loss_dict = self.criterion(vp=batch['sampled_posed_points'],
-                                             vp_pred=vp_pred,
-                                             vc=vc,
-                                             vc_pred=vc_pred, 
-                                             conf=vc_conf,
-                                             mask=mask,
-                                             w_pred=w_pred,
-                                             w_smpl=w_smpl)
+            loss, loss_dict = self.criterion(
+                vp=batch['sampled_posed_points'],
+                vp_pred=vp_pred,
+                vc=vc,
+                vc_pred=vc_pred, 
+                conf=vc_conf,
+                mask=mask,
+                w_pred=w_pred,
+                w_smpl=w_smpl,
+                dvc_pred=dvc_pred,
+                dvc_conf=dvc_conf
+            )
 
             # Visualise and log
             if self.global_step % self.vis_frequency == 0:
-                self.visualiser.visualise(normal_maps=normal_maps.cpu().detach().numpy(),
-                                          vp=vp.cpu().detach().numpy(),
-                                          vc=vc.cpu().detach().numpy(),
-                                          vp_pred=vp_pred.cpu().detach().numpy(),
-                                          vc_pred=vc_pred.cpu().detach().numpy(),
-                                          conf=vc_conf.cpu().detach().numpy(),
-                                          mask=mask.cpu().detach().numpy(),
-                                          vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
-                                          color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
-                                          no_annotations=True,
-                                          plot_error_heatmap=True)
+                self.visualiser.visualise(
+                    normal_maps=normal_maps.cpu().detach().numpy(),
+                    vp=vp.cpu().detach().numpy(),
+                    vc=vc.cpu().detach().numpy(),
+                    vp_pred=vp_pred.cpu().detach().numpy(),
+                    vc_pred=vc_pred.cpu().detach().numpy(),
+                    conf=vc_conf.cpu().detach().numpy(),
+                    mask=mask.cpu().detach().numpy(),
+                    vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
+                    color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
+                    no_annotations=True,
+                    plot_error_heatmap=True
+                )
 
             self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
             for k, v in loss_dict.items():
@@ -143,16 +153,6 @@ class CCHTrainer(pl.LightningModule):
             vc_avg_err = torch.linalg.norm(vc - vc_pred, dim=-1) * mask 
             vc_avg_err = vc_avg_err.sum() / mask.sum()
             self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
-
-            # if w_pred is not None:
-            #     self.log(f'{split}_wpred_max', w_pred.max(), on_step=True, on_epoch=True, sync_dist=True)
-
-            if batch_idx % 10 == 0 and batch_idx > 0:
-                # import ipdb; ipdb.set_trace()
-                pass
-
-            # import ipdb; ipdb.set_trace()
-            # print(loss_dict)
 
             return loss 
         except RuntimeError as e:

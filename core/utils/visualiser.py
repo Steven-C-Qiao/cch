@@ -323,16 +323,17 @@ class Visualiser(pl.LightningModule):
                              conf_mask=conf_mask, 
                              no_annotations=no_annotations)
         
-        self.visualise_scenepic(vp=vp, 
-                                vc=vc, 
-                                vp_pred=vp_pred, 
-                                vc_pred=rearrange(vc_pred, 'b n h w c -> b n (h w) c'), 
-                                color=color, 
-                                masks=mask, 
-                                vertex_visibility=vertex_visibility)
+        # self.visualise_scenepic(vp=vp, 
+        #                         vc=vc, 
+        #                         vp_pred=vp_pred, 
+        #                         vc_pred=rearrange(vc_pred, 'b n h w c -> b n (h w) c'), 
+        #                         color=color, 
+        #                         masks=mask, 
+        #                         vertex_visibility=vertex_visibility)
         
 
     def visualise_scenepic(self, vp, vc, vp_pred, vc_pred, color, masks, vertex_visibility):
+        id = 0
         viridis = plt.colormaps.get_cmap('viridis')
 
         scene = sp.Scene()
@@ -342,7 +343,7 @@ class Visualiser(pl.LightningModule):
         positions = []
         colors = []
         for view in range(4):
-            vc_plot = vc_pred[id, view, masks[id, view].astype(np.bool)].reshape(-1, 3)
+            vc_plot = vc_pred[id, view, masks[id, view].astype(np.bool).flatten()].reshape(-1, 3)
             vc_plot[..., 0] += 2.0
             positions.append(vc_plot)
             colors.append(color[id, view, masks[id, view].astype(np.bool)].flatten())
@@ -422,6 +423,6 @@ class Visualiser(pl.LightningModule):
         frame.add_mesh(mesh_vc_pred)
         frame.add_mesh(mesh_vc_gt)
 
-        path = os.path.join(self.save_dir, f'{self.global_step:06d}_sp.png')
+        path = os.path.join(self.save_dir, f'{self.global_step:06d}_sp.html')
 
         scene.save_as_html(path)

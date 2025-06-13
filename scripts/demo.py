@@ -20,7 +20,7 @@ from core.configs import paths
 from core.configs.cch_cfg import get_cch_cfg_defaults
 sapiens_ckpt_path = "/scratches/kyuban/cq244/CCH/sapiens/torchscript/normal/checkpoints/sapiens_1b/sapiens_1b_normal_render_people_epoch_115_torchscript.pt2"
 cch_ckpt_path = "/scratches/kyuban/cq244/CCH/cch/exp/exp_022_norm/saved_models/val_loss_epoch=051.ckpt"
-img_dir_path = "/scratches/kyuban/cq244/CCH/cch/demo/demo_002/images"
+img_dir_path = "/scratches/kyuban/cq244/CCH/cch/demo/demo_shortshort/images"
 
 
 class Config:

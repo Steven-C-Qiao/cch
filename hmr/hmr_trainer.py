@@ -20,7 +20,7 @@ from hmr.hmr_loss import HMRLoss
 
 from core.utils.renderer import SurfaceNormalRenderer 
 from core.utils.sample_utils import sample_cameras
-from core.utils.visualiser import Visualiser
+# from core.utils.visualiser import Visualiser
 
 from pytorch3d.loss import chamfer_distance
 
@@ -55,7 +55,7 @@ class HMRTrainer(pl.LightningModule):
         )
 
         self.criterion = HMRLoss()
-        self.visualiser = Visualiser(save_dir=vis_save_dir)
+        # self.visualiser = Visualiser(save_dir=vis_save_dir)
 
         self.save_hyperparameters(ignore=['smpl_model'])
 
@@ -71,7 +71,8 @@ class HMRTrainer(pl.LightningModule):
         return self.model(batch)
     
     def on_train_epoch_start(self):
-        self.visualiser.set_global_rank(self.global_rank)
+        pass
+        # self.visualiser.set_global_rank(self.global_rank)
 
     def training_step(self, batch, batch_idx, split='train'):
         process_func = self.process_inputs if self.cfg.DATA.TYPE == 'smpl' else self.process_cape_inputs
@@ -140,7 +141,7 @@ class HMRTrainer(pl.LightningModule):
         self.chamfer_loss.append(metrics['chamfer_loss'].item())
         self.chamfer_loss_t.append(metrics['chamfer_loss_t'].item())
 
-        if self.global_step % 1000 == 0 and self.global_rank == 0:
+        if self.global_step % 1000 == 0:
             self.visualise(vp_pred.cpu().detach().numpy(), 
                         vc_pred.cpu().detach().numpy(), 
                         vp.cpu().detach().numpy(), 

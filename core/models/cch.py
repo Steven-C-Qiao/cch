@@ -16,6 +16,7 @@ class CCH(nn.Module):
         """
         super(CCH, self).__init__()
         self.smpl_model = smpl_model
+        self.cfg = cfg
 
         self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="conv")
         self.canonical_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
@@ -24,6 +25,10 @@ class CCH(nn.Module):
             self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3)
         else:
             self.skinning_head = None
+
+        if cfg.MODEL.POSE_CORRECTIVES:
+            # per-frame pose correctives and uncertainty
+            self.pose_correctives_head = DPTHead(dim_in=2 * embed_dim, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3) 
 
         # if predict_smpl_topology:
         #     self.mesh_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1", feature_only=True)
@@ -47,12 +52,18 @@ class CCH(nn.Module):
         vc = torch.clamp(vc, -2, 2)
 
 
-        if self.skinning_head is not None:
+        if self.cfg.MODEL.SKINNING_WEIGHTS:
             w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, 
                                            additional_conditioning=vc) # rearrange(vc, 'b n h w c -> (b n) c h w'))
             w = F.softmax(w, dim=-1)
         else:
             w, w_conf = None, None
+
+        if self.cfg.MODEL.POSE_CORRECTIVES:
+            pose_correctives, pose_correctives_conf = self.pose_correctives_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, 
+                                                                                 additional_conditioning=vc)
+        else:
+            pose_correctives, pose_correctives_conf = None, None
 
         # if self.mesh_head is not None:
         #     mesh_pred = self.mesh_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, 
@@ -69,7 +80,9 @@ class CCH(nn.Module):
             'vc': vc,
             'vc_conf': vc_conf,
             'w': w,
-            'w_conf': w_conf
+            'w_conf': w_conf,
+            'dvc': pose_correctives,
+            'dvc_conf': pose_correctives_conf
         }
         return pred 
 
