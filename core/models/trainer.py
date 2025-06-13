@@ -197,6 +197,11 @@ class CCHTrainer(pl.LightningModule):
             )
             joints = smpl_output.joints[:, :24]
 
+            # CAPE provided naked shape is bad, 
+            # add a correction to the joints by scaling height of the provided naked shape to first_frame_v_cano
+            naked_height = (smpl_output.vertices[:, :, 1].max(dim=-1).values - smpl_output.vertices[:, :, 1].min(dim=-1).values)
+            joints = joints * (subject_height[:, None, None] / naked_height[:, None, None])
+
             if normalise:
                 joints = joints / subject_height[:, None, None]
 

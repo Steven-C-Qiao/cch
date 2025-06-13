@@ -20,7 +20,7 @@ _C.MODEL = CfgNode()
 _C.MODEL.GENDER = 'neutral'
 _C.MODEL.SMPL_PATH = 'model_files/smpl'
 _C.MODEL.SKINNING_WEIGHTS = True
-_C.MODEL.POSE_CORRECTIVES = False
+_C.MODEL.POSE_CORRECTIVES = True
 
 # Loss
 _C.LOSS = CfgNode()
