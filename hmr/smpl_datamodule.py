@@ -38,7 +38,7 @@ class SmplDataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(
             self.val_dataset,
-            batch_size=self.cfg.TRAIN.BATCH_SIZE,
+            batch_size=self.cfg.TRAIN.BATCH_SIZE * 4,
             shuffle=False,
             drop_last=True,
             num_workers=self.cfg.TRAIN.NUM_WORKERS,

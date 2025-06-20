@@ -16,7 +16,7 @@ class HMRLoss(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.loss_targets = ['vertices', 'tpose_vertices']
+        self.loss_targets = ['vertices', 'tpose_vertices', 'pose_rotmat']
 
 
 
@@ -62,7 +62,7 @@ class HMRLoss(nn.Module):
     #     return total_loss, loss_dict
     
 
-    def forward(self, vp, vc, vp_pred, vc_pred):
+    def forward(self, vp, vc, vp_pred, vc_pred, pose_pred=None, pose_gt=None):
         loss_dict = {}
         # vp = vp.view(-1, 6890, 3)
         # vc = vc.view(-1, 6890, 3)
@@ -71,10 +71,12 @@ class HMRLoss(nn.Module):
 
         loss1 = self.loss_fns['vertices'](vp_pred, vp)
         loss2 = self.loss_fns['vertices'](vc_pred, vc)
-        loss = loss1 + loss2
+        loss3 = self.loss_fns['pose_rotmat'](pose_pred, pose_gt)
+        loss = loss1 + loss2 + loss3
 
         loss_dict['vp_loss'] = loss1
         loss_dict['vc_loss'] = loss2
+        loss_dict['pose_rotmat_loss'] = loss3
         loss_dict['total_loss'] = loss
 
         return loss, loss_dict

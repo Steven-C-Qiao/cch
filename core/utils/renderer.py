@@ -97,7 +97,7 @@ class SurfaceNormalRenderer(pl.LightningModule):
         self.register_buffer('faces', smpl_faces)
     
 
-    def forward(self, vertices, R=None, T=None, faces=None, skinning_weights=None, first_frame_v_cano=None):
+    def forward(self, vertices, R=None, T=None, faces=None, skinning_weights=None, first_frame_v_cano=None, part_segmentation=None):
         """
         Args:
             vertices: (B, N, V, 3)
@@ -184,12 +184,17 @@ class SurfaceNormalRenderer(pl.LightningModule):
             ret['skinning_weights_maps'] = rearrange(skinning_weights_map, '(b n) h w c -> b n h w c', b=B, n=N)
 
         # ------------------- canonical color maps -------------------
-        
         if first_frame_v_cano is not None:
             mesh.textures = TexturesVertex(verts_features=first_frame_v_cano)
             images = self.renderer(mesh)
             canonical_color_map = images[..., :3]#.cpu().numpy()
             ret['canonical_color_maps'] = rearrange(canonical_color_map, '(b n) h w c -> b n h w c', b=B, n=N)
+
+        if part_segmentation is not None:
+            mesh.textures = TexturesVertex(verts_features=part_segmentation)
+            images = self.renderer(mesh)
+            part_segmentation_map = images[..., :3]#.cpu().numpy()
+            ret['part_segmentation_maps'] = rearrange(part_segmentation_map, '(b n) h w c -> b n h w c', b=B, n=N)
 
         return ret
 

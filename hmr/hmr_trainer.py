@@ -10,6 +10,8 @@ from einops import rearrange
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+from smplx.lbs import batch_rodrigues
+
 
 from core.configs import paths 
 
@@ -74,7 +76,7 @@ class HMRTrainer(pl.LightningModule):
         pass
         # self.visualiser.set_global_rank(self.global_rank)
 
-    def training_step(self, batch, batch_idx, split='train'):
+    def training_step(self, batch, batch_idx, split='train', plot=True):
         process_func = self.process_inputs if self.cfg.DATA.TYPE == 'smpl' else self.process_cape_inputs
         if not self.dev: # more randomness in process_inputs, naive set first batch doesn't work 
             batch = process_func(batch, batch_idx, normalise=self.normalise)
@@ -120,12 +122,19 @@ class HMRTrainer(pl.LightningModule):
             global_orient=torch.zeros(B, 3).to(self.device),
             pose2rot=True
         )
-        vc_pred = t_smpl_pred_output.vertices.repeat_interleave(N, dim=0) # NOTE questionable, this is different for each frame 
+        vc_pred = t_smpl_pred_output.vertices[:, None].repeat(1, N, 1, 1)
+
+
+        gt_pose_rotmats = batch_rodrigues(batch['pose'].reshape(-1, 3))
+        gt_pose_rotmats = gt_pose_rotmats.view(-1, 24, 3, 3)[:, 1:]
+
 
         loss, loss_dict = self.criterion(vp=batch['v_posed'].view(-1, 6890, 3),
                                          vc=batch['v_cano'].view(-1, 6890, 3),
                                          vp_pred=vp_pred.view(-1, 6890, 3),
-                                         vc_pred=vc_pred)
+                                         vc_pred=vc_pred.view(-1, 6890, 3),
+                                         pose_pred=pred_pose,
+                                         pose_gt=gt_pose_rotmats)
         self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         for k, v in loss_dict.items():
@@ -141,11 +150,11 @@ class HMRTrainer(pl.LightningModule):
         self.chamfer_loss.append(metrics['chamfer_loss'].item())
         self.chamfer_loss_t.append(metrics['chamfer_loss_t'].item())
 
-        if self.global_step % 1000 == 0:
-            self.visualise(vp_pred.cpu().detach().numpy(), 
-                        vc_pred.cpu().detach().numpy(), 
-                        vp.cpu().detach().numpy(), 
-                        vc.cpu().detach().numpy())
+        if plot and self.global_step % 1000 == 0 and self.global_rank == 0:
+            self.visualise(vp_pred=vp_pred.cpu().detach().numpy(), 
+                            vc_pred=vc_pred.cpu().detach().numpy(), 
+                            vp=vp.cpu().detach().numpy(), 
+                            vc=vc.cpu().detach().numpy())
         # self.test_step_count += 1
         return loss 
 
@@ -188,11 +197,10 @@ class HMRTrainer(pl.LightningModule):
             ret = self.renderer(vp, 
                                 R, 
                                 T, 
-                                skinning_weights=w)
-                                # first_frame_v_cano=batch['v_cano'][:, 0])
+                                skinning_weights=w,
+                                first_frame_v_cano=batch['v_cano'])
             normal_imgs = ret['normals'].permute(0, 1, 4, 2, 3)
             masks = ret['masks'].permute(0, 1, 4, 2, 3)
-            skinning_weights_maps = ret['skinning_weights_maps']
             
             # canonical_color_maps = torch.tensor(ret['canonical_color_maps'], 
             #                                     dtype=torch.float32).to(self.device)
@@ -202,8 +210,9 @@ class HMRTrainer(pl.LightningModule):
             batch['R'] = R
             batch['T'] = T
             batch['masks'] = masks
-            batch['skinning_weights_maps'] = skinning_weights_maps
-            # batch['canonical_color_maps'] = canonical_color_maps
+            batch['skinning_weights_maps'] = ret['skinning_weights_maps']
+            batch['canonical_color_maps'] = ret['canonical_color_maps']
+            batch['vertex_visibility'] = ret['vertex_visibility']
         return batch 
     
 
@@ -251,7 +260,7 @@ class HMRTrainer(pl.LightningModule):
     
     def test_step(self, batch, batch_idx):
         with torch.no_grad():
-            loss = self.training_step(batch, batch_idx, split='test')
+            loss = self.training_step(batch, batch_idx, split='test', plot=False)
             # self.log('test_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
     
@@ -285,7 +294,7 @@ class HMRTrainer(pl.LightningModule):
     #             print(name)
 
 
-    def visualise(self, vp_pred, vc_pred, vp, vc, no_annotations=True):
+    def visualise(self, vp_pred, vc_pred, vp, vc, no_annotations=False):
         s = 0.04
         alpha = 0.5
         B, N = vp_pred.shape[:2]
@@ -348,13 +357,13 @@ class HMRTrainer(pl.LightningModule):
 
 
         plt.tight_layout(pad=0.01)
-        plt.savefig(f'{self.vis_save_dir}/{self.test_step_count}_vp.png', dpi=300)
+        plt.savefig(f'{self.vis_save_dir}/{self.global_step}_vp.png', dpi=300)
         plt.close()
 
         fig = plt.figure(figsize=(3*4, B*4))
         for b in range(B):
-            vc_b = vc[b]
-            vc_pred_b = vc_pred[b]
+            vc_b = vc[b, 0]
+            vc_pred_b = vc_pred[b, 0]
 
             ax = fig.add_subplot(B, 3, b*3 + 1, projection='3d')
             ax.scatter(vc_b[:,0], vc_b[:,1], vc_b[:,2], s=s, alpha=alpha, color='blue', label='GT')
@@ -410,7 +419,7 @@ class HMRTrainer(pl.LightningModule):
 
         
         plt.tight_layout(pad=0.01)
-        plt.savefig(f'{self.vis_save_dir}/{self.test_step_count}_vc.png', dpi=300)
+        plt.savefig(f'{self.vis_save_dir}/{self.global_step}_vc.png', dpi=300)
         plt.close()
 
 
@@ -429,7 +438,18 @@ class HMRTrainer(pl.LightningModule):
         self.log('pve_t', pve_t, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
 
         # chamfer 
-        chamfer_loss, _ = chamfer_distance(vp_pred, vp)
+        chamfer_loss, _ = chamfer_distance(vp_pred, vp,
+                                           batch_reduction=None, point_reduction=None)
+        chamfer_loss_v_pred_to_v = chamfer_loss[0]
+        chamfer_loss_v_to_v_pred = chamfer_loss[1]
+
+        chamfer_loss_v_pred_to_v = chamfer_loss_v_pred_to_v.mean()
+        chamfer_loss_v_to_v_pred = chamfer_loss_v_to_v_pred.mean()
+
+        self.log('chamfer_loss_v_pred_to_v', chamfer_loss_v_pred_to_v, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
+        self.log('chamfer_loss_v_to_v_pred', chamfer_loss_v_to_v_pred, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
+
+        chamfer_loss = chamfer_loss_v_pred_to_v + chamfer_loss_v_to_v_pred
         self.log('chamfer_loss', chamfer_loss, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
 
         # chamfer_t

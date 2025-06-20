@@ -3,6 +3,7 @@
 *.html
 *.ipynb
 *.js
+*.pkl
 
 __pycache__
 
@@ -11,4 +12,4 @@ vggt/
 exp/
 CameraHMR/
 demo/
-
+tinkering/misc/

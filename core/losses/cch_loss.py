@@ -67,22 +67,6 @@ class PosedPointmapChamferLoss(nn.Module):
         loss = masked_loss_v_pred_to_v + loss_v_to_v_pred.mean()
 
         return loss, masked_loss_v_pred_to_v
-    
-# class RegulariserLoss(nn.Module):
-#     """
-#     Regulariser loss for skinning weights
-#     """
-#     def __init__(self):
-#         super().__init__()
-        
-#     def forward(self, dw_pred, mask=None):
-#         loss1 = torch.abs(torch.sum(dw_pred, dim=-1))
-#         loss2 = dw_pred ** 2
-
-#         if mask is not None:
-#             loss1 = loss1 * mask
-#             loss2 = loss2 * mask[..., None]
-#         return loss1.mean() + loss2.mean()
         
 
 class SkinningWeightLoss(nn.Module):
@@ -151,3 +135,15 @@ class CCHLoss(nn.Module):
 
         loss_dict['total_loss'] = total_loss
         return total_loss, loss_dict
+    
+
+if __name__ == '__main__':
+    # test chamfer dist
+    x = torch.tensor([[[0, 0, 0], [1, 1, 1]]]).float()
+    y = torch.tensor([[[1, 1, 1], [-1, -1, 0]]]).float()
+    loss, loss_normals = chamfer_distance(x, y, 
+                                single_directional=False, 
+                                batch_reduction=None, 
+                                point_reduction=None)
+    print(loss)
+    print(loss_normals)

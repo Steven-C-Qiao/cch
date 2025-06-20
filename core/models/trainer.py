@@ -5,13 +5,7 @@ import torch.optim as optim
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from einops import rearrange
-
-
-import scenepic as sp 
-from matplotlib import cm, pyplot as plt
-from matplotlib.colors import Normalize
-from matplotlib.cm import viridis
-
+from pytorch3d.loss import chamfer_distance
 
 from core.configs import paths 
 
@@ -32,6 +26,7 @@ class CCHTrainer(pl.LightningModule):
                  vis_save_dir=None):
         
         super().__init__()
+        self.save_scenepic = True 
         self.dev = dev
         self.cfg = cfg
         self.normalise = cfg.DATA.NORMALISE
@@ -67,105 +62,101 @@ class CCHTrainer(pl.LightningModule):
         self.visualiser.set_global_rank(self.global_rank)
 
     def training_step(self, batch, batch_idx, split='train'):
-        try:
-            if not self.dev:
+        if not self.dev:
+            batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
+        if self.global_step == 0:
+            if self.dev:
                 batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
-            if self.global_step == 0:
-                if self.dev:
-                    batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
-                self.first_batch = batch
-                # self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
-            if self.dev:    
-                batch = self.first_batch
+            self.first_batch = batch
+            # self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
+        if self.dev:    
+            batch = self.first_batch
 
-            B, N = batch['pose'].shape[:2]
-            vp = batch['v_posed']
-            mask = batch['masks'].squeeze()
-            # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
-            joints = batch['joints']
-            normal_maps = batch['normal_imgs']
-            w_smpl = batch['skinning_weights_maps']
-            vc = batch['canonical_color_maps']
+        B, N = batch['pose'].shape[:2]
+        vp = batch['v_posed']
+        masks = batch['masks'].squeeze()
+        # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
+        joints = batch['joints']
+        normal_maps = batch['normal_imgs']
+        w_smpl = batch['skinning_weights_maps']
+        vc = batch['canonical_color_maps']
 
 
-            # ------------------- forward pass -------------------
-            preds = self(normal_maps)
-            vc_pred, vc_conf = preds['vc'], preds['vc_conf']
+        # ------------------- forward pass -------------------
+        preds = self(normal_maps)
+        vc_pred, vc_conf = preds['vc'], preds['vc_conf']
 
 
-            if self.cfg.MODEL.SKINNING_WEIGHTS:
-                w_pred, w_conf = preds['w'], preds['w_conf']
-                # w_pred = w_smpl + dw_pred
-            else:
-                w_pred, w_conf = w_smpl, None
+        if self.cfg.MODEL.SKINNING_WEIGHTS:
+            w_pred, w_conf = preds['w'], preds['w_conf']
+            # w_pred = w_smpl + dw_pred
+        else:
+            w_pred, w_conf = w_smpl, None
 
-            if self.cfg.MODEL.POSE_CORRECTIVES:
-                dvc_pred, dvc_conf = preds['dvc'], preds['dvc_conf']
-                vc_pred = vc_pred + dvc_pred
-            else:
-                dvc_pred, dvc_conf = None, None
+        if self.cfg.MODEL.POSE_CORRECTIVES:
+            dvc_pred, dvc_conf = preds['dvc'], preds['dvc_conf']
+            vc_pred = vc_pred + dvc_pred
+        else:
+            dvc_pred, dvc_conf = None, None
 
-            vp_pred, joints_pred = general_lbs(
-                vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
-                pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
-                lbs_weights=rearrange(w_pred, 'b n h w j -> (b n) (h w) j'),
-                J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
-                parents=self.smpl_model.parents 
+        vp_pred, joints_pred = general_lbs(
+            vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
+            pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
+            lbs_weights=rearrange(w_pred, 'b n h w j -> (b n) (h w) j'),
+            J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
+            parents=self.smpl_model.parents 
+        )
+        vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
+        # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
+
+
+        # For app.animate_pm.py 
+        # self.save_avatar(vc_pred, vc_conf, w_pred, joints, masks, w_smpl=w_smpl)
+
+
+        loss, loss_dict = self.criterion(
+            vp=batch['sampled_posed_points'],
+            vp_pred=vp_pred,
+            vc=vc,
+            vc_pred=vc_pred, 
+            conf=vc_conf,
+            mask=masks,
+            w_pred=w_pred,
+            w_smpl=w_smpl,
+            dvc_pred=dvc_pred,
+            dvc_conf=dvc_conf
+        )
+
+        # Visualise and log
+        if self.global_step % self.vis_frequency == 0:
+            self.visualiser.visualise(
+                normal_maps=normal_maps.cpu().detach().numpy(),
+                vp=vp.cpu().detach().numpy(),
+                vc=vc.cpu().detach().numpy(),
+                vp_pred=vp_pred.cpu().detach().numpy(),
+                vc_pred=vc_pred.cpu().detach().numpy(),
+                conf=vc_conf.cpu().detach().numpy(),
+                mask=masks.cpu().detach().numpy(),
+                vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
+                color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
+                no_annotations=True,
+                plot_error_heatmap=True
             )
-            vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
-            # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
+        self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
+        for k, v in loss_dict.items():
+            if k != 'total_loss':
+                self.log(f'{split}_{k}', v, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
 
-            loss, loss_dict = self.criterion(
-                vp=batch['sampled_posed_points'],
-                vp_pred=vp_pred,
-                vc=vc,
-                vc_pred=vc_pred, 
-                conf=vc_conf,
-                mask=mask,
-                w_pred=w_pred,
-                w_smpl=w_smpl,
-                dvc_pred=dvc_pred,
-                dvc_conf=dvc_conf
-            )
+        vc_avg_err = torch.linalg.norm(vc - vc_pred, dim=-1) * masks 
+        vc_avg_err = vc_avg_err.sum() / masks.sum()
+        self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
 
-            # Visualise and log
-            if self.global_step % self.vis_frequency == 0:
-                self.visualiser.visualise(
-                    normal_maps=normal_maps.cpu().detach().numpy(),
-                    vp=vp.cpu().detach().numpy(),
-                    vc=vc.cpu().detach().numpy(),
-                    vp_pred=vp_pred.cpu().detach().numpy(),
-                    vc_pred=vc_pred.cpu().detach().numpy(),
-                    conf=vc_conf.cpu().detach().numpy(),
-                    mask=mask.cpu().detach().numpy(),
-                    vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
-                    color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
-                    no_annotations=True,
-                    plot_error_heatmap=True
-                )
+        # print(vc_avg_err, loss_dict['vc_pointmap_dist'])
+        # import ipdb; ipdb.set_trace()
 
-            self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
-            for k, v in loss_dict.items():
-                if k != 'total_loss':
-                    self.log(f'{split}_{k}', v, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
+        return loss 
 
-            vc_avg_err = torch.linalg.norm(vc - vc_pred, dim=-1) * mask 
-            vc_avg_err = vc_avg_err.sum() / mask.sum()
-            self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
-
-            return loss 
-        except RuntimeError as e:
-            if "NCCL" in str(e):
-                print(f"NCCL error on GPU {self.global_rank}: {str(e)}")
-                if torch.distributed.is_initialized():
-                    torch.distributed.barrier()
-                # Clear CUDA cache
-                torch.cuda.empty_cache()
-                # Retry the step
-                return self.training_step(batch, batch_idx, split)
-            raise
-    
 
 
     def process_inputs(self, batch, batch_idx, normalise=False):
@@ -302,6 +293,14 @@ class CCHTrainer(pl.LightningModule):
     #                 print(f"Large gradient in {name}: {grad_norm}")
     
     def test_step(self, batch, batch_idx):
+
+        import scenepic as sp 
+        from matplotlib import cm, pyplot as plt
+        from matplotlib.colors import Normalize
+        from matplotlib.cm import viridis
+
+        from pytorch3d.loss import chamfer_distance
+
         viridis = plt.colormaps.get_cmap('viridis')
 
         split = 'test'
@@ -337,6 +336,12 @@ class CCHTrainer(pl.LightningModule):
             w_pred = w_smpl
             w_conf = None
 
+        if self.cfg.MODEL.POSE_CORRECTIVES:
+            dvc_pred, dvc_conf = preds['dvc'], preds['dvc_conf']
+            vc_pred = vc_pred + dvc_pred
+        else:
+            dvc_pred, dvc_conf = None, None
+
 
         vp_pred, joints_pred = general_lbs(
             vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
@@ -358,152 +363,221 @@ class CCHTrainer(pl.LightningModule):
                                          w_pred=w_pred,
                                          w_smpl=w_smpl)
 
-        # Visualise and log
-        if self.global_step % self.vis_frequency == 0:
-            self.visualiser.visualise(normal_maps=normal_maps.cpu().detach().numpy(),
-                                      vp=vp.cpu().detach().numpy(),
-                                      vc=vc.cpu().detach().numpy(),
-                                      vp_pred=vp_pred.cpu().detach().numpy(),
-                                      vc_pred=vc_pred.cpu().detach().numpy(),
-                                      conf=vc_conf.cpu().detach().numpy(),
-                                      mask=mask.cpu().detach().numpy(),
-                                      vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
-                                      color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
-                                      no_annotations=True,
-                                      plot_error_heatmap=True)
 
         self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
         for k, v in loss_dict.items():
             if k != 'total_loss':
-                self.log(f'{split}_{k}', v, on_step=True, on_epoch=False, sync_dist=True, rank_zero_only=True)
+                self.log(f'{split}_{k}', v, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
 
+
+        # pointmap vc average error
         vc_avg_err = torch.linalg.norm(vc - vc_pred, dim=-1) * mask 
         vc_avg_err = vc_avg_err.sum() / mask.sum()
         self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
 
 
-        # save a bunch of stuff for scenepic visualisation later
-        scenepic_dir = os.path.join(self.visualiser.save_dir, 'scenepic')
-        if not os.path.exists(scenepic_dir):
-            os.makedirs(scenepic_dir)
+        # chamfer distance between vc and vc_pred
+        vc_first_frame = batch['first_frame_v_cano']
+        
+
+        if vc_conf is not None:
+            conf_threshold = 0.08
+            conf_mask = (1/vc_conf) < conf_threshold
+
+        full_mask = (mask * conf_mask).bool()
+
+        # print(vc_first_frame.shape, vc_pred.shape)
+        # print(mask.shape, conf_mask.shape, full_mask.shape)
 
         
-        vp = vp.detach().cpu().numpy()
-        vp_pred = vp_pred.detach().cpu().numpy()
-        vc_pred = vc_pred.detach().cpu().numpy()
-        vc = vc.detach().cpu().numpy()
-        color = np.argmax(w_pred.detach().cpu().numpy(), axis=-1)
-        normal_maps = normal_maps.detach().cpu().numpy()
-        masks = mask.detach().cpu().numpy()
-        vertex_visibility = batch['vertex_visibility'].detach().cpu().numpy()
-        
-        save = False 
-        if save:
-            np.save(os.path.join(scenepic_dir, f'vp_{self.global_step}.npy'), vp)
-            np.save(os.path.join(scenepic_dir, f'vertex_visibility_{self.global_step}.npy'), vertex_visibility)
-            np.save(os.path.join(scenepic_dir, f'color_{self.global_step}.npy'), color)
-            np.save(os.path.join(scenepic_dir, f'vc_{self.global_step}.npy'), vc)
-            np.save(os.path.join(scenepic_dir, f'vc_pred_{self.global_step}.npy'), vc_pred)
-            np.save(os.path.join(scenepic_dir, f'vp_pred_{self.global_step}.npy'), vp_pred)
-            np.save(os.path.join(scenepic_dir, f'normal_maps_{self.global_step}.npy'), normal_maps)
-            np.save(os.path.join(scenepic_dir, f'masks_{self.global_step}.npy'), masks)
+        vc_mesh_chamfer, _ = chamfer_distance(rearrange(vc_pred, 'b n h w c -> b (n h w) c'), 
+                                           vc_first_frame, 
+                                           batch_reduction=None, point_reduction=None)
 
+        vc_mesh_chamfer = vc_mesh_chamfer[0] * rearrange(full_mask, 'b n h w -> b (n h w)')
+        vc_mesh_chamfer = vc_mesh_chamfer.sum() / (full_mask.sum() + 1e-6)
 
-        id = 1
-        plot_gt = True
-        side_by_side = False
-
-        scene = sp.Scene()
-
-
-        # ----------------------- vc pred -----------------------
-        positions = []
-        colors = []
-        for view in range(4):
-            vc_plot = vc_pred[id, view, masks[id, view].astype(np.bool)].reshape(-1, 3)
-            vc_plot[..., 0] += 2.0
-            positions.append(vc_plot)
-            colors.append(color[id, view, masks[id, view].astype(np.bool)].flatten())
-
-        positions = np.concatenate(positions, axis=0)
-        colors = np.concatenate(colors, axis=0)
-        colors_normalized = colors / colors.max()
-        colors_rgb = viridis(colors_normalized)[:, :3] 
-
-        mesh_vc_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vc_pred")
-        mesh_vc_pred.add_sphere() 
-        mesh_vc_pred.apply_transform(sp.Transforms.Scale(0.005)) 
-        mesh_vc_pred.enable_instancing(positions = positions, colors = colors_rgb) 
-
-
-        # ----------------------- vc gt -----------------------
-        positions = []
-        for view in range(4):
-            vc_gt = vc[id, view, masks[id, view].astype(np.bool)].reshape(-1, 3)
-            vc_gt[..., 0] += 1.2 if side_by_side else 0
-            vc_gt[..., 0] += 2.0
-            positions.append(vc_gt)
-        positions = np.concatenate(positions, axis=0)
-
-        mesh_vc_gt = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vc_gt")
-        mesh_vc_gt.add_sphere() 
-        mesh_vc_gt.apply_transform(sp.Transforms.Scale(0.005)) 
-        mesh_vc_gt.enable_instancing(positions = positions) 
+        self.log(f'{split}_vc_mesh_chamfer', vc_mesh_chamfer, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
 
 
 
-        # ----------------------- vp pred -----------------------
-        positions = []
-        colors = []
+    def metrics(self, vc=None, vc_pred=None, vp=None, vp_pred=None, conf=None, mask=None):
+        if conf is not None:
+            conf_threshold = 0.08
+            conf_mask = (1/conf) < conf_threshold
+        full_mask = (mask * conf_mask).bool()
 
-        for view in range(4):
-            vp_plot = vp_pred[id, view, masks[id, view].astype(np.bool).flatten()]
-            vp_plot[..., 0] += 0.8 * view - 1.6
-            positions.append(vp_plot)
-            colors.append(color[id, view, masks[id, view].astype(np.bool)].flatten())
-
-
-        positions = np.concatenate(positions, axis=0)
-        colors = np.concatenate(colors, axis=0)
+        # ----------------------- vc -----------------------
+        vc_pm_dist = torch.norm(vc - vc_pred, dim=-1) * full_mask 
+        vc_pm_dist = vc_pm_dist.sum() / (full_mask.sum() + 1e-6)
 
 
-        colors_normalized = colors / colors.max()
-        colors_rgb = viridis(colors_normalized)[:, :3] 
-
-        mesh_vp_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vp_pred")
-        mesh_vp_pred.add_sphere() 
-        mesh_vp_pred.apply_transform(sp.Transforms.Scale(0.005)) 
-        mesh_vp_pred.enable_instancing(positions = positions, colors = colors_rgb) 
-
-
-        # ----------------------- vp gt -----------------------
-        positions = []
-        for view in range(4):
-            vp_gt_plot = vp[id, view, vertex_visibility[id, view].astype(np.bool).flatten()]
-            vp_gt_plot[..., 0] += 0.8 * view - 1.6
-            positions.append(vp_gt_plot)
-        positions = np.concatenate(positions, axis=0)
-
-        mesh_vp_gt = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vp_gt")
-        mesh_vp_gt.add_sphere() 
-        mesh_vp_gt.apply_transform(sp.Transforms.Scale(0.005)) 
-        mesh_vp_gt.enable_instancing(positions = positions) 
+        '''
+        vp: (B, N, 6890, 3)
+        vp_pred: (B, N, H, W, 3)
+        mask: (B, N, H, W)
+        conf: (B, N, H, W)
+        '''
+        vp_dist_squared, _ = chamfer_distance(vp_pred, vp, batch_reduction=None, point_reduction=None)
+        vp_pred_dist_to_vp = torch.sqrt(vp_dist_squared[0])
+        vp_pred_dist_to_vp = vp_pred_dist_to_vp.sum() / (full_mask.sum() + 1e-6)
 
 
-        # ----------------------- canvas -----------------------
-        golden_ratio = (1 + np.sqrt(5)) / 2
-        canvas = scene.create_canvas_3d(width = 1600, height = 1600 / golden_ratio, shading=sp.Shading(bg_color=sp.Colors.White))
-        frame = canvas.create_frame()
+        return {
+            'vc_pm_dist': vc_pm_dist,
+            'vpp2vp_chamfer_dist': vp_pred_dist_to_vp,
+        }
 
-        frame.add_mesh(mesh_vp_pred)
-        frame.add_mesh(mesh_vp_gt)
 
-        frame.add_mesh(mesh_vc_pred)
-        frame.add_mesh(mesh_vc_gt)
 
-        path = os.path.join(self.visualiser.save_dir, f'scenepic_vp_{self.global_step}.html')
-        scene.save_as_html(path)
+
+        if self.save_scenepic:
+            self.save_scenepic = False
+            # save a bunch of stuff for scenepic visualisation later
+            scenepic_dir = os.path.join(self.visualiser.save_dir, 'scenepic')
+            if not os.path.exists(scenepic_dir):
+                os.makedirs(scenepic_dir)
+
+            
+            vp = vp.detach().cpu().numpy()
+            vp_pred = vp_pred.detach().cpu().numpy()
+            vc_pred = vc_pred.detach().cpu().numpy()
+            vc = vc.detach().cpu().numpy()
+            color = np.argmax(w_pred.detach().cpu().numpy(), axis=-1)
+            normal_maps = normal_maps.detach().cpu().numpy()
+            masks = mask.detach().cpu().numpy()
+            vertex_visibility = batch['vertex_visibility'].detach().cpu().numpy()
+            
+            save = False 
+            if save:
+                np.save(os.path.join(scenepic_dir, f'vp_{self.global_step}.npy'), vp)
+                np.save(os.path.join(scenepic_dir, f'vertex_visibility_{self.global_step}.npy'), vertex_visibility)
+                np.save(os.path.join(scenepic_dir, f'color_{self.global_step}.npy'), color)
+                np.save(os.path.join(scenepic_dir, f'vc_{self.global_step}.npy'), vc)
+                np.save(os.path.join(scenepic_dir, f'vc_pred_{self.global_step}.npy'), vc_pred)
+                np.save(os.path.join(scenepic_dir, f'vp_pred_{self.global_step}.npy'), vp_pred)
+                np.save(os.path.join(scenepic_dir, f'normal_maps_{self.global_step}.npy'), normal_maps)
+                np.save(os.path.join(scenepic_dir, f'masks_{self.global_step}.npy'), masks)
+
+
+            id = 1
+            plot_gt = True
+            side_by_side = False
+
+            scene = sp.Scene()
+
+
+            # ----------------------- vc pred -----------------------
+            positions = []
+            colors = []
+            for view in range(4):
+                vc_plot = vc_pred[id, view, masks[id, view].astype(np.bool)].reshape(-1, 3)
+                vc_plot[..., 0] += 2.0
+                positions.append(vc_plot)
+                colors.append(color[id, view, masks[id, view].astype(np.bool)].flatten())
+
+            positions = np.concatenate(positions, axis=0)
+            colors = np.concatenate(colors, axis=0)
+            colors_normalized = colors / colors.max()
+            colors_rgb = viridis(colors_normalized)[:, :3] 
+
+            mesh_vc_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vc_pred")
+            mesh_vc_pred.add_sphere() 
+            mesh_vc_pred.apply_transform(sp.Transforms.Scale(0.005)) 
+            mesh_vc_pred.enable_instancing(positions = positions, colors = colors_rgb) 
+
+
+            # ----------------------- vc gt -----------------------
+            positions = []
+            for view in range(4):
+                vc_gt = vc[id, view, masks[id, view].astype(np.bool)].reshape(-1, 3)
+                vc_gt[..., 0] += 1.2 if side_by_side else 0
+                vc_gt[..., 0] += 2.0
+                positions.append(vc_gt)
+            positions = np.concatenate(positions, axis=0)
+
+            mesh_vc_gt = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vc_gt")
+            mesh_vc_gt.add_sphere() 
+            mesh_vc_gt.apply_transform(sp.Transforms.Scale(0.005)) 
+            mesh_vc_gt.enable_instancing(positions = positions) 
+
+
+
+            # ----------------------- vp pred -----------------------
+            positions = []
+            colors = []
+
+            for view in range(4):
+                vp_plot = vp_pred[id, view, masks[id, view].astype(np.bool).flatten()]
+                vp_plot[..., 0] += 0.8 * view - 1.6
+                positions.append(vp_plot)
+                colors.append(color[id, view, masks[id, view].astype(np.bool)].flatten())
+
+
+            positions = np.concatenate(positions, axis=0)
+            colors = np.concatenate(colors, axis=0)
+
+
+            colors_normalized = colors / colors.max()
+            colors_rgb = viridis(colors_normalized)[:, :3] 
+
+            mesh_vp_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vp_pred")
+            mesh_vp_pred.add_sphere() 
+            mesh_vp_pred.apply_transform(sp.Transforms.Scale(0.005)) 
+            mesh_vp_pred.enable_instancing(positions = positions, colors = colors_rgb) 
+
+
+            # ----------------------- vp gt -----------------------
+            positions = []
+            for view in range(4):
+                vp_gt_plot = vp[id, view, vertex_visibility[id, view].astype(np.bool).flatten()]
+                vp_gt_plot[..., 0] += 0.8 * view - 1.6
+                positions.append(vp_gt_plot)
+            positions = np.concatenate(positions, axis=0)
+
+            mesh_vp_gt = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vp_gt")
+            mesh_vp_gt.add_sphere() 
+            mesh_vp_gt.apply_transform(sp.Transforms.Scale(0.005)) 
+            mesh_vp_gt.enable_instancing(positions = positions) 
+
+
+            # ----------------------- canvas -----------------------
+            golden_ratio = (1 + np.sqrt(5)) / 2
+            canvas = scene.create_canvas_3d(width = 1600, height = 1600 / golden_ratio, shading=sp.Shading(bg_color=sp.Colors.White))
+            frame = canvas.create_frame()
+
+            frame.add_mesh(mesh_vp_pred)
+            frame.add_mesh(mesh_vp_gt)
+
+            frame.add_mesh(mesh_vc_pred)
+            frame.add_mesh(mesh_vc_gt)
+
+            path = os.path.join(self.visualiser.save_dir, f'scenepic_vp_{self.global_step}.html')
+            scene.save_as_html(path)
 
 
 
         return loss 
+    
+
+    def save_avatar(self, vc_pred, vc_conf, w_pred, joints, masks, w_smpl):
+        save_avatar = True
+        if save_avatar:
+            import pickle
+            with open('tinkering/avatar.pkl', 'wb') as f:
+                pickle.dump({
+                    # 'normal_maps': normal_maps,
+                    # 'vertex_visibility': vertex_visibility,
+                    # 'color': color,
+                    'masks': masks.cpu().detach().numpy(),
+                    'vc_pred': vc_pred.cpu().detach().numpy(),
+                    'vc_conf': vc_conf.cpu().detach().numpy(),
+                    'w_pred': w_pred.cpu().detach().numpy(),
+                    'w_smpl': w_smpl.cpu().detach().numpy(),
+                    'joints': joints.cpu().detach().numpy()
+                }, f)
+            print(vc_pred.shape, vc_conf.shape, w_pred.shape, joints.shape)
+
+        import ipdb; ipdb.set_trace()
+        print('')
+

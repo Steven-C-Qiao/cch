@@ -16,6 +16,7 @@ sys.path.append('.')
 from hmr.hmr_cfg import get_hmr_cfg_defaults
 from hmr.hmr_trainer import HMRTrainer
 from hmr.smpl_datamodule import SmplDataModule
+from core.data.cch_datamodule import CCHDataModule
 
 
 def run_test(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None):
@@ -43,8 +44,11 @@ def run_test(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=Non
         dev=dev,
         vis_save_dir=vis_save_dir
     )
+    if cfg.DATA.TYPE == 'cape':
+        datamodule = CCHDataModule(cfg)
+    else:
+        datamodule = SmplDataModule(cfg)
 
-    datamodule = SmplDataModule(cfg)
 
     # Callbacks
     checkpoint_callbacks = [

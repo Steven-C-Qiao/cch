@@ -20,7 +20,7 @@ from core.data.cch_datamodule import CCHDataModule
 
 
 def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None):
-    seed_everything(42)
+    seed_everything(1)
     
     # Get config
     cfg = get_hmr_cfg_defaults()

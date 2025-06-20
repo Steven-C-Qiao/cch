@@ -39,17 +39,17 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
     if cfg_opts is not None:
         cfg.merge_from_list(cfg_opts)
 
-    path = resume_path if resume_path is not None else load_path
-    if path is not None:
-        path = str(Path(path).parent.parent / 'lightning_logs')
-        if os.path.exists(path):
-            version_dirs = sorted(glob.glob(os.path.join(path, 'version_*')))
-            if version_dirs:
-                latest_version = version_dirs[-1]
-                hparams_file = os.path.join(latest_version, 'hparams.yaml')
-                if os.path.exists(hparams_file):
-                    cfg.merge_from_file(hparams_file)
-                    logger.info(f"Loaded hyperparameters from: {hparams_file}")
+    # path = resume_path if resume_path is not None else load_path
+    # if path is not None:
+    #     path = str(Path(path).parent.parent / 'lightning_logs')
+    #     if os.path.exists(path):
+    #         version_dirs = sorted(glob.glob(os.path.join(path, 'version_*')))
+    #         if version_dirs:
+    #             latest_version = version_dirs[-1]
+    #             hparams_file = os.path.join(latest_version, 'hparams.yaml')
+    #             if os.path.exists(hparams_file):
+    #                 cfg.merge_from_file(hparams_file)
+    #                 logger.info(f"Loaded hyperparameters from: {hparams_file}")
 
     if dev:
         cfg.TRAIN.BATCH_SIZE = 2

@@ -71,6 +71,7 @@ class CapeDataset(Dataset):
                     else:
                         raise ValueError(f"Invalid line: {line}")
 
+                    # self.seq_ids[id].append((sequence_name, valid_frames, removed_frames))
                     self.all_seqs.append((id, sequence_name, valid_frames, removed_frames))
         self.total_num_sequences = len(self.all_seqs)
         self.total_num_frames = sum(int(valid_frames) for _, _, valid_frames, _ in self.all_seqs)
@@ -91,6 +92,7 @@ class CapeDataset(Dataset):
         
         if removed_frames is not None:
             all_removed = removed_frames.split(',')
+            # print(all_removed)
             for i in range(len(all_removed)):
                 # Parse removed frames range if present
                 removed_start, removed_end = map(int, all_removed[i].split('-'))
@@ -108,6 +110,8 @@ class CapeDataset(Dataset):
         ret = defaultdict(list)
         for i in sampled_frames_indices:
             try:
+                # if f'sequences/{id}/{sequence_name}/{sequence_name}.{i:06d}.npz' in corrupted_frames:
+                #     continue
                 fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{i:06d}.npz')
                 data = np.load(fpath)
                 
@@ -130,7 +134,7 @@ class CapeDataset(Dataset):
 
                         # Seems that even data is loaded, some npys can still be broken, move append here
                         ret['transl'].append(temp_transl)
-                        ret['v_cano'].append(temp_v_cano) 
+                        ret['v_cano'].append(temp_v_cano) # NOTE Questionable, this is different for each frame 
                         ret['pose'].append(temp_pose)
                         ret['v_posed'].append(temp_v_posed)
                     except: # iterate until a valid frame is loaded
