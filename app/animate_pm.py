@@ -31,7 +31,7 @@ from core.models.smpl import SMPL
 from core.configs import paths
 from core.configs.cch_cfg import get_cch_cfg_defaults
 from core.utils.general_lbs import general_lbs
-from core.utils.pointrend import PointCloudRenderer
+from core.utils.diffpointrend import PointCloudRenderer
 
 MODEL_PATH = "/scratches/kyuban/cq244/CCH/cch/exp/exp_031_pred_w/saved_models/val_posed_loss_epoch=048.ckpt"
 AMASS_POSE_PATH = '/scratches/kyuban/cq244/datasets/AMASS/CNRS/283/-01_L_1_stageii.npz'

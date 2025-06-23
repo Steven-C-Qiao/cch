@@ -74,16 +74,17 @@ class CCHTrainer(pl.LightningModule):
 
         B, N = batch['pose'].shape[:2]
         vp = batch['v_posed']
+        vp_sampled = batch['v_posed_samples']
         masks = batch['masks'].squeeze()
         # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
         joints = batch['joints']
         normal_maps = batch['normal_imgs']
-        w_smpl = batch['skinning_weights_maps']
-        vc = batch['canonical_color_maps']
+        w_smpl = batch['w_pm']
+        vc = batch['vc_pm']
 
 
         # ------------------- forward pass -------------------
-        preds = self(normal_maps)
+        preds = self(normal_maps, pose=batch['pose'])
         vc_pred, vc_conf = preds['vc'], preds['vc_conf']
 
 
@@ -115,7 +116,7 @@ class CCHTrainer(pl.LightningModule):
 
 
         loss, loss_dict = self.criterion(
-            vp=batch['sampled_posed_points'],
+            vp=vp_sampled,
             vp_pred=vp_pred,
             vc=vc,
             vc_pred=vc_pred, 
@@ -124,10 +125,21 @@ class CCHTrainer(pl.LightningModule):
             w_pred=w_pred,
             w_smpl=w_smpl,
             dvc_pred=dvc_pred,
-            dvc_conf=dvc_conf
-        )
+            dvc_conf=dvc_conf,
+            epoch=self.current_epoch
+        )          
+        self.log(f'{split}_loss', loss, prog_bar=True, sync_dist=True, rank_zero_only=True)
+        self.log_dict(loss_dict, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
 
-        # Visualise and log
+        self.metrics(vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'), 
+                     vc_pred=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'), 
+                     vp=rearrange(vp, 'b n v c -> (b n) v c'), 
+                     vp_pred=rearrange(vp_pred, 'b n v c -> (b n) v c'), 
+                     conf=rearrange(vc_conf, 'b n h w -> (b n) (h w)'), 
+                     mask=rearrange(masks, 'b n h w -> (b n) (h w)'), 
+                     split=split)
+
+        # Visualise
         if self.global_step % self.vis_frequency == 0:
             self.visualiser.visualise(
                 normal_maps=normal_maps.cpu().detach().numpy(),
@@ -143,19 +155,47 @@ class CCHTrainer(pl.LightningModule):
                 plot_error_heatmap=True
             )
 
-        self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
-        for k, v in loss_dict.items():
-            if k != 'total_loss':
-                self.log(f'{split}_{k}', v, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
-
-        vc_avg_err = torch.linalg.norm(vc - vc_pred, dim=-1) * masks 
-        vc_avg_err = vc_avg_err.sum() / masks.sum()
-        self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
-
-        # print(vc_avg_err, loss_dict['vc_pointmap_dist'])
-        # import ipdb; ipdb.set_trace()
-
         return loss 
+    
+
+    def metrics(self, vc=None, vc_pred=None, vp=None, vp_pred=None, conf=None, mask=None, split='train'):
+        if conf is not None:
+            conf_threshold = 0.08
+            conf_mask = (1/conf) < conf_threshold
+        full_mask = (mask * conf_mask).bool()
+
+        # ----------------------- vc -----------------------
+        vc_pm_dist = torch.norm(vc - vc_pred, dim=-1) * full_mask 
+        vc_pm_dist = vc_pm_dist.sum() / (full_mask.sum() + 1e-6) * 100.0
+
+
+        # ----------------------- vp -----------------------
+        '''
+        vp: (B, N, 6890, 3)
+        vp_pred: (B, N, H, W, 3)
+        mask: (B, N, H, W)
+        conf: (B, N, H, W)
+        '''
+        vp_dist_squared, _ = chamfer_distance(vp_pred, vp, batch_reduction=None, point_reduction=None)
+        vpp2vp_dist = torch.sqrt(vp_dist_squared[0])
+        masked_vpp2vp_dist = vpp2vp_dist * full_mask
+        vpp2vp_dist = masked_vpp2vp_dist.sum() / (full_mask.sum() + 1e-6) * 100.0
+
+        vp2vpp_dist = torch.sqrt(vp_dist_squared[1])
+        vp2vpp_dist = vp2vpp_dist.mean() * 100.0
+
+
+        self.log(f'{split}_vc_pm_dist',          vc_pm_dist,  on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
+        self.log(f'{split}_vpp2vp_chamfer_dist', vpp2vp_dist, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
+        self.log(f'{split}_vp2vpp_chamfer_dist', vp2vpp_dist, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
+
+        return {
+            'vc_pm_dist': vc_pm_dist,
+            'vpp2vp_chamfer_dist': vpp2vp_dist,
+            'vp2vpp_chamfer_dist': vp2vpp_dist,
+        }
+
+
 
 
 
@@ -221,8 +261,8 @@ class CCHTrainer(pl.LightningModule):
             batch['T'] = T
             batch['joints'] = joints
             batch['masks'] = masks
-            batch['skinning_weights_maps'] = skinning_weights_maps
-            batch['canonical_color_maps'] = canonical_color_maps
+            batch['w_pm'] = skinning_weights_maps
+            batch['vc_pm'] = canonical_color_maps
             batch['vertex_visibility'] = ret['vertex_visibility']
         return batch 
     
@@ -233,15 +273,6 @@ class CCHTrainer(pl.LightningModule):
             # self.log('val_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
     
-    def on_validation_epoch_end(self):
-        pass 
-        # names = []
-        # vals = []
-        # for name, param in self.criterion.named_parameters():
-        #     names.append(name.split('.')[-1])
-        #     vals.append(torch.exp(-param.data.clone()).item())
-        # logger.info(f'Current homosced weights: {list(zip(names, vals))}')
-
 
     def configure_optimizers(self):
         params = list(self.model.parameters()) + list(self.criterion.parameters())
@@ -264,43 +295,12 @@ class CCHTrainer(pl.LightningModule):
             }
         else:
             return optimizer
-        
-        
-    
-    # def on_after_backward(self):
-    #     for name, param in self.named_parameters():
-    #         if param.grad is None:
-    #             print(name)
 
-    #     # Check if skinning weights are enabled in config
-    #     if self.cfg.MODEL.SKINNING_WEIGHTS:
-    #         # Get the last layer of skinning_head's output_conv2
-    #         last_layer = self.model.skinning_head.scratch.output_conv2[-1]
-            
-    #         if hasattr(last_layer, 'weight') and last_layer.weight.grad is not None:
-    #             grad_norm = last_layer.weight.grad.norm().item()
-    #             print(f"Skinning head last layer weight gradient norm: {grad_norm}")
-                
-    #         if hasattr(last_layer, 'bias') and last_layer.bias.grad is not None:
-    #             grad_norm = last_layer.bias.grad.norm().item()
-    #             print(f"Skinning head last layer bias gradient norm: {grad_norm}")
 
-    # def on_after_backward(self):
-    #     for name, param in self.named_parameters():
-    #         if param.grad is not None:
-    #             grad_norm = param.grad.norm().item()
-    #             if grad_norm > 10:
-    #                 print(f"Large gradient in {name}: {grad_norm}")
-    
     def test_step(self, batch, batch_idx):
 
         import scenepic as sp 
-        from matplotlib import cm, pyplot as plt
-        from matplotlib.colors import Normalize
-        from matplotlib.cm import viridis
-
-        from pytorch3d.loss import chamfer_distance
-
+        from matplotlib import pyplot as plt
         viridis = plt.colormaps.get_cmap('viridis')
 
         split = 'test'
@@ -316,12 +316,13 @@ class CCHTrainer(pl.LightningModule):
 
         B, N = batch['pose'].shape[:2]
         vp = batch['v_posed']
+        vp_sampled = batch['v_posed_samples']
         mask = batch['masks'].squeeze()
         # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
         joints = batch['joints']
         normal_maps = batch['normal_imgs']
-        w_smpl = batch['skinning_weights_maps']
-        vc = batch['canonical_color_maps']
+        w_smpl = batch['w_pm']
+        vc = batch['vc_pm']
 
 
         # ------------------- forward pass -------------------
@@ -331,10 +332,8 @@ class CCHTrainer(pl.LightningModule):
 
         if self.cfg.MODEL.SKINNING_WEIGHTS:
             w_pred, w_conf = preds['w'], preds['w_conf']
-            # w_pred = w_smpl + w_pred
         else:
-            w_pred = w_smpl
-            w_conf = None
+            w_pred, w_conf = w_smpl, None
 
         if self.cfg.MODEL.POSE_CORRECTIVES:
             dvc_pred, dvc_conf = preds['dvc'], preds['dvc_conf']
@@ -354,41 +353,32 @@ class CCHTrainer(pl.LightningModule):
         # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
 
-        loss, loss_dict = self.criterion(vp=batch['sampled_posed_points'],
+        loss, loss_dict = self.criterion(vp=vp_sampled,
                                          vp_pred=vp_pred,
                                          vc=vc,
                                          vc_pred=vc_pred, 
                                          conf=vc_conf,
                                          mask=mask,
                                          w_pred=w_pred,
-                                         w_smpl=w_smpl)
-
-
-        self.log(f'{split}_loss', loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
-        for k, v in loss_dict.items():
-            if k != 'total_loss':
-                self.log(f'{split}_{k}', v, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
-
-
-        # pointmap vc average error
-        vc_avg_err = torch.linalg.norm(vc - vc_pred, dim=-1) * mask 
-        vc_avg_err = vc_avg_err.sum() / mask.sum()
-        self.log(f'{split}_vc_avg_dist', vc_avg_err, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
-
+                                         w_smpl=w_smpl,
+                                         epoch=self.current_epoch)
+        self.log(f'{split}_loss', loss, prog_bar=True, sync_dist=True, rank_zero_only=True)
+        self.metrics(vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'), 
+                     vc_pred=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'), 
+                     vp=rearrange(vp, 'b n v c -> (b n) v c'), 
+                     vp_pred=rearrange(vp_pred, 'b n v c -> (b n) v c'), 
+                     conf=rearrange(vc_conf, 'b n h w -> (b n) (h w)'), 
+                     mask=rearrange(mask, 'b n h w -> (b n) (h w)'), 
+                     split=split)
 
         # chamfer distance between vc and vc_pred
         vc_first_frame = batch['first_frame_v_cano']
-        
 
         if vc_conf is not None:
             conf_threshold = 0.08
             conf_mask = (1/vc_conf) < conf_threshold
 
         full_mask = (mask * conf_mask).bool()
-
-        # print(vc_first_frame.shape, vc_pred.shape)
-        # print(mask.shape, conf_mask.shape, full_mask.shape)
-
         
         vc_mesh_chamfer, _ = chamfer_distance(rearrange(vc_pred, 'b n h w c -> b (n h w) c'), 
                                            vc_first_frame, 
@@ -397,42 +387,12 @@ class CCHTrainer(pl.LightningModule):
         vc_mesh_chamfer = vc_mesh_chamfer[0] * rearrange(full_mask, 'b n h w -> b (n h w)')
         vc_mesh_chamfer = vc_mesh_chamfer.sum() / (full_mask.sum() + 1e-6)
 
-        self.log(f'{split}_vc_mesh_chamfer', vc_mesh_chamfer, on_step=True, on_epoch=True, sync_dist=True, rank_zero_only=True)
+        self.log(f'{split}_vc_mesh_chamfer', vc_mesh_chamfer, sync_dist=True, rank_zero_only=True)
 
 
-
-    def metrics(self, vc=None, vc_pred=None, vp=None, vp_pred=None, conf=None, mask=None):
-        if conf is not None:
-            conf_threshold = 0.08
-            conf_mask = (1/conf) < conf_threshold
-        full_mask = (mask * conf_mask).bool()
-
-        # ----------------------- vc -----------------------
-        vc_pm_dist = torch.norm(vc - vc_pred, dim=-1) * full_mask 
-        vc_pm_dist = vc_pm_dist.sum() / (full_mask.sum() + 1e-6)
-
-
-        '''
-        vp: (B, N, 6890, 3)
-        vp_pred: (B, N, H, W, 3)
-        mask: (B, N, H, W)
-        conf: (B, N, H, W)
-        '''
-        vp_dist_squared, _ = chamfer_distance(vp_pred, vp, batch_reduction=None, point_reduction=None)
-        vp_pred_dist_to_vp = torch.sqrt(vp_dist_squared[0])
-        vp_pred_dist_to_vp = vp_pred_dist_to_vp.sum() / (full_mask.sum() + 1e-6)
-
-
-        return {
-            'vc_pm_dist': vc_pm_dist,
-            'vpp2vp_chamfer_dist': vp_pred_dist_to_vp,
-        }
-
-
-
-
-        if self.save_scenepic:
-            self.save_scenepic = False
+        save_scenepic = True
+        if save_scenepic:
+            save_scenepic = False
             # save a bunch of stuff for scenepic visualisation later
             scenepic_dir = os.path.join(self.visualiser.save_dir, 'scenepic')
             if not os.path.exists(scenepic_dir):

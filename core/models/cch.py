@@ -7,6 +7,7 @@ from einops import rearrange
 
 from core.heads.dpt_head import DPTHead
 from core.models.cch_aggregator import Aggregator
+from core.heads.pose_corrective_head import PoseCorrectiveHead
 
 
 class CCH(nn.Module):
@@ -28,7 +29,8 @@ class CCH(nn.Module):
 
         if cfg.MODEL.POSE_CORRECTIVES:
             # per-frame pose correctives and uncertainty
-            self.pose_correctives_head = DPTHead(dim_in=2 * embed_dim, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3) 
+            # self.pose_correctives_head = DPTHead(dim_in=2 * embed_dim, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3) 
+            self.pose_correctives_head = PoseCorrectiveHead(condition_dim=72)
 
         # if predict_smpl_topology:
         #     self.mesh_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1", feature_only=True)
@@ -37,7 +39,7 @@ class CCH(nn.Module):
 
 
 
-    def forward(self, images):
+    def forward(self, images, pose=None):
 
         if len(images.shape) == 4:
             images = images.unsqueeze(0)
@@ -60,8 +62,16 @@ class CCH(nn.Module):
             w, w_conf = None, None
 
         if self.cfg.MODEL.POSE_CORRECTIVES:
-            pose_correctives, pose_correctives_conf = self.pose_correctives_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, 
-                                                                                 additional_conditioning=vc)
+            # Given pose, and w, repose canonical points and render the posed position maps. This serves as the condition for the pose corrective head.
+            # The pose corrective head will take in the posed position maps and the canonical position maps, and output the pose corrective.
+            # The pose corrective is then added to the canonical position maps to get the final position maps.
+
+            pose_correctives = self.pose_correctives_head(pose, vc)
+
+
+            # pose_correctives, pose_correctives_conf = self.pose_correctives_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, 
+            #                                                                      additional_conditioning=vc)
+            # pose_correctives = (torch.sigmoid(pose_correctives) - 0.5) * 0.2
         else:
             pose_correctives, pose_correctives_conf = None, None
 

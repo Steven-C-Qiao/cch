@@ -79,29 +79,20 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
     checkpoint_callbacks = [
         ModelCheckpoint(
             dirpath=model_save_dir,
-            filename='val_loss_{epoch:03d}',
+            filename='val_vc_pm_dist_{epoch:03d}',
             save_top_k=1,
             save_last=True,
             verbose=True,
-            monitor='val_loss',
+            monitor='val_vc_pm_dist',
             mode='min'
         ),
         ModelCheckpoint(
             dirpath=model_save_dir,
-            filename='val_vc_avg_dist_{epoch:03d}',
+            filename='val_vpp2vp_chamfer_dist_{epoch:03d}',
             save_top_k=1,
             save_last=True,
             verbose=True,
-            monitor='val_vc_avg_dist',
-            mode='min'
-        ),
-        ModelCheckpoint(
-            dirpath=model_save_dir,
-            filename='val_posed_loss_{epoch:03d}',
-            save_top_k=1,
-            save_last=True,
-            verbose=True,
-            monitor='val_posed_loss',
+            monitor='val_vpp2vp_chamfer_dist',
             mode='min'
         ),
     ]
@@ -181,6 +172,7 @@ if __name__ == '__main__':
 
     assert ((args.resume_training_states is not None) * (args.load_from_ckpt is not None) == 0), 'Specify either resume_training_states or load_from_ckpt, not both'
 
+    torch.set_float32_matmul_precision('high')
     run_train(
         exp_dir=args.experiment_dir,
         cfg_opts=args.cfg_opts,

@@ -4,6 +4,7 @@
 *.ipynb
 *.js
 *.pkl
+*.npz
 
 __pycache__
 

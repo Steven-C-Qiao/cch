@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from pytorch3d.loss import chamfer_distance
-
+import pytorch_lightning as pl
 from einops import rearrange
 
 class CanonicalRGBConfLoss(nn.Module):
@@ -66,7 +66,7 @@ class PosedPointmapChamferLoss(nn.Module):
 
         loss = masked_loss_v_pred_to_v + loss_v_to_v_pred.mean()
 
-        return loss, masked_loss_v_pred_to_v
+        return loss
         
 
 class SkinningWeightLoss(nn.Module):
@@ -87,7 +87,7 @@ class SkinningWeightLoss(nn.Module):
         
 
 
-class CCHLoss(nn.Module):
+class CCHLoss(pl.LightningModule):
     """
     vc_gt: (B, N, H, W, 3)
     vc_pred: (B, N, H, W, 3)
@@ -104,46 +104,61 @@ class CCHLoss(nn.Module):
         self.canonical_rgb_loss = CanonicalRGBConfLoss()
         self.skinning_weight_loss = SkinningWeightLoss()
 
+        self._create_loss_weight_schedule(cfg)
 
-    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, w_pred=None, w_smpl=None, dvc_pred=None, dvc_conf=None):
+
+    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, w_pred=None, w_smpl=None, dvc_pred=None, dvc_conf=None, epoch=None):
         loss_dict = {}
 
-        posed_loss, chamfer_vp_pred_to_vp = self.posed_pointmap_loss(rearrange(vp, 'b n v c -> (b n) v c'), 
-                                                                     rearrange(vp_pred, 'b n v c -> (b n) v c'), 
-                                                                     rearrange(mask, 'b n h w -> (b n) (h w)')) 
-        posed_loss *= self.cfg.LOSS.VP_LOSS_WEIGHT
-        loss_dict['posed_loss'] = posed_loss
-        loss_dict['chamfer_vp_pred_to_vp'] = chamfer_vp_pred_to_vp
+        posed_loss = self.posed_pointmap_loss(
+            rearrange(vp, 'b n v c -> (b n) v c'), 
+            rearrange(vp_pred, 'b n v c -> (b n) v c'), 
+            rearrange(mask, 'b n h w -> (b n) (h w)')
+        ) 
+        posed_loss *= self.posed_loss_schedule[epoch]
+        loss_dict['vp_chamfer_loss'] = posed_loss
 
         canonical_loss = self.canonical_rgb_loss(vc, vc_pred, conf=conf, mask=mask)
-        canonical_loss *= self.cfg.LOSS.VC_LOSS_WEIGHT
-        loss_dict['canonical_loss'] = canonical_loss
+        canonical_loss *= self.canonical_loss_schedule[epoch]
+        loss_dict['vc_pm_loss'] = canonical_loss
         
         total_loss = posed_loss + canonical_loss
         
         if w_pred is not None:
-            loss_w = self.skinning_weight_loss(w_smpl, w_pred, mask) * self.cfg.LOSS.W_REGULARISER_WEIGHT
+            loss_w = self.skinning_weight_loss(w_smpl, w_pred, mask) * self.w_reg_loss_schedule[epoch]
             loss_dict['w_reg_loss'] = loss_w
             total_loss += loss_w
 
         if dvc_pred is not None:
             # l2 loss for dvc_pred
             dvc_loss = torch.norm(dvc_pred, dim=-1)
-            dvc_loss = dvc_loss.mean() * self.cfg.LOSS.DVC_LOSS_WEIGHT
-            loss_dict['dvc_loss'] = dvc_loss
+            dvc_loss = dvc_loss.mean() * self.dvc_loss_schedule[epoch]
+            loss_dict['dvc_reg_loss'] = dvc_loss
             total_loss += dvc_loss
 
         loss_dict['total_loss'] = total_loss
+        
         return total_loss, loss_dict
     
+    def _create_loss_weight_schedule(self, cfg):
+        """
+        Create a loss weight schedule for the loss weights
+        """
+        total_epochs = cfg.TRAIN.NUM_EPOCHS
+        self.posed_loss_schedule = torch.linspace(cfg.LOSS.VP_LOSS_WEIGHT, cfg.LOSS.VP_LOSS_WEIGHT_FINAL, total_epochs)
+        self.canonical_loss_schedule = torch.linspace(cfg.LOSS.VC_LOSS_WEIGHT, cfg.LOSS.VC_LOSS_WEIGHT_FINAL, total_epochs)
+        self.w_reg_loss_schedule = torch.linspace(cfg.LOSS.W_REGULARISER_WEIGHT, cfg.LOSS.W_REGULARISER_WEIGHT_FINAL, total_epochs)
+        self.dvc_loss_schedule = torch.linspace(cfg.LOSS.DVC_LOSS_WEIGHT, cfg.LOSS.DVC_LOSS_WEIGHT_FINAL, total_epochs)
+
 
 if __name__ == '__main__':
     # test chamfer dist
     x = torch.tensor([[[0, 0, 0], [1, 1, 1]]]).float()
-    y = torch.tensor([[[1, 1, 1], [-1, -1, 0]]]).float()
+    y = torch.tensor([[[0.5, 0.5, 0.5]]]).float()
     loss, loss_normals = chamfer_distance(x, y, 
                                 single_directional=False, 
                                 batch_reduction=None, 
                                 point_reduction=None)
-    print(loss)
-    print(loss_normals)
+    reduced_loss, reduced_loss_normals = chamfer_distance(x, y)
+    print(loss)  # (tensor([[0.7500, 0.7500]]), tensor([[0.7500]]))
+    print(reduced_loss)  # tensor(1.5000)
