@@ -45,11 +45,12 @@ class Visualiser(pl.LightningModule):
             plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_normal_images.png'))
             plt.close()
       
-    def visualise_vc_as_image(self, vc_pred, vc=None, mask=None, conf=None, plot_error_heatmap=True):
+    def visualise_vc_as_image(self, vc_pred, vc=None, mask=None, conf=None, 
+                              plot_error_heatmap=True, dvc=None, vp_cond=None, vp_cond_mask=None):
         if self.rank == 0:
             B, N, H, W, C = vc_pred.shape
 
-            B = min(B, 2)
+            B = min(B, 1)
             N = min(N, 4)
 
             if conf is not None:
@@ -75,9 +76,17 @@ class Visualiser(pl.LightningModule):
 
                 vc_pred = np.clip(vc_pred, 0, 1)
 
-            
-            num_rows = 3 if plot_error_heatmap else 2
+            if vp_cond is not None:
+                vp_cond = (vp_cond + 1) / 2
+                vp_cond = vp_cond.clip(0, 1)
+                vp_cond[~vp_cond_mask.astype(bool)] = 1
+                vp_cond = vp_cond * 255
+
+            num_rows = 2
+            num_rows += 1 if plot_error_heatmap else 0
             num_rows += 1 if conf is not None else 0
+            num_rows += 1 if dvc is not None else 0
+            num_rows += 1 if vp_cond is not None else 0
             fig = plt.figure(figsize=(4*N, num_rows*4*B))
 
             for b in range(B):
@@ -122,7 +131,30 @@ class Visualiser(pl.LightningModule):
                         plt.title(f'1/conf Frame {n}')
                         if n == N-1: 
                             plt.colorbar(im)
-                        plt.axis('off')    
+                        plt.axis('off')
+
+                    if dvc is not None:
+                        plt.subplot(num_rows*B, N, (b*num_rows+4)*N + n + 1)
+                        dvc_masked = dvc[b,n] * mask[b,n][..., None]
+                        # dvc_norm_masked = np.linalg.norm(dvc_masked, axis=-1)
+
+
+                        # viridis = plt.cm.get_cmap('viridis')
+                        # dvc_viridis = viridis(dvc_norm_masked)[..., :3]
+
+                        # dvc_viridis[~mask[b,n].astype(np.bool)] = 1
+
+                        im = plt.imshow(dvc_masked)
+                        plt.title(f'dvc Frame {n}')
+                        if n == N-1:
+                            plt.colorbar(im)
+                        plt.axis('off')
+
+                    if vp_cond is not None:
+                        plt.subplot(num_rows*B, N, (b*num_rows+5)*N + n + 1)
+                        im = plt.imshow(vp_cond[b,n].astype(np.uint8))
+                        plt.title(f'rend vp {n}')
+                        plt.axis('off')
                         
             plt.tight_layout()
             plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_colormaps.png'))
@@ -282,7 +314,10 @@ class Visualiser(pl.LightningModule):
                   color=None, 
                   vertex_visibility=None, 
                   no_annotations=True,
-                  plot_error_heatmap=True):
+                  plot_error_heatmap=True,
+                  dvc=None,
+                  vp_cond=None,
+                  vp_cond_mask=None):
         """
         Visualise normal images, canonical pointmaps, and posed vertices
 
@@ -309,6 +344,9 @@ class Visualiser(pl.LightningModule):
 
         self.visualise_vc_as_image(vc_pred=vc_pred, 
                                    vc=vc, 
+                                   dvc=dvc,
+                                   vp_cond=vp_cond,
+                                   vp_cond_mask=vp_cond_mask,
                                    mask=mask, 
                                    conf=conf, 
                                    plot_error_heatmap=plot_error_heatmap)

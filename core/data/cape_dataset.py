@@ -106,6 +106,7 @@ class CapeDataset(Dataset):
         sampled_frames_indices = np.random.choice(valid_frames_indices, self.num_frames, replace=False)
 
         ret = defaultdict(list)
+        print2=False
         for i in sampled_frames_indices:
             # try:
             #     fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{i:06d}.npz')
@@ -136,18 +137,34 @@ class CapeDataset(Dataset):
             #         except: # iterate until a valid frame is loaded
             #             continue
             data = None
+            printing = False
             while data is None:
                 try:
                     fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{i:06d}.npz')
+                    if printing:
+                        print(f'worker {torch.utils.data.get_worker_info().id if torch.utils.data.get_worker_info() else "main"} trying frame {i} {fpath}')
                     data = np.load(fpath)
-                    ret['transl'].append(torch.from_numpy(data['transl']).float())
-                    ret['v_cano'].append(torch.from_numpy(data['v_cano']).float())
-                    ret['pose'].append(torch.from_numpy(data['pose']).float()) 
-                    ret['v_posed'].append(torch.from_numpy(data['v_posed']).float())
+
+                    transl = torch.from_numpy(data['transl']).float()
+                    v_cano = torch.from_numpy(data['v_cano']).float()
+                    pose = torch.from_numpy(data['pose']).float() 
+                    v_posed = torch.from_numpy(data['v_posed']).float()
+
+                    if printing:
+                        print('success')
+                        print2=True
+                    
                 except:
+                    printing=True
                     # Sample a new random frame if loading fails
+                    print(f'failed to load frame {i} {fpath}')
                     i = np.random.choice(valid_frames_indices, 1, replace=False)[0]
                     continue
+
+            ret['transl'].append(transl)
+            ret['v_cano'].append(v_cano)
+            ret['pose'].append(pose) 
+            ret['v_posed'].append(v_posed)
 
                 
             # Sample from vp for chamfer
@@ -180,6 +197,10 @@ class CapeDataset(Dataset):
             fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{frame}.npz')
         data = np.load(fpath)
         ret['first_frame_v_cano'] = torch.from_numpy(data['v_cano']).float()
+
+
+        if print2:
+            print(f'getitem {index} done after error')
 
         
 

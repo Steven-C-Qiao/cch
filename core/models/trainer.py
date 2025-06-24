@@ -30,7 +30,7 @@ class CCHTrainer(pl.LightningModule):
         self.dev = dev
         self.cfg = cfg
         self.normalise = cfg.DATA.NORMALISE
-        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 100
+        self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 5
  
         self.renderer = SurfaceNormalRenderer(image_size=(224, 224))
 
@@ -55,8 +55,8 @@ class CCHTrainer(pl.LightningModule):
         self.save_hyperparameters(ignore=['smpl_model'])
         
 
-    def forward(self, batch):
-        return self.model(batch)
+    def forward(self, batch, pose=None, joints=None, w_smpl=None, mask=None, R=None, T=None):
+        return self.model(batch, pose=pose, joints=joints, w_smpl=w_smpl, mask=mask, R=R, T=T)
     
     def on_train_epoch_start(self):
         self.visualiser.set_global_rank(self.global_rank)
@@ -84,35 +84,29 @@ class CCHTrainer(pl.LightningModule):
 
 
         # ------------------- forward pass -------------------
-        preds = self(normal_maps, pose=batch['pose'])
-        vc_pred, vc_conf = preds['vc'], preds['vc_conf']
+        preds = self(
+            normal_maps, 
+            pose=batch['pose'], 
+            joints=batch['joints'], 
+            w_smpl=batch['w_pm'], 
+            mask=batch['masks'], 
+            R=batch['R'], 
+            T=batch['T']
+        )
+        vp_init_pred, vc_pred, w_pred, dvc_pred = preds['vp'], preds['vc'], preds['w'], preds['dvc']
+        vc_conf, w_conf, dvc_conf = preds['vc_conf'], preds['w_conf'], None
+        vp_cond = preds['vp_cond']
 
 
-        if self.cfg.MODEL.SKINNING_WEIGHTS:
-            w_pred, w_conf = preds['w'], preds['w_conf']
-            # w_pred = w_smpl + dw_pred
-        else:
-            w_pred, w_conf = w_smpl, None
-
-        if self.cfg.MODEL.POSE_CORRECTIVES:
-            dvc_pred, dvc_conf = preds['dvc'], preds['dvc_conf']
-            vc_pred = vc_pred + dvc_pred
-        else:
-            dvc_pred, dvc_conf = None, None
-
-        vp_pred, joints_pred = general_lbs(
-            vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
+        vp_pred, _ = general_lbs(
+            vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'),
             pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
-            lbs_weights=rearrange(w_pred, 'b n h w j -> (b n) (h w) j'),
+            lbs_weights=rearrange(w_smpl, 'b n h w j -> (b n) (h w) j'),
             J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
             parents=self.smpl_model.parents 
         )
         vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
-        # joints_pred = rearrange(joints_pred, '(b n) j c -> b n j c', b=B, n=N)
 
-
-        # For app.animate_pm.py 
-        # self.save_avatar(vc_pred, vc_conf, w_pred, joints, masks, w_smpl=w_smpl)
 
 
         loss, loss_dict = self.criterion(
@@ -127,7 +121,7 @@ class CCHTrainer(pl.LightningModule):
             dvc_pred=dvc_pred,
             dvc_conf=dvc_conf,
             epoch=self.current_epoch
-        )          
+        )
         self.log(f'{split}_loss', loss, prog_bar=True, sync_dist=True, rank_zero_only=True)
         self.log_dict(loss_dict, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
 
@@ -151,9 +145,13 @@ class CCHTrainer(pl.LightningModule):
                 mask=masks.cpu().detach().numpy(),
                 vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
                 color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
+                # dvc=dvc_pred.cpu().detach().numpy(),
+                # vp_cond=rearrange(vp_cond, 'b n c h w -> b n h w c').cpu().detach().numpy(),
                 no_annotations=True,
                 plot_error_heatmap=True
             )
+        # For app.animate_pm.py 
+        # self.save_avatar(vc_pred, vc_conf, w_pred, joints, masks, w_smpl=w_smpl)
 
         return loss 
     
@@ -216,8 +214,8 @@ class CCHTrainer(pl.LightningModule):
                 vc = batch['first_frame_v_cano'] # B, 6890, 3
                 subject_height = (vc[..., 1].max(dim=-1).values - vc[..., 1].min(dim=-1).values)
 
-                batch['first_frame_v_cano'] = vc / subject_height[:, None, None] # B, 6890, 3
-                batch['v_posed'] = batch['v_posed'] / subject_height[:, None, None, None] # B, N, 6890, 3
+                batch['first_frame_v_cano'] = vc / subject_height[:, None, None] * 1.7 # B, 6890, 3
+                batch['v_posed'] = batch['v_posed'] / subject_height[:, None, None, None] * 1.7 # B, N, 6890, 3
                 
 
 
@@ -231,10 +229,10 @@ class CCHTrainer(pl.LightningModule):
             # CAPE provided naked shape is bad, 
             # add a correction to the joints by scaling height of the provided naked shape to first_frame_v_cano
             naked_height = (smpl_output.vertices[:, :, 1].max(dim=-1).values - smpl_output.vertices[:, :, 1].min(dim=-1).values)
-            joints = joints * (subject_height[:, None, None] / naked_height[:, None, None])
+            joints = joints * (subject_height[:, None, None] / naked_height[:, None, None]) 
 
             if normalise:
-                joints = joints / subject_height[:, None, None]
+                joints = joints / subject_height[:, None, None] * 1.7
 
             w = (self.smpl_model.lbs_weights)[None, None].repeat(batch_size, num_frames, 1, 1)
 
@@ -245,11 +243,13 @@ class CCHTrainer(pl.LightningModule):
             T = T.to(self.device)
 
             # render normal images
-            ret = self.renderer(vp, 
-                                R, 
-                                T, 
-                                skinning_weights=w,
-                                first_frame_v_cano=batch['first_frame_v_cano'])
+            ret = self.renderer(
+                vertices=batch['v_posed'], 
+                R=R, 
+                T=T, 
+                skinning_weights=w,
+                first_frame_v_cano=batch['first_frame_v_cano']
+            )
             normal_imgs = ret['normals'].permute(0, 1, 4, 2, 3)
             masks = ret['masks'].permute(0, 1, 4, 2, 3)
             skinning_weights_maps = ret['skinning_weights_maps']
@@ -326,7 +326,7 @@ class CCHTrainer(pl.LightningModule):
 
 
         # ------------------- forward pass -------------------
-        preds = self(normal_maps)
+        preds = self(normal_maps, pose=batch['pose'], joints=batch['joints'], w_smpl=batch['w_pm'], mask=batch['masks'], R=batch['R'], T=batch['T'])
         vc_pred, vc_conf = preds['vc'], preds['vc_conf']
 
 

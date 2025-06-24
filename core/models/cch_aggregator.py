@@ -66,10 +66,11 @@ class Aggregator(nn.Module):
         qk_norm=True,
         rope_freq=100,
         init_values=0.01,
+        input_channels=3,
     ):
         super().__init__()
 
-        self.__build_patch_embed__(patch_embed, img_size, patch_size, num_register_tokens, embed_dim=embed_dim)
+        self.__build_patch_embed__(patch_embed, img_size, patch_size, num_register_tokens, embed_dim=embed_dim, input_channels=input_channels)
 
         # Initialize rotary position embedding if frequency > 0
         self.rope = RotaryPositionEmbedding2D(frequency=rope_freq) if rope_freq > 0 else None
@@ -154,6 +155,7 @@ class Aggregator(nn.Module):
         block_chunks=0,
         init_values=1.0,
         embed_dim=1024,
+        input_channels=3,
     ):
         """
         Build the patch embed layer. If 'conv', we use a
@@ -161,7 +163,7 @@ class Aggregator(nn.Module):
         """
 
         if "conv" in patch_embed:
-            self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, in_chans=3, embed_dim=embed_dim)
+            self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, in_chans=input_channels, embed_dim=embed_dim)
         else:
             vit_models = {
                 "dinov2_vitl14_reg": vit_large,
@@ -200,11 +202,12 @@ class Aggregator(nn.Module):
         """
         B, S, C_in, H, W = images.shape
 
-        if C_in != 3:
+        if C_in != 3 and C_in != 6:
             raise ValueError(f"Expected 3 input channels, got {C_in}")
 
-        # Normalize images and reshape for patch embed
-        images = (images - self._resnet_mean) / self._resnet_std
+        if C_in == 3:
+            # Normalize images and reshape for patch embed
+            images = (images - self._resnet_mean) / self._resnet_std
 
         # Reshape to [B*S, C, H, W] for patch embedding
         images = images.view(B * S, C_in, H, W)

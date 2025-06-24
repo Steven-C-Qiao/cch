@@ -13,8 +13,8 @@ class CanonicalRGBConfLoss(nn.Module):
     conf: (B, N, H, W) in [0, 1]
     mask: (B, N, H, W)
     """
-    def __init__(self, alpha=1.0):
-        self.alpha = alpha
+    def __init__(self, cfg):
+        self.alpha = cfg.LOSS.ALPHA
         super().__init__()
 
     def get_conf_log(self, x):
@@ -101,7 +101,7 @@ class CCHLoss(pl.LightningModule):
         self.cfg = cfg
 
         self.posed_pointmap_loss = PosedPointmapChamferLoss(cfg)
-        self.canonical_rgb_loss = CanonicalRGBConfLoss()
+        self.canonical_rgb_loss = CanonicalRGBConfLoss(cfg)
         self.skinning_weight_loss = SkinningWeightLoss()
 
         self._create_loss_weight_schedule(cfg)

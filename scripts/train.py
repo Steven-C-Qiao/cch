@@ -81,7 +81,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
             dirpath=model_save_dir,
             filename='val_vc_pm_dist_{epoch:03d}',
             save_top_k=1,
-            save_last=True,
+            save_last=False,
             verbose=True,
             monitor='val_vc_pm_dist',
             mode='min'
