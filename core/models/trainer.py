@@ -55,8 +55,8 @@ class CCHTrainer(pl.LightningModule):
         self.save_hyperparameters(ignore=['smpl_model'])
         
 
-    def forward(self, batch, pose=None, joints=None, w_smpl=None, mask=None, R=None, T=None):
-        return self.model(batch, pose=pose, joints=joints, w_smpl=w_smpl, mask=mask, R=R, T=T)
+    def forward(self, batch, pose=None, joints=None, w_smpl=None, mask=None, R=None, T=None, gt_vc=None):
+        return self.model(batch, pose=pose, joints=joints, w_smpl=w_smpl, mask=mask, R=R, T=T, gt_vc=gt_vc)
     
     def on_train_epoch_start(self):
         self.visualiser.set_global_rank(self.global_rank)
@@ -91,7 +91,8 @@ class CCHTrainer(pl.LightningModule):
             w_smpl=batch['w_pm'], 
             mask=batch['masks'], 
             R=batch['R'], 
-            T=batch['T']
+            T=batch['T'],
+            gt_vc=vc
         )
         vp_init_pred, vc_pred, w_pred, dvc_pred = preds['vp'], preds['vc'], preds['w'], preds['dvc']
         vc_conf, w_conf, dvc_conf = preds['vc_conf'], preds['w_conf'], None
@@ -99,13 +100,13 @@ class CCHTrainer(pl.LightningModule):
         vp_cond_mask = preds['vp_cond_mask']
 
         vp_pred, _ = general_lbs(
-            vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'),
+            vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
             pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
             lbs_weights=rearrange(w_smpl, 'b n h w j -> (b n) (h w) j'),
             J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
             parents=self.smpl_model.parents 
         )
-        vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
+        vp_pred = rearrange(vp_pred, '(b n) (h w) c -> b n h w c', b=B, n=N, h=224, w=224)
 
 
 
@@ -128,8 +129,8 @@ class CCHTrainer(pl.LightningModule):
         self.metrics(vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'), 
                      vc_pred=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'), 
                      vp=rearrange(vp, 'b n v c -> (b n) v c'), 
-                     vp_pred=rearrange(vp_pred, 'b n v c -> (b n) v c'), 
-                     conf=rearrange(vc_conf, 'b n h w -> (b n) (h w)'), 
+                     vp_pred=rearrange(vp_pred, 'b n h w c -> (b n) (h w) c'), 
+                    #  conf=rearrange(vc_conf, 'b n h w -> (b n) (h w)'), 
                      mask=rearrange(masks, 'b n h w -> (b n) (h w)'), 
                      split=split)
 
@@ -139,15 +140,15 @@ class CCHTrainer(pl.LightningModule):
                 normal_maps=normal_maps.cpu().detach().numpy(),
                 vp=vp.cpu().detach().numpy(),
                 vc=vc.cpu().detach().numpy(),
-                vp_pred=vp_pred.cpu().detach().numpy(),
+                vp_pred=rearrange(vp_pred, 'b n h w c -> b n (h w) c').cpu().detach().numpy(),
                 vc_pred=vc_pred.cpu().detach().numpy(),
-                conf=vc_conf.cpu().detach().numpy(),
+                # conf=vc_conf.cpu().detach().numpy(),
                 mask=masks.cpu().detach().numpy(),
                 vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
                 color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
                 dvc=dvc_pred.cpu().detach().numpy(),
-                vp_cond=rearrange(vp_cond, 'b n c h w -> b n h w c').cpu().detach().numpy(),
-                vp_cond_mask=vp_cond_mask.cpu().detach().numpy(),
+                vp_cond=vp_cond.cpu().detach().numpy(),
+                vp_cond_mask=masks.cpu().detach().numpy(),
                 no_annotations=True,
                 plot_error_heatmap=True
             )
@@ -161,7 +162,9 @@ class CCHTrainer(pl.LightningModule):
         if conf is not None:
             conf_threshold = 0.08
             conf_mask = (1/conf) < conf_threshold
-        full_mask = (mask * conf_mask).bool()
+            full_mask = (mask * conf_mask).bool()
+        else:
+            full_mask = mask.bool()
 
         # ----------------------- vc -----------------------
         vc_pm_dist = torch.norm(vc - vc_pred, dim=-1) * full_mask 

@@ -80,12 +80,11 @@ class Visualiser(pl.LightningModule):
                 dvc = np.linalg.norm(dvc, axis=-1)
 
             if vp_cond is not None:
-                
-                vp_cond[vp_cond_mask.astype(bool)] = 0
+                vp_cond[~mask.astype(bool)] = 0
 
                 norm_min, norm_max = vp_cond.min(), vp_cond.max()
                 vp_cond = (vp_cond - norm_min) / (norm_max - norm_min)
-                vp_cond[vp_cond_mask.astype(bool)] = 1
+                vp_cond[~mask.astype(bool)] = 1
 
             num_rows = 2
             num_rows += 1 if plot_error_heatmap else 0
@@ -96,25 +95,26 @@ class Visualiser(pl.LightningModule):
 
             for b in range(B):
                 for n in range(N):
+                    row=0
                     # Plot vc (ground truth) on top row
-                    plt.subplot(num_rows*B, N, b*num_rows*N + n + 1)
+                    plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
                     if vc is not None:
                         plt.imshow(vc[b,n])
                         plt.title(f'GT Frame {n}')
                     plt.axis('off')
-
+                    row += 1
                     # Plot vc_pred (prediction) on bottom row 
-                    plt.subplot(num_rows*B, N, (b*num_rows+1)*N + n + 1)
+                    plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
                     plt.imshow(vc_pred[b,n])
                     plt.title(f'Pred Frame {n}')
                     plt.axis('off')
-
+                    row += 1
                     if plot_error_heatmap:
                         # error_heatmap = np.linalg.norm(vc_pred[b,n] - vc[b,n], axis=-1)
                         # error_heatmap *= mask[b,n]
                         # error_heatmap[error_heatmap > 0.3] = 0
-                        plt.subplot(num_rows*B, N, (b*num_rows+2)*N + n + 1)
-
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
+                        row += 1
                         colors = [(1, 1, 1), (1, 0, 0)]  # White to red
                         custom_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('custom', colors)
                         im = plt.imshow(error_heatmap[b,n], cmap=custom_cmap, 
@@ -125,7 +125,8 @@ class Visualiser(pl.LightningModule):
                         plt.title(f'Error Heatmap Frame {n}')
                         plt.axis('off')
                     if conf is not None:
-                        plt.subplot(num_rows*B, N, (b*num_rows+3)*N + n + 1)
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
+                        row += 1
                         # conf_masked = conf[b,n] * mask[b,n] + 1e-3
                         # conf_masked = conf_masked * mask[b,n]
                         colors = [(1, 1, 1), (1, 0.5, 0)]  # White to orange
@@ -139,7 +140,8 @@ class Visualiser(pl.LightningModule):
                         plt.axis('off')
 
                     if dvc is not None:
-                        plt.subplot(num_rows*B, N, (b*num_rows+4)*N + n + 1)
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
+                        row += 1
                         dvc_masked = dvc[b,n] * mask[b,n]
                         # dvc_norm_masked = np.linalg.norm(dvc_masked, axis=-1)
 
@@ -156,7 +158,8 @@ class Visualiser(pl.LightningModule):
                         plt.axis('off')
 
                     if vp_cond is not None:
-                        plt.subplot(num_rows*B, N, (b*num_rows+5)*N + n + 1)
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
+                        row += 1
                         im = plt.imshow(vp_cond[b,n])
                         plt.title(f'rend vp {n}')
                         plt.axis('off')
@@ -363,7 +366,7 @@ class Visualiser(pl.LightningModule):
                              bg_mask=mask, 
                              color=color, 
                              vertex_visibility=vertex_visibility, 
-                             conf_mask=conf_mask, 
+                            #  conf_mask=conf_mask, 
                              no_annotations=no_annotations)
         
         # self.visualise_scenepic(vp=vp, 
