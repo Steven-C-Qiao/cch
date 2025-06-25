@@ -32,7 +32,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None):
-    set_seed(2)
+    set_seed(3)
     
     # Get config
     cfg = get_cch_cfg_defaults()

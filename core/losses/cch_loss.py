@@ -112,7 +112,7 @@ class CCHLoss(pl.LightningModule):
 
         posed_loss = self.posed_pointmap_loss(
             rearrange(vp, 'b n v c -> (b n) v c'), 
-            rearrange(vp_pred, 'b n v c -> (b n) v c'), 
+            rearrange(vp_pred, 'b n h w c -> (b n) (h w) c'), 
             rearrange(mask, 'b n h w -> (b n) (h w)')
         ) 
         posed_loss *= self.posed_loss_schedule[epoch]

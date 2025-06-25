@@ -31,6 +31,7 @@ class CCHTrainer(pl.LightningModule):
         self.cfg = cfg
         self.normalise = cfg.DATA.NORMALISE
         self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 5
+        self.image_size = cfg.DATA.IMG_SIZE
  
         self.renderer = SurfaceNormalRenderer(image_size=(224, 224))
 
@@ -81,6 +82,7 @@ class CCHTrainer(pl.LightningModule):
         normal_maps = batch['normal_imgs']
         w_smpl = batch['w_pm']
         vc = batch['vc_pm']
+        vertex_visibility = batch['vertex_visibility']
 
 
         # ------------------- forward pass -------------------
@@ -93,19 +95,18 @@ class CCHTrainer(pl.LightningModule):
             R=batch['R'], 
             T=batch['T']
         )
-        vp_init_pred, vc_pred, w_pred, dvc_pred = preds['vp'], preds['vc'], preds['w'], preds['dvc']
-        vc_conf, w_conf, dvc_conf = preds['vc_conf'], preds['w_conf'], None
-        vp_cond = preds['vp_cond']
-        vp_cond_mask = preds['vp_cond_mask']
+        vp_init_pred, vc_pred, w_pred, dvc_pred = preds['vp_init_pred'], preds['vc_pred'], preds['w_pred'], preds['dvc_pred']
+        vc_conf, w_conf, dvc_conf = preds['vc_conf_pred'], preds['w_conf_pred'], None
+
 
         vp_pred, _ = general_lbs(
-            vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'),
+            vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
             pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
             lbs_weights=rearrange(w_smpl, 'b n h w j -> (b n) (h w) j'),
             J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
             parents=self.smpl_model.parents 
         )
-        vp_pred = rearrange(vp_pred, '(b n) v c -> b n v c', b=B, n=N)
+        vp_pred = rearrange(vp_pred, '(b n) (h w) c -> b n h w c', b=B, n=N, h=self.image_size, w=self.image_size)
 
 
 
@@ -125,16 +126,22 @@ class CCHTrainer(pl.LightningModule):
         self.log(f'{split}_loss', loss, prog_bar=True, sync_dist=True, rank_zero_only=True)
         self.log_dict(loss_dict, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
 
-        self.metrics(vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'), 
-                     vc_pred=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'), 
-                     vp=rearrange(vp, 'b n v c -> (b n) v c'), 
-                     vp_pred=rearrange(vp_pred, 'b n v c -> (b n) v c'), 
-                     conf=rearrange(vc_conf, 'b n h w -> (b n) (h w)'), 
-                     mask=rearrange(masks, 'b n h w -> (b n) (h w)'), 
-                     split=split)
+
+
+
+        self.metrics(
+            vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'), 
+            vc_pred=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'), 
+            vp=rearrange(vp, 'b n v c -> (b n) v c'), 
+            vp_pred=rearrange(vp_pred, 'b n v c -> (b n) v c'), 
+            conf=rearrange(vc_conf, 'b n h w -> (b n) (h w)'), 
+            mask=rearrange(masks, 'b n h w -> (b n) (h w)'), 
+            split=split
+        )
+        
 
         # Visualise
-        if self.global_step % self.vis_frequency == 0:
+        if (self.global_step % self.vis_frequency == 0 and self.global_step > 0) or (self.global_step == 1):
             self.visualiser.visualise(
                 normal_maps=normal_maps.cpu().detach().numpy(),
                 vp=vp.cpu().detach().numpy(),
@@ -143,11 +150,10 @@ class CCHTrainer(pl.LightningModule):
                 vc_pred=vc_pred.cpu().detach().numpy(),
                 conf=vc_conf.cpu().detach().numpy(),
                 mask=masks.cpu().detach().numpy(),
-                vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
+                vertex_visibility=vertex_visibility.cpu().detach().numpy(),
                 color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
                 dvc=dvc_pred.cpu().detach().numpy(),
-                vp_cond=rearrange(vp_cond, 'b n c h w -> b n h w c').cpu().detach().numpy(),
-                vp_cond_mask=vp_cond_mask.cpu().detach().numpy(),
+                vp_init_pred=vp_init_pred.cpu().detach().numpy(),
                 no_annotations=True,
                 plot_error_heatmap=True
             )

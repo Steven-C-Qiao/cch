@@ -46,7 +46,7 @@ class Visualiser(pl.LightningModule):
             plt.close()
       
     def visualise_vc_as_image(self, vc_pred, vc=None, mask=None, conf=None, 
-                              plot_error_heatmap=True, dvc=None, vp_cond=None, vp_cond_mask=None):
+                              plot_error_heatmap=True, dvc=None, vp_init_pred=None):
         if self.rank == 0:
             B, N, H, W, C = vc_pred.shape
 
@@ -79,41 +79,44 @@ class Visualiser(pl.LightningModule):
             if dvc is not None:
                 dvc = np.linalg.norm(dvc, axis=-1)
 
-            if vp_cond is not None:
-                
-                vp_cond[vp_cond_mask.astype(bool)] = 0
+            if vp_init_pred is not None:
+                vp_init_pred[~mask.astype(bool)] = 0
 
-                norm_min, norm_max = vp_cond.min(), vp_cond.max()
-                vp_cond = (vp_cond - norm_min) / (norm_max - norm_min)
-                vp_cond[vp_cond_mask.astype(bool)] = 1
+                norm_min, norm_max = vp_init_pred.min(), vp_init_pred.max()
+                vp_init_pred = (vp_init_pred - norm_min) / (norm_max - norm_min)
+                vp_init_pred[~mask.astype(bool)] = 1
 
             num_rows = 2
             num_rows += 1 if plot_error_heatmap else 0
             num_rows += 1 if conf is not None else 0
             num_rows += 1 if dvc is not None else 0
-            num_rows += 1 if vp_cond is not None else 0
+            num_rows += 1 if vp_init_pred is not None else 0
             fig = plt.figure(figsize=(4*N, num_rows*4*B))
 
             for b in range(B):
                 for n in range(N):
-                    # Plot vc (ground truth) on top row
-                    plt.subplot(num_rows*B, N, b*num_rows*N + n + 1)
+                    row = 0
+                    # ------------ gt vc ------------
+                    plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
                     if vc is not None:
                         plt.imshow(vc[b,n])
                         plt.title(f'GT Frame {n}')
                     plt.axis('off')
+                    row += 1
 
-                    # Plot vc_pred (prediction) on bottom row 
-                    plt.subplot(num_rows*B, N, (b*num_rows+1)*N + n + 1)
+                    # ------------ pred vc ------------
+                    plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
                     plt.imshow(vc_pred[b,n])
                     plt.title(f'Pred Frame {n}')
                     plt.axis('off')
+                    row += 1
 
+                    # ------------ error heatmap ------------
                     if plot_error_heatmap:
                         # error_heatmap = np.linalg.norm(vc_pred[b,n] - vc[b,n], axis=-1)
                         # error_heatmap *= mask[b,n]
                         # error_heatmap[error_heatmap > 0.3] = 0
-                        plt.subplot(num_rows*B, N, (b*num_rows+2)*N + n + 1)
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
 
                         colors = [(1, 1, 1), (1, 0, 0)]  # White to red
                         custom_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('custom', colors)
@@ -124,8 +127,11 @@ class Visualiser(pl.LightningModule):
                             plt.colorbar(im)
                         plt.title(f'Error Heatmap Frame {n}')
                         plt.axis('off')
+                        row += 1
+
+                    # ------------ conf ------------
                     if conf is not None:
-                        plt.subplot(num_rows*B, N, (b*num_rows+3)*N + n + 1)
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
                         # conf_masked = conf[b,n] * mask[b,n] + 1e-3
                         # conf_masked = conf_masked * mask[b,n]
                         colors = [(1, 1, 1), (1, 0.5, 0)]  # White to orange
@@ -138,16 +144,10 @@ class Visualiser(pl.LightningModule):
                             plt.colorbar(im)
                         plt.axis('off')
 
+                    # ------------ dvc ------------
                     if dvc is not None:
-                        plt.subplot(num_rows*B, N, (b*num_rows+4)*N + n + 1)
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
                         dvc_masked = dvc[b,n] * mask[b,n]
-                        # dvc_norm_masked = np.linalg.norm(dvc_masked, axis=-1)
-
-
-                        # viridis = plt.cm.get_cmap('viridis')
-                        # dvc_viridis = viridis(dvc_norm_masked)[..., :3]
-
-                        # dvc_viridis[~mask[b,n].astype(np.bool)] = 1
 
                         im = plt.imshow(dvc_masked, cmap='viridis')
                         plt.title(f'dvc Frame {n}')
@@ -155,12 +155,13 @@ class Visualiser(pl.LightningModule):
                             plt.colorbar(im)
                         plt.axis('off')
 
-                    if vp_cond is not None:
-                        plt.subplot(num_rows*B, N, (b*num_rows+5)*N + n + 1)
-                        im = plt.imshow(vp_cond[b,n])
-                        plt.title(f'rend vp {n}')
+                    # ------------ vp init pred ------------
+                    if vp_init_pred is not None:
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
+                        im = plt.imshow(vp_init_pred[b,n])
+                        plt.title(f'vp init pred no dvc {n}')
                         plt.axis('off')
-                        
+
             plt.tight_layout()
             plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_colormaps.png'))
             plt.close()
@@ -321,8 +322,7 @@ class Visualiser(pl.LightningModule):
                   no_annotations=True,
                   plot_error_heatmap=True,
                   dvc=None,
-                  vp_cond=None,
-                  vp_cond_mask=None):
+                  vp_init_pred=None):
         """
         Visualise normal images, canonical pointmaps, and posed vertices
 
@@ -350,8 +350,7 @@ class Visualiser(pl.LightningModule):
         self.visualise_vc_as_image(vc_pred=vc_pred, 
                                    vc=vc, 
                                    dvc=dvc,
-                                   vp_cond=vp_cond,
-                                   vp_cond_mask=vp_cond_mask,
+                                   vp_init_pred=vp_init_pred,
                                    mask=mask, 
                                    conf=conf, 
                                    plot_error_heatmap=plot_error_heatmap)
