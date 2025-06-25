@@ -81,8 +81,8 @@ class Visualiser(pl.LightningModule):
 
             if vp_cond is not None:
                 vp_cond[~mask.astype(bool)] = 0
-
                 norm_min, norm_max = vp_cond.min(), vp_cond.max()
+
                 vp_cond = (vp_cond - norm_min) / (norm_max - norm_min)
                 vp_cond[~mask.astype(bool)] = 1
 
@@ -118,7 +118,7 @@ class Visualiser(pl.LightningModule):
                         colors = [(1, 1, 1), (1, 0, 0)]  # White to red
                         custom_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('custom', colors)
                         im = plt.imshow(error_heatmap[b,n], cmap=custom_cmap, 
-                                        norm=matplotlib.colors.LogNorm(vmin=1e-3, vmax=np.max(error_heatmap[b,n])))
+                                        norm=matplotlib.colors.LogNorm(vmin=min(1e-3, np.max(error_heatmap[b,n])), vmax=np.max(error_heatmap[b,n])))
 
                         if n == N-1:
                             plt.colorbar(im)
@@ -133,7 +133,7 @@ class Visualiser(pl.LightningModule):
                         custom_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('custom', colors)
                         im = plt.imshow(conf[b,n],
                                         cmap=custom_cmap,
-                                        norm=matplotlib.colors.LogNorm(vmin=1e-3, vmax=np.max(conf[b,n])))
+                                        norm=matplotlib.colors.LogNorm(vmin=min(1e-3, np.max(conf[b,n])), vmax=np.max(conf[b,n])))
                         plt.title(f'1/conf Frame {n}')
                         if n == N-1: 
                             plt.colorbar(im)

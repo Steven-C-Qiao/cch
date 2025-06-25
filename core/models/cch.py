@@ -46,6 +46,15 @@ class CCH(nn.Module):
 
 
     def forward(self, images, pose=None, joints=None, w_smpl=None, mask=None, R=None, T=None, gt_vc=None):
+        """
+        return:
+            vc: canonical pointmaps: (B, N, H, W, 3)
+            vc_conf: vc confidence maps: (B, N, H, W, 1)
+            vp: posed vertices from vc: (B, N, H, W, 3)
+            w: skinning weights: (B, N, H, W, 25)
+            w_conf: skinning weights confidence maps: (B, N, H, W, 1) or None 
+            dvc: pose correctives: (B, N, H, W, 3)
+        """
 
         if len(images.shape) == 4:
             images = images.unsqueeze(0)
@@ -74,14 +83,12 @@ class CCH(nn.Module):
         vc = vc + dvc
 
         pred = {
-            'vc': vc, # B, N, H, W, 3
+            'vc': vc, 
             'vc_conf': None,
             'vp': vp,
             'w': w,
             'w_conf': None,
-            'dvc': dvc, # B, N, H, W, 3
-            'vp_cond': vp, # B, N, H, W, 3
-            'vp_cond_mask': mask, # B, N, H, W
+            'dvc': dvc, 
         }
 
         return pred 
