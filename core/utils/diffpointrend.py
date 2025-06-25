@@ -40,7 +40,7 @@ class PointCloudRenderer(pl.LightningModule):
 
         self.renderer = PointsRenderer(
             rasterizer=self.rasteriser,
-            compositor=AlphaCompositor(background_color=torch.tensor([1, 1, 1]))
+            compositor=AlphaCompositor()#(background_color=torch.tensor([1, 1, 1]))
         )
 
     def forward(self,

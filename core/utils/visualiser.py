@@ -76,11 +76,16 @@ class Visualiser(pl.LightningModule):
 
                 vc_pred = np.clip(vc_pred, 0, 1)
 
+            if dvc is not None:
+                dvc = np.linalg.norm(dvc, axis=-1)
+
             if vp_cond is not None:
-                vp_cond = (vp_cond + 1) / 2
-                vp_cond = vp_cond.clip(0, 1)
-                vp_cond[~vp_cond_mask.astype(bool)] = 1
-                vp_cond = vp_cond * 255
+                
+                vp_cond[vp_cond_mask.astype(bool)] = 0
+
+                norm_min, norm_max = vp_cond.min(), vp_cond.max()
+                vp_cond = (vp_cond - norm_min) / (norm_max - norm_min)
+                vp_cond[vp_cond_mask.astype(bool)] = 1
 
             num_rows = 2
             num_rows += 1 if plot_error_heatmap else 0
@@ -135,7 +140,7 @@ class Visualiser(pl.LightningModule):
 
                     if dvc is not None:
                         plt.subplot(num_rows*B, N, (b*num_rows+4)*N + n + 1)
-                        dvc_masked = dvc[b,n] * mask[b,n][..., None]
+                        dvc_masked = dvc[b,n] * mask[b,n]
                         # dvc_norm_masked = np.linalg.norm(dvc_masked, axis=-1)
 
 
@@ -144,7 +149,7 @@ class Visualiser(pl.LightningModule):
 
                         # dvc_viridis[~mask[b,n].astype(np.bool)] = 1
 
-                        im = plt.imshow(dvc_masked)
+                        im = plt.imshow(dvc_masked, cmap='viridis')
                         plt.title(f'dvc Frame {n}')
                         if n == N-1:
                             plt.colorbar(im)
@@ -152,7 +157,7 @@ class Visualiser(pl.LightningModule):
 
                     if vp_cond is not None:
                         plt.subplot(num_rows*B, N, (b*num_rows+5)*N + n + 1)
-                        im = plt.imshow(vp_cond[b,n].astype(np.uint8))
+                        im = plt.imshow(vp_cond[b,n])
                         plt.title(f'rend vp {n}')
                         plt.axis('off')
                         

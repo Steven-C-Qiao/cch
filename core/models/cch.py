@@ -126,8 +126,11 @@ class CCH(nn.Module):
             vc = vc + dvc
 
             vp = rearrange(vp, '(b n) (h w) c -> b n (h w) c', h=H, w=W, b=B, n=N)
+            vp_cond_mask = rearrange(vp_cond_mask, '(b n) h w -> b n h w', b=B, n=N)
         else:
             vp, dvc, vp_cond, vp_cond_mask = None, None, None, None
+
+        # import ipdb; ipdb.set_trace()
             
 
         pred = {

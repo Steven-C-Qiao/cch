@@ -96,7 +96,7 @@ class CCHTrainer(pl.LightningModule):
         vp_init_pred, vc_pred, w_pred, dvc_pred = preds['vp'], preds['vc'], preds['w'], preds['dvc']
         vc_conf, w_conf, dvc_conf = preds['vc_conf'], preds['w_conf'], None
         vp_cond = preds['vp_cond']
-
+        vp_cond_mask = preds['vp_cond_mask']
 
         vp_pred, _ = general_lbs(
             vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'),
@@ -145,8 +145,9 @@ class CCHTrainer(pl.LightningModule):
                 mask=masks.cpu().detach().numpy(),
                 vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
                 color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
-                # dvc=dvc_pred.cpu().detach().numpy(),
-                # vp_cond=rearrange(vp_cond, 'b n c h w -> b n h w c').cpu().detach().numpy(),
+                dvc=dvc_pred.cpu().detach().numpy(),
+                vp_cond=rearrange(vp_cond, 'b n c h w -> b n h w c').cpu().detach().numpy(),
+                vp_cond_mask=vp_cond_mask.cpu().detach().numpy(),
                 no_annotations=True,
                 plot_error_heatmap=True
             )

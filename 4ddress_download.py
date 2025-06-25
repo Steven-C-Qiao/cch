@@ -29,13 +29,13 @@ def wait_for_downloads(download_dir, expected_count, timeout=10800):
             raise TimeoutError("Download timed out.")
         time.sleep(2)
 
-downloaded = 0
+downloaded = 4
 total = len(links)
 while downloaded < total:
     link = links[downloaded]
     link.click()
     time.sleep(5)  # Give browser time to start download
-    wait_for_downloads(download_dir, downloaded + 1, timeout=10800)
+    wait_for_downloads(download_dir, downloaded + 1, timeout=108000)
     downloaded += 1
     print(f"Downloaded {downloaded}/{total}")
 
