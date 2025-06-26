@@ -86,6 +86,8 @@ class Visualiser(pl.LightningModule):
                 vp_cond = (vp_cond - norm_min) / (norm_max - norm_min)
                 vp_cond[~mask.astype(bool)] = 1
 
+                vp_cond = np.clip(vp_cond, 0, 1)
+
             num_rows = 2
             num_rows += 1 if plot_error_heatmap else 0
             num_rows += 1 if conf is not None else 0
@@ -350,14 +352,14 @@ class Visualiser(pl.LightningModule):
         
         self.visualise_input_normal_imgs(normal_maps)
 
-        self.visualise_vc_as_image(vc_pred=vc_pred, 
-                                   vc=vc, 
-                                   dvc=dvc,
-                                   vp_cond=vp_cond,
-                                   vp_cond_mask=vp_cond_mask,
-                                   mask=mask, 
-                                   conf=conf, 
-                                   plot_error_heatmap=plot_error_heatmap)
+        # self.visualise_vc_as_image(vc_pred=vc_pred, 
+        #                            vc=vc, 
+        #                            dvc=dvc,
+        #                            vp_cond=vp_cond,
+        #                            vp_cond_mask=vp_cond_mask,
+        #                            mask=mask, 
+        #                            conf=conf, 
+        #                            plot_error_heatmap=plot_error_heatmap)
         
         self.visualise_vp_vc(vp=vp, 
                              vc=vc, 

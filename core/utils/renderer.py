@@ -97,7 +97,8 @@ class SurfaceNormalRenderer(pl.LightningModule):
         self.register_buffer('faces', smpl_faces)
     
 
-    def forward(self, vertices, R=None, T=None, faces=None, skinning_weights=None, first_frame_v_cano=None, part_segmentation=None):
+    def forward(self, vertices, R=None, T=None, faces=None, skinning_weights=None, 
+                first_frame_v_cano=None, part_segmentation=None, dvc=None):
         """
         Args:
             vertices: (B, N, V, 3)
@@ -119,6 +120,9 @@ class SurfaceNormalRenderer(pl.LightningModule):
         if first_frame_v_cano is not None:
             assert len(first_frame_v_cano.shape) == 3
             first_frame_v_cano = first_frame_v_cano.repeat_interleave(N, dim=0)
+
+        if dvc is not None:
+            dvc = dvc.view(B * N, -1, 3)
 
         vertices = vertices.view(B * N, -1, 3)
         faces = faces[None].repeat(B * N, 1, 1)
@@ -195,6 +199,12 @@ class SurfaceNormalRenderer(pl.LightningModule):
             images = self.renderer(mesh)
             part_segmentation_map = images[..., :3]#.cpu().numpy()
             ret['part_segmentation_maps'] = rearrange(part_segmentation_map, '(b n) h w c -> b n h w c', b=B, n=N)
+
+        if dvc is not None:
+            mesh.textures = TexturesVertex(verts_features=dvc)
+            images = self.renderer(mesh)
+            dvc_map = images[..., :3]#.cpu().numpy()
+            ret['dvc_maps'] = rearrange(dvc_map, '(b n) h w c -> b n h w c', b=B, n=N)
 
         return ret
 

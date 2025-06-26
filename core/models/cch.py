@@ -43,6 +43,14 @@ class CCH(nn.Module):
             # per-frame pose correctives and uncertainty
             # self.pose_correctives_head = DPTHead(dim_in=2 * embed_dim, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3) 
             self.pose_correctives_head = DPTHead(dim_in=2 * 64, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1")
+    
+            # self.pose_correctives_aggregator = Aggregator(
+            #     img_size=img_size, patch_size=patch_size, embed_dim=64, mlp_ratio=2.0, num_heads=2,
+            #     patch_embed="conv", input_channels=6
+            # )
+            # self.pose_correctives_head = DPTHead(dim_in=2 * 64, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1",
+            #                                      features=16,out_channels=[12, 12, 12, 12])
+
 
 
     def forward(self, images, pose=None, joints=None, w_smpl=None, mask=None, R=None, T=None, gt_vc=None):
