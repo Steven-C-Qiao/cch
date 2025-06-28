@@ -13,8 +13,9 @@ class MaskedL2Loss(nn.Module):
 
     def forward(self, x, y, mask=None):
         loss = torch.norm(x - y, dim=-1)
+
         if mask is not None:
-            loss = loss * mask.squeeze()
+            loss = loss * mask
         return loss.sum() / mask.sum()
 
 
@@ -152,10 +153,10 @@ class CCHLoss(pl.LightningModule):
 
 
             # l2 loss to regularise dvc_pred
-            dvc_reg_loss = torch.norm(dvc_pred, dim=-1)
-            dvc_reg_loss = dvc_reg_loss.mean() * self.dvc_loss_schedule[epoch]
-            loss_dict['dvc_reg_loss'] = dvc_reg_loss
-            total_loss += dvc_reg_loss
+            # dvc_reg_loss = torch.norm(dvc_pred, dim=-1)
+            # dvc_reg_loss = dvc_reg_loss.mean() * self.dvc_loss_schedule[epoch]
+            # loss_dict['dvc_reg_loss'] = dvc_reg_loss
+            # total_loss += dvc_reg_loss
 
         loss_dict['total_loss'] = total_loss
         

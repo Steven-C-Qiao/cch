@@ -46,7 +46,7 @@ class Visualiser(pl.LightningModule):
             plt.close()
       
     def visualise_vc_as_image(self, vc_pred, vc=None, mask=None, conf=None, 
-                              plot_error_heatmap=True, dvc=None, vp_cond=None, vp_cond_mask=None):
+                              plot_error_heatmap=True, dvc=None, dvc_pred=None, vp_cond=None, vp_cond_mask=None):
         if self.rank == 0:
             B, N, H, W, C = vc_pred.shape
 
@@ -76,6 +76,8 @@ class Visualiser(pl.LightningModule):
 
                 vc_pred = np.clip(vc_pred, 0, 1)
 
+            if dvc_pred is not None:
+                dvc_pred = np.linalg.norm(dvc_pred, axis=-1)
             if dvc is not None:
                 dvc = np.linalg.norm(dvc, axis=-1)
 
@@ -92,6 +94,7 @@ class Visualiser(pl.LightningModule):
             num_rows += 1 if plot_error_heatmap else 0
             num_rows += 1 if conf is not None else 0
             num_rows += 1 if dvc is not None else 0
+            num_rows += 1 if dvc_pred is not None else 0
             num_rows += 1 if vp_cond is not None else 0
             fig = plt.figure(figsize=(4*N, num_rows*4*B))
 
@@ -115,12 +118,13 @@ class Visualiser(pl.LightningModule):
                         # error_heatmap = np.linalg.norm(vc_pred[b,n] - vc[b,n], axis=-1)
                         # error_heatmap *= mask[b,n]
                         # error_heatmap[error_heatmap > 0.3] = 0
+                        error_heatmap[error_heatmap < 1e-5] = 1e-5
                         plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
                         row += 1
                         colors = [(1, 1, 1), (1, 0, 0)]  # White to red
                         custom_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('custom', colors)
                         im = plt.imshow(error_heatmap[b,n], cmap=custom_cmap, 
-                                        norm=matplotlib.colors.LogNorm(vmin=min(1e-3, np.max(error_heatmap[b,n])), vmax=np.max(error_heatmap[b,n])))
+                                        norm=matplotlib.colors.LogNorm(vmin=1e-5, vmax=np.max(error_heatmap[b,n])))
 
                         if n == N-1:
                             plt.colorbar(im)
@@ -135,7 +139,7 @@ class Visualiser(pl.LightningModule):
                         custom_cmap = matplotlib.colors.LinearSegmentedColormap.from_list('custom', colors)
                         im = plt.imshow(conf[b,n],
                                         cmap=custom_cmap,
-                                        norm=matplotlib.colors.LogNorm(vmin=min(1e-3, np.max(conf[b,n])), vmax=np.max(conf[b,n])))
+                                        norm=matplotlib.colors.LogNorm(vmin=min(1e-3, np.min(conf[b,n])), vmax=np.max(conf[b,n])))
                         plt.title(f'1/conf Frame {n}')
                         if n == N-1: 
                             plt.colorbar(im)
@@ -157,6 +161,13 @@ class Visualiser(pl.LightningModule):
                         plt.title(f'dvc Frame {n}')
                         if n == N-1:
                             plt.colorbar(im)
+                        plt.axis('off')
+                    if dvc_pred is not None:
+                        dvc_pred_masked = dvc_pred[b,n] * mask[b,n]
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
+                        row += 1
+                        im = plt.imshow(dvc_pred_masked)
+                        plt.title(f'dvc_pred Frame {n}')
                         plt.axis('off')
 
                     if vp_cond is not None:
@@ -326,6 +337,7 @@ class Visualiser(pl.LightningModule):
                   no_annotations=True,
                   plot_error_heatmap=True,
                   dvc=None,
+                  dvc_pred=None,
                   vp_cond=None,
                   vp_cond_mask=None):
         """
@@ -355,6 +367,7 @@ class Visualiser(pl.LightningModule):
         # self.visualise_vc_as_image(vc_pred=vc_pred, 
         #                            vc=vc, 
         #                            dvc=dvc,
+        #                            dvc_pred=dvc_pred,
         #                            vp_cond=vp_cond,
         #                            vp_cond_mask=vp_cond_mask,
         #                            mask=mask, 

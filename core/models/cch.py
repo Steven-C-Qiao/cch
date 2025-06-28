@@ -37,12 +37,11 @@ class CCH(nn.Module):
 
         if self.model_pose_correctives:
             self.pose_correctives_aggregator = Aggregator(
-                img_size=img_size, patch_size=patch_size, embed_dim=64, mlp_ratio=2.0, num_heads=2,
-                patch_embed="conv", input_channels=6
+                img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="conv", input_channels=6
             )
             # per-frame pose correctives and uncertainty
             # self.pose_correctives_head = DPTHead(dim_in=2 * embed_dim, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3) 
-            self.pose_correctives_head = DPTHead(dim_in=2 * 64, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1")
+            self.pose_correctives_head = DPTHead(dim_in=2 * embed_dim, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1")
     
             # self.pose_correctives_aggregator = Aggregator(
             #     img_size=img_size, patch_size=patch_size, embed_dim=64, mlp_ratio=2.0, num_heads=2,
@@ -80,6 +79,7 @@ class CCH(nn.Module):
             parents=self.smpl_model.parents 
         )
         vp = rearrange(vp, '(b n) (h w) c -> b n h w c', h=H, w=W, b=B, n=N)
+        vp = vp * mask.unsqueeze(-1)
 
 
 

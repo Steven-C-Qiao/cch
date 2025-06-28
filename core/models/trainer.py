@@ -90,7 +90,7 @@ class CCHTrainer(pl.LightningModule):
             pose=batch['pose'], 
             joints=batch['joints'], 
             w_smpl=batch['w_pm'], 
-            mask=batch['masks'], 
+            mask=batch['masks'].squeeze(), 
             R=batch['R'], 
             T=batch['T'],
             gt_vc=vc
@@ -147,7 +147,8 @@ class CCHTrainer(pl.LightningModule):
                 mask=masks.cpu().detach().numpy(),
                 vertex_visibility=batch['vertex_visibility'].cpu().detach().numpy(),
                 color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
-                dvc=dvc_pred.cpu().detach().numpy(),
+                dvc = dvc_pm_target.cpu().detach().numpy(),
+                dvc_pred=dvc_pred.cpu().detach().numpy(),
                 vp_cond=vp_init_pred.cpu().detach().numpy(),
                 vp_cond_mask=masks.cpu().detach().numpy(),
                 no_annotations=True,
@@ -190,7 +191,7 @@ class CCHTrainer(pl.LightningModule):
 
         show_prog_bar = (split == 'train')
 
-        self.log(f'{split}_vc_pm_dist',          vc_pm_dist,  on_step=True, on_epoch=True, prog_bar=show_prog_bar, sync_dist=True, rank_zero_only=True)
+        self.log(f'{split}_vc_pm_dist', vc_pm_dist,  on_step=True, on_epoch=True, prog_bar=show_prog_bar, sync_dist=True, rank_zero_only=True)
         self.log(f'{split}_vpp2vp_cfd', vpp2vp_dist, on_step=True, on_epoch=True, prog_bar=show_prog_bar, sync_dist=True, rank_zero_only=True)
         self.log(f'{split}_vp2vpp_cfd', vp2vpp_dist, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
 
