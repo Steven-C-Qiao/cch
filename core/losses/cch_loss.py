@@ -4,6 +4,21 @@ from pytorch3d.loss import chamfer_distance
 import pytorch_lightning as pl
 from einops import rearrange
 
+class MaskedL2Loss(nn.Module):
+    """
+    Masked L2 loss
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x, y, mask=None):
+        loss = torch.norm(x - y, dim=-1)
+
+        if mask is not None:
+            loss = loss * mask
+        return loss.sum() / mask.sum()
+
+
 class CanonicalRGBConfLoss(nn.Module):
     """
     Masked L2 loss for canonical color maps
@@ -101,13 +116,15 @@ class CCHLoss(pl.LightningModule):
         self.cfg = cfg
 
         self.posed_pointmap_loss = PosedPointmapChamferLoss(cfg)
-        self.canonical_rgb_loss = CanonicalRGBConfLoss(cfg)
-        self.skinning_weight_loss = SkinningWeightLoss()
+        # self.canonical_rgb_loss = CanonicalRGBConfLoss(cfg)
+        # self.skinning_weight_loss = SkinningWeightLoss()
+        self.dvc_loss = MaskedL2Loss()
 
         self._create_loss_weight_schedule(cfg)
 
 
-    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, w_pred=None, w_smpl=None, dvc_pred=None, dvc_conf=None, epoch=None):
+    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, w_pred=None, w_smpl=None, 
+                dvc_pred=None, dvc_conf=None, epoch=None, dvc_pm_target=None):
         loss_dict = {}
 
         posed_loss = self.posed_pointmap_loss(
@@ -118,23 +135,28 @@ class CCHLoss(pl.LightningModule):
         posed_loss *= self.posed_loss_schedule[epoch]
         loss_dict['vp_chamfer_loss'] = posed_loss
 
-        canonical_loss = self.canonical_rgb_loss(vc, vc_pred, conf=conf, mask=mask)
-        canonical_loss *= self.canonical_loss_schedule[epoch]
-        loss_dict['vc_pm_loss'] = canonical_loss
+        # canonical_loss = self.canonical_rgb_loss(vc, vc_pred, conf=conf, mask=mask)
+        # canonical_loss *= self.canonical_loss_schedule[epoch]
+        # loss_dict['vc_pm_loss'] = canonical_loss
         
-        total_loss = posed_loss + canonical_loss
+        total_loss = posed_loss
         
-        if w_pred is not None:
-            loss_w = self.skinning_weight_loss(w_smpl, w_pred, mask) * self.w_reg_loss_schedule[epoch]
-            loss_dict['w_reg_loss'] = loss_w
-            total_loss += loss_w
+        # if w_pred is not None:
+        #     loss_w = self.skinning_weight_loss(w_smpl, w_pred, mask) * self.w_reg_loss_schedule[epoch]
+        #     loss_dict['w_reg_loss'] = loss_w
+        #     total_loss += loss_w
 
         if dvc_pred is not None:
-            # l2 loss for dvc_pred
-            dvc_loss = torch.norm(dvc_pred, dim=-1)
-            dvc_loss = dvc_loss.mean() * self.dvc_loss_schedule[epoch]
-            loss_dict['dvc_reg_loss'] = dvc_loss
+            dvc_loss = self.dvc_loss(dvc_pred, dvc_pm_target, mask) * self.dvc_loss_schedule[epoch]
+            loss_dict['dvc_loss'] = dvc_loss
             total_loss += dvc_loss
+
+
+            # l2 loss to regularise dvc_pred
+            # dvc_reg_loss = torch.norm(dvc_pred, dim=-1)
+            # dvc_reg_loss = dvc_reg_loss.mean() * self.dvc_loss_schedule[epoch]
+            # loss_dict['dvc_reg_loss'] = dvc_reg_loss
+            # total_loss += dvc_reg_loss
 
         loss_dict['total_loss'] = total_loss
         
@@ -142,13 +164,13 @@ class CCHLoss(pl.LightningModule):
     
     def _create_loss_weight_schedule(self, cfg):
         """
-        Create a loss weight schedule for the loss weights
+        NO SCHEDULE for now 
         """
         total_epochs = cfg.TRAIN.NUM_EPOCHS
-        self.posed_loss_schedule = torch.linspace(cfg.LOSS.VP_LOSS_WEIGHT, cfg.LOSS.VP_LOSS_WEIGHT_FINAL, total_epochs)
-        self.canonical_loss_schedule = torch.linspace(cfg.LOSS.VC_LOSS_WEIGHT, cfg.LOSS.VC_LOSS_WEIGHT_FINAL, total_epochs)
-        self.w_reg_loss_schedule = torch.linspace(cfg.LOSS.W_REGULARISER_WEIGHT, cfg.LOSS.W_REGULARISER_WEIGHT_FINAL, total_epochs)
-        self.dvc_loss_schedule = torch.linspace(cfg.LOSS.DVC_LOSS_WEIGHT, cfg.LOSS.DVC_LOSS_WEIGHT_FINAL, total_epochs)
+        self.posed_loss_schedule = torch.linspace(cfg.LOSS.VP_LOSS_WEIGHT, cfg.LOSS.VP_LOSS_WEIGHT, total_epochs)
+        self.canonical_loss_schedule = torch.linspace(cfg.LOSS.VC_LOSS_WEIGHT, cfg.LOSS.VC_LOSS_WEIGHT, total_epochs)
+        self.w_reg_loss_schedule = torch.linspace(cfg.LOSS.W_REGULARISER_WEIGHT, cfg.LOSS.W_REGULARISER_WEIGHT, total_epochs)
+        self.dvc_loss_schedule = torch.linspace(cfg.LOSS.DVC_LOSS_WEIGHT, cfg.LOSS.DVC_LOSS_WEIGHT, total_epochs)
 
 
 if __name__ == '__main__':

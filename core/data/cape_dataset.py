@@ -152,6 +152,11 @@ class CapeDataset(Dataset):
                     i = np.random.choice(valid_frames_indices, 1, replace=False)[0]
                     continue
 
+            # print(transl.shape, v_cano.shape, pose.shape, v_posed.shape)
+            assert transl.shape == (3,), f"Expected transl shape (3,), got {transl.shape}"
+            assert v_cano.shape == (6890, 3), f"Expected v_cano shape (6890, 3), got {v_cano.shape}"
+            assert pose.shape == (72,), f"Expected pose shape (72,), got {pose.shape}"
+            assert v_posed.shape == (6890, 3), f"Expected v_posed shape (6890, 3), got {v_posed.shape}"
             ret['transl'].append(transl)
             ret['v_cano'].append(v_cano)
             ret['pose'].append(pose) 

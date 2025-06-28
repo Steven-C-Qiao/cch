@@ -56,8 +56,8 @@ class CCHTrainer(pl.LightningModule):
         self.save_hyperparameters(ignore=['smpl_model'])
         
 
-    def forward(self, batch, pose=None, joints=None, w_smpl=None, mask=None, R=None, T=None):
-        return self.model(batch, pose=pose, joints=joints, w_smpl=w_smpl, mask=mask, R=R, T=T)
+    def forward(self, batch, pose=None, joints=None, w_smpl=None, mask=None, R=None, T=None, gt_vc=None):
+        return self.model(batch, pose=pose, joints=joints, w_smpl=w_smpl, mask=mask, R=R, T=T, gt_vc=gt_vc)
     
     def on_train_epoch_start(self):
         self.visualiser.set_global_rank(self.global_rank)
@@ -82,6 +82,7 @@ class CCHTrainer(pl.LightningModule):
         normal_maps = batch['normal_imgs']
         w_smpl = batch['w_pm']
         vc = batch['vc_pm']
+        dvc_pm_target = batch['dvc_pm']
         vertex_visibility = batch['vertex_visibility']
 
 
@@ -91,15 +92,17 @@ class CCHTrainer(pl.LightningModule):
             pose=batch['pose'], 
             joints=batch['joints'], 
             w_smpl=batch['w_pm'], 
-            mask=batch['masks'], 
+            mask=batch['masks'].squeeze(), 
             R=batch['R'], 
-            T=batch['T']
+            T=batch['T'],
+            gt_vc=vc
         )
         vp_init_pred, vc_pred, w_pred, dvc_pred = preds['vp_init_pred'], preds['vc_pred'], preds['w_pred'], preds['dvc_pred']
         vc_conf, w_conf, dvc_conf = preds['vc_conf_pred'], preds['w_conf_pred'], None
 
 
         vp_pred, _ = general_lbs(
+            vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
             vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
             pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
             lbs_weights=rearrange(w_smpl, 'b n h w j -> (b n) (h w) j'),
@@ -121,6 +124,7 @@ class CCHTrainer(pl.LightningModule):
             w_smpl=w_smpl,
             dvc_pred=dvc_pred,
             dvc_conf=dvc_conf,
+            dvc_pm_target=dvc_pm_target,
             epoch=self.current_epoch
         )
         self.log(f'{split}_loss', loss, prog_bar=True, sync_dist=True, rank_zero_only=True)
@@ -146,17 +150,20 @@ class CCHTrainer(pl.LightningModule):
                 normal_maps=normal_maps.cpu().detach().numpy(),
                 vp=vp.cpu().detach().numpy(),
                 vc=vc.cpu().detach().numpy(),
-                vp_pred=vp_pred.cpu().detach().numpy(),
+                vp_pred=rearrange(vp_pred, 'b n h w c -> b n (h w) c').cpu().detach().numpy(),
                 vc_pred=vc_pred.cpu().detach().numpy(),
-                conf=vc_conf.cpu().detach().numpy(),
+                # conf=vc_conf.cpu().detach().numpy(),
                 mask=masks.cpu().detach().numpy(),
                 vertex_visibility=vertex_visibility.cpu().detach().numpy(),
                 color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
-                dvc=dvc_pred.cpu().detach().numpy(),
-                vp_init_pred=vp_init_pred.cpu().detach().numpy(),
+                dvc = dvc_pm_target.cpu().detach().numpy(),
+                dvc_pred=dvc_pred.cpu().detach().numpy(),
+                vp_cond=vp_init_pred.cpu().detach().numpy(),
+                vp_cond_mask=masks.cpu().detach().numpy(),
                 no_annotations=True,
                 plot_error_heatmap=True
             )
+
         # For app.animate_pm.py 
         # self.save_avatar(vc_pred, vc_conf, w_pred, joints, masks, w_smpl=w_smpl)
 
@@ -167,7 +174,9 @@ class CCHTrainer(pl.LightningModule):
         if conf is not None:
             conf_threshold = 0.08
             conf_mask = (1/conf) < conf_threshold
-        full_mask = (mask * conf_mask).bool()
+            full_mask = (mask * conf_mask).bool()
+        else:
+            full_mask = mask.bool()
 
         # ----------------------- vc -----------------------
         vc_pm_dist = torch.norm(vc - vc_pred, dim=-1) * full_mask 
@@ -189,15 +198,16 @@ class CCHTrainer(pl.LightningModule):
         vp2vpp_dist = torch.sqrt(vp_dist_squared[1])
         vp2vpp_dist = vp2vpp_dist.mean() * 100.0
 
+        show_prog_bar = (split == 'train')
 
-        self.log(f'{split}_vc_pm_dist',          vc_pm_dist,  on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
-        self.log(f'{split}_vpp2vp_chamfer_dist', vpp2vp_dist, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
-        self.log(f'{split}_vp2vpp_chamfer_dist', vp2vpp_dist, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
+        self.log(f'{split}_vc_pm_dist', vc_pm_dist,  on_step=True, on_epoch=True, prog_bar=show_prog_bar, sync_dist=True, rank_zero_only=True)
+        self.log(f'{split}_vpp2vp_cfd', vpp2vp_dist, on_step=True, on_epoch=True, prog_bar=show_prog_bar, sync_dist=True, rank_zero_only=True)
+        self.log(f'{split}_vp2vpp_cfd', vp2vpp_dist, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
 
         return {
             'vc_pm_dist': vc_pm_dist,
-            'vpp2vp_chamfer_dist': vpp2vp_dist,
-            'vp2vpp_chamfer_dist': vp2vpp_dist,
+            'vpp2vp_cfd': vpp2vp_dist,
+            'vp2vpp_cfd': vp2vpp_dist,
         }
 
 
@@ -223,6 +233,7 @@ class CCHTrainer(pl.LightningModule):
 
                 batch['first_frame_v_cano'] = vc / subject_height[:, None, None] * 1.7 # B, 6890, 3
                 batch['v_posed'] = batch['v_posed'] / subject_height[:, None, None, None] * 1.7 # B, N, 6890, 3
+                batch['v_cano'] = batch['v_cano'] / subject_height[:, None, None, None] * 1.7 # B, N, 6890, 3
                 
 
 
@@ -249,19 +260,31 @@ class CCHTrainer(pl.LightningModule):
             R = R.to(self.device)
             T = T.to(self.device)
 
+            dvc = batch['v_cano'] - batch['first_frame_v_cano'][:, None]
             # render normal images
             ret = self.renderer(
                 vertices=batch['v_posed'], 
                 R=R, 
                 T=T, 
                 skinning_weights=w,
-                first_frame_v_cano=batch['first_frame_v_cano']
+                first_frame_v_cano=batch['first_frame_v_cano'],
+                dvc=dvc
             )
             normal_imgs = ret['normals'].permute(0, 1, 4, 2, 3)
             masks = ret['masks'].permute(0, 1, 4, 2, 3)
             skinning_weights_maps = ret['skinning_weights_maps']
             canonical_color_maps = ret['canonical_color_maps']
-            
+            dvc_maps = ret['dvc_maps']
+
+
+            # import matplotlib.pyplot as plt
+            # dvc_maps[~masks.bool().squeeze()] = 0
+            # plt.imshow(torch.norm(dvc_maps[0, 0], dim=-1).cpu().detach().numpy())
+            # plt.colorbar()
+            # plt.show()
+
+            # import ipdb 
+            # ipdb.set_trace()
             
             batch['normal_imgs'] = normal_imgs
             batch['R'] = R
@@ -271,6 +294,7 @@ class CCHTrainer(pl.LightningModule):
             batch['w_pm'] = skinning_weights_maps
             batch['vc_pm'] = canonical_color_maps
             batch['vertex_visibility'] = ret['vertex_visibility']
+            batch['dvc_pm'] = dvc_maps
         return batch 
     
 

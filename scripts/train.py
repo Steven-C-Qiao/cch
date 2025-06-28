@@ -32,7 +32,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None):
-    set_seed(3)
+    set_seed(42)
     
     # Get config
     cfg = get_cch_cfg_defaults()
@@ -88,11 +88,11 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
         ),
         ModelCheckpoint(
             dirpath=model_save_dir,
-            filename='val_vpp2vp_chamfer_dist_{epoch:03d}',
+            filename='val_vpp2vp_cfd_{epoch:03d}',
             save_top_k=1,
             save_last=True,
             verbose=True,
-            monitor='val_vpp2vp_chamfer_dist',
+            monitor='val_vpp2vp_cfd',
             mode='min'
         ),
     ]
