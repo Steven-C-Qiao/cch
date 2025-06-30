@@ -116,8 +116,8 @@ class CCHLoss(pl.LightningModule):
         self.cfg = cfg
 
         self.posed_pointmap_loss = PosedPointmapChamferLoss(cfg)
-        # self.canonical_rgb_loss = CanonicalRGBConfLoss(cfg)
-        # self.skinning_weight_loss = SkinningWeightLoss()
+        self.canonical_rgb_loss = CanonicalRGBConfLoss(cfg)
+        self.skinning_weight_loss = SkinningWeightLoss()
         self.dvc_loss = MaskedL2Loss()
 
         self._create_loss_weight_schedule(cfg)
@@ -135,16 +135,16 @@ class CCHLoss(pl.LightningModule):
         posed_loss *= self.posed_loss_schedule[epoch]
         loss_dict['vp_chamfer_loss'] = posed_loss
 
-        # canonical_loss = self.canonical_rgb_loss(vc, vc_pred, conf=conf, mask=mask)
-        # canonical_loss *= self.canonical_loss_schedule[epoch]
-        # loss_dict['vc_pm_loss'] = canonical_loss
+        canonical_loss = self.canonical_rgb_loss(vc, vc_pred, conf=conf, mask=mask)
+        canonical_loss *= self.canonical_loss_schedule[epoch]
+        loss_dict['vc_pm_loss'] = canonical_loss
         
-        total_loss = posed_loss
+        total_loss = posed_loss + canonical_loss
         
-        # if w_pred is not None:
-        #     loss_w = self.skinning_weight_loss(w_smpl, w_pred, mask) * self.w_reg_loss_schedule[epoch]
-        #     loss_dict['w_reg_loss'] = loss_w
-        #     total_loss += loss_w
+        if w_pred is not None:
+            loss_w = self.skinning_weight_loss(w_smpl, w_pred, mask) * self.w_reg_loss_schedule[epoch]
+            loss_dict['w_reg_loss'] = loss_w
+            total_loss += loss_w
 
         if dvc_pred is not None:
             dvc_loss = self.dvc_loss(dvc_pred, dvc_pm_target, mask) * self.dvc_loss_schedule[epoch]

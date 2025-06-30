@@ -25,10 +25,8 @@ class CCH(nn.Module):
         self.model_skinning_weights = cfg.MODEL.SKINNING_WEIGHTS
         self.model_pose_correctives = cfg.MODEL.POSE_CORRECTIVES
 
-        # self.renderer = PointCloudRenderer(image_size=(img_size, img_size))
-
-        # self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="conv")
-        # self.canonical_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
+        self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="conv")
+        self.canonical_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
 
         if self.model_skinning_weights:
             self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3)
@@ -68,13 +66,13 @@ class CCH(nn.Module):
 
         aggregated_tokens_list, patch_start_idx = self.aggregator(images) 
 
-        vc, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
-        vc = torch.clamp(vc, -2, 2)
+        vc_init, vc_conf_init = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+        vc_init = torch.clamp(vc_init, -2, 2)
 
 
         if self.model_skinning_weights:
             w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, 
-                                           additional_conditioning=vc) # rearrange(vc, 'b n h w c -> (b n) c h w'))
+                                           additional_conditioning=vc_init) # rearrange(vc, 'b n h w c -> (b n) c h w'))
             w = F.softmax(w, dim=-1)
         else:
             w, w_conf = w_smpl, None
@@ -87,21 +85,23 @@ class CCH(nn.Module):
             """
 
             vp_init, _ = general_lbs(
-                vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'),
+                vc=rearrange(vc_init, 'b n h w c -> (b n) (h w) c'),
                 pose=rearrange(pose, 'b n c -> (b n) c'),
                 lbs_weights=rearrange(w, 'b n h w j -> (b n) (h w) j'),
                 J=joints.repeat_interleave(pose.shape[1], dim=0),
                 parents=self.parents 
             )
             vp_init = rearrange(vp_init, '(b n) (h w) c -> b n h w c', b=B, n=N, h=H, w=W)
+            vp_init = vp_init * mask.unsqueeze(-1)
             
-            pose_correctives_head_input = torch.cat([vc, vp_init], dim=-3)
+            pose_correctives_head_input = torch.cat([rearrange(vc_init, 'b n h w c -> b n c h w'),
+                                                     rearrange(vp_init, 'b n h w c -> b n c h w')], dim=-3)
 
             pose_correctives_aggregated_tokens_list, _ = self.pose_correctives_aggregator(pose_correctives_head_input)
             dvc, _ = self.pose_correctives_head(pose_correctives_aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
             dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
             
-            vc = vc + dvc
+            vc = vc_init + dvc
 
         else:
             vp_init, dvc = None, None
@@ -110,11 +110,12 @@ class CCH(nn.Module):
             
 
         pred = {
-            'vc_pred': vc,
-            'vc_conf_pred': vc_conf,
+            'vc_init_pred': vc_init,
+            'vc_conf_init_pred': vc_conf_init,
             'vp_init_pred': vp_init,
             'w_pred': w,
             'w_conf_pred': w_conf,
+            'vc_pred': vc,
             'dvc_pred': dvc
         }
 
