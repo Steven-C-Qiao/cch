@@ -80,8 +80,7 @@ class CCH(nn.Module):
 
         if self.model_pose_correctives:
             """
-            To predict pose correctives, predict pointmap updates conditioned on pose.
-            To condition on pose, use LBS to generate the posed pointmaps, which is coarsely pixel-aligned with vc pointmaps.
+            Generate pose condition as the posed colormap 
             """
 
             vp_init, _ = general_lbs(

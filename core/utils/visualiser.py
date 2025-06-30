@@ -447,7 +447,7 @@ class Visualiser(pl.LightningModule):
         )
 
         self.visualise_vc_as_image(
-            vc_pred=vc_pred, 
+            vc_pred=vc_init_pred, #vc_pred, 
             vc=vc, 
             dvc=dvc,
             vp_init_pred=vp_init_pred,

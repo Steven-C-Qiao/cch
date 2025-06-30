@@ -123,7 +123,7 @@ class CCHTrainer(pl.LightningModule):
             vp=vp_sampled,
             vp_pred=vp_pred,
             vc=vc,
-            vc_pred=vc_pred, 
+            vc_pred=vc_init_pred, 
             conf=vc_init_pred_conf,
             mask=masks,
             w_pred=w_pred,
@@ -141,7 +141,7 @@ class CCHTrainer(pl.LightningModule):
 
         self.metrics(
             vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'), 
-            vc_pred=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'), 
+            vc_pred=rearrange(vc_init_pred, 'b n h w c -> (b n) (h w) c'), 
             vp=rearrange(vp, 'b n v c -> (b n) v c'), 
             vp_pred=rearrange(vp_pred, 'b n h w c -> (b n) (h w) c'), 
             conf=rearrange(vc_init_pred_conf, 'b n h w -> (b n) (h w)'), 
