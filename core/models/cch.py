@@ -48,7 +48,7 @@ class CCH(nn.Module):
 
 
 
-    def forward(self, images, pose=None, joints=None, w_smpl=None, mask=None, R=None, T=None):
+    def forward(self, images, pose=None, joints=None, w_smpl=None, mask=None):
         """
         Inputs:
         Returns:
@@ -106,8 +106,6 @@ class CCH(nn.Module):
         else:
             vp_init, dvc = None, None
 
-        # import ipdb; ipdb.set_trace()
-            
 
         pred = {
             'vc_init_pred': vc_init,

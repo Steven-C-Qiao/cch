@@ -56,8 +56,8 @@ class CCHTrainer(pl.LightningModule):
         self.save_hyperparameters(ignore=['smpl_model'])
         
 
-    def forward(self, batch, pose=None, joints=None, w_smpl=None, mask=None, R=None, T=None):
-        return self.model(batch, pose=pose, joints=joints, w_smpl=w_smpl, mask=mask, R=R, T=T)
+    def forward(self, batch, pose=None, joints=None, w_smpl=None, mask=None):
+        return self.model(batch, pose=pose, joints=joints, w_smpl=w_smpl, mask=mask)
     
     def on_train_epoch_start(self):
         self.visualiser.set_global_rank(self.global_rank)
@@ -76,8 +76,8 @@ class CCHTrainer(pl.LightningModule):
         B, N = batch['pose'].shape[:2]
         vp = batch['v_posed']
         vp_sampled = batch['v_posed_samples']
-        masks = batch['masks'].squeeze()
-        # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
+        masks = batch['masks']
+        pose = batch['pose']
         joints = batch['joints']
         normal_maps = batch['normal_imgs']
         w_smpl = batch['w_pm']
@@ -89,17 +89,13 @@ class CCHTrainer(pl.LightningModule):
         # ------------------- forward pass -------------------
         preds = self(
             normal_maps, 
-            pose=batch['pose'], 
-            joints=batch['joints'], 
-            w_smpl=batch['w_pm'], 
-            mask=batch['masks'].squeeze(), 
-            R=batch['R'], 
-            T=batch['T']
+            pose=pose, 
+            joints=joints, 
+            w_smpl=w_smpl, 
+            mask=masks
         )
-        
         vc_init_pred, vc_init_pred_conf = preds['vc_init_pred'], preds['vc_conf_init_pred']
         vp_init_pred = preds['vp_init_pred']
-
         vc_pred = preds['vc_pred']
 
         if self.cfg.MODEL.SKINNING_WEIGHTS:
@@ -121,7 +117,6 @@ class CCHTrainer(pl.LightningModule):
             parents=self.smpl_model.parents 
         )
         vp_pred = rearrange(vp_pred, '(b n) (h w) c -> b n h w c', b=B, n=N, h=self.image_size, w=self.image_size)
-
 
 
         loss, loss_dict = self.criterion(
@@ -161,15 +156,16 @@ class CCHTrainer(pl.LightningModule):
                 normal_maps=normal_maps.cpu().detach().numpy(),
                 vp=vp.cpu().detach().numpy(),
                 vc=vc.cpu().detach().numpy(),
-                vp_pred=rearrange(vp_pred, 'b n h w c -> b n (h w) c').cpu().detach().numpy(),
+                vp_pred=vp_pred.cpu().detach().numpy(),
+                vp_init_pred=vp_init_pred.cpu().detach().numpy(),
                 vc_pred=vc_pred.cpu().detach().numpy(),
+                vc_init_pred=vc_init_pred.cpu().detach().numpy(),
                 conf=vc_init_pred_conf.cpu().detach().numpy(),
                 mask=masks.cpu().detach().numpy(),
                 vertex_visibility=vertex_visibility.cpu().detach().numpy(),
                 color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
                 dvc=dvc_pm_target.cpu().detach().numpy(),
                 dvc_pred=dvc_pred.cpu().detach().numpy(),
-                vp_init_pred=vp_init_pred.cpu().detach().numpy(),
                 no_annotations=True,
                 plot_error_heatmap=True
             )
@@ -300,7 +296,7 @@ class CCHTrainer(pl.LightningModule):
             batch['R'] = R
             batch['T'] = T
             batch['joints'] = joints
-            batch['masks'] = masks
+            batch['masks'] = masks.squeeze()
             batch['w_pm'] = skinning_weights_maps
             batch['vc_pm'] = canonical_color_maps
             batch['vertex_visibility'] = ret['vertex_visibility']
@@ -355,11 +351,12 @@ class CCHTrainer(pl.LightningModule):
         if self.dev:    
             batch = self.first_batch
 
+
         B, N = batch['pose'].shape[:2]
         vp = batch['v_posed']
         vp_sampled = batch['v_posed_samples']
-        masks = batch['masks'].squeeze()
-        # global_pose, body_pose = batch['pose'][..., :3], batch['pose'][..., 3:]
+        masks = batch['masks']
+        pose = batch['pose']
         joints = batch['joints']
         normal_maps = batch['normal_imgs']
         w_smpl = batch['w_pm']
@@ -371,17 +368,13 @@ class CCHTrainer(pl.LightningModule):
         # ------------------- forward pass -------------------
         preds = self(
             normal_maps, 
-            pose=batch['pose'], 
-            joints=batch['joints'], 
-            w_smpl=batch['w_pm'], 
-            mask=batch['masks'].squeeze(), 
-            R=batch['R'], 
-            T=batch['T']
+            pose=pose, 
+            joints=joints, 
+            w_smpl=w_smpl, 
+            mask=masks
         )
-        
         vc_init_pred, vc_init_pred_conf = preds['vc_init_pred'], preds['vc_conf_init_pred']
         vp_init_pred = preds['vp_init_pred']
-
         vc_pred = preds['vc_pred']
 
         if self.cfg.MODEL.SKINNING_WEIGHTS:
@@ -393,7 +386,6 @@ class CCHTrainer(pl.LightningModule):
             dvc_pred, dvc_conf = preds['dvc_pred'], None
         else:
             dvc_pred, dvc_conf = None, None
-
 
 
         vp_pred, _ = general_lbs(
@@ -448,15 +440,16 @@ class CCHTrainer(pl.LightningModule):
             normal_maps=normal_maps.cpu().detach().numpy(),
             vp=vp.cpu().detach().numpy(),
             vc=vc.cpu().detach().numpy(),
-            vp_pred=rearrange(vp_pred, 'b n h w c -> b n (h w) c').cpu().detach().numpy(),
+            vp_pred=vp_pred.cpu().detach().numpy(),
+            vp_init_pred=vp_init_pred.cpu().detach().numpy(),
             vc_pred=vc_pred.cpu().detach().numpy(),
+            vc_init_pred=vc_init_pred.cpu().detach().numpy(),
             conf=vc_init_pred_conf.cpu().detach().numpy(),
             mask=masks.cpu().detach().numpy(),
             vertex_visibility=vertex_visibility.cpu().detach().numpy(),
             color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
             dvc=dvc_pm_target.cpu().detach().numpy(),
             dvc_pred=dvc_pred.cpu().detach().numpy(),
-            vp_init_pred=vp_init_pred.cpu().detach().numpy(),
             no_annotations=True,
             plot_error_heatmap=True
         )
