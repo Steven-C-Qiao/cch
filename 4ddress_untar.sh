@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Script to untar all tar.gz files from 4DDress_tar to 4DDress directory
+# Organizes files by subject ID and clothing type
 
 # Source and destination directories
 SOURCE_DIR="/scratches/kyuban/cq244/datasets/4DDress_tar"
@@ -18,9 +19,6 @@ if [ ! -d "$DEST_DIR" ]; then
     mkdir -p "$DEST_DIR"
 fi
 
-# Change to destination directory
-cd "$DEST_DIR"
-
 # Count total tar.gz files for progress tracking
 TOTAL_FILES=$(find "$SOURCE_DIR" -name "*.tar.gz" | wc -l)
 echo "Found $TOTAL_FILES tar.gz files to extract"
@@ -31,14 +29,42 @@ CURRENT=0
 # Find and extract all tar.gz files
 find "$SOURCE_DIR" -name "*.tar.gz" | while read -r tarfile; do
     CURRENT=$((CURRENT + 1))
-    echo "[$CURRENT/$TOTAL_FILES] Extracting: $(basename "$tarfile")"
+    filename=$(basename "$tarfile")
+    echo "[$CURRENT/$TOTAL_FILES] Processing: $filename"
     
-    # Extract the tar.gz file
-    if tar -xzf "$tarfile"; then
-        echo "  ✓ Successfully extracted: $(basename "$tarfile")"
+    # Extract subject ID and clothing type from filename
+    # Pattern: '_4D-DRESS_XXXXX_Type.tar.gz'
+    if [[ $filename =~ _4D-DRESS_([0-9]{5})_(Inner|Outer)\.tar\.gz ]]; then
+        subject_id="${BASH_REMATCH[1]}"
+        clothing_type="${BASH_REMATCH[2]}"
+        
+        # Create subject and clothing type directories
+        subject_dir="$DEST_DIR/$subject_id"
+        clothing_dir="$subject_dir/$clothing_type"
+        
+        mkdir -p "$clothing_dir"
+        
+        echo "  Subject ID: $subject_id, Clothing Type: $clothing_type"
+        echo "  Extracting to: $clothing_dir"
+        
+        # Extract the tar.gz file to the specific directory
+        if tar -xzf "$tarfile" -C "$clothing_dir"; then
+            echo "  ✓ Successfully extracted: $filename"
+        else
+            echo "  ✗ Failed to extract: $filename"
+        fi
     else
-        echo "  ✗ Failed to extract: $(basename "$tarfile")"
+        echo "  ⚠ Warning: Filename '$filename' doesn't match expected pattern '_4D-DRESS_XXXXX_Inner/Outer.tar.gz'"
+        echo "  Extracting to root destination directory..."
+        
+        # Fallback: extract to root destination directory
+        if tar -xzf "$tarfile" -C "$DEST_DIR"; then
+            echo "  ✓ Successfully extracted: $filename (to root directory)"
+        else
+            echo "  ✗ Failed to extract: $filename"
+        fi
     fi
 done
 
-echo "Extraction complete! Files extracted to: $DEST_DIR"
+echo "Extraction complete! Files organized in: $DEST_DIR"
+echo "Directory structure: $DEST_DIR/SUBJECT_ID/CLOTHING_TYPE/"
