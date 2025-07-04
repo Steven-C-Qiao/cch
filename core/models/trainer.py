@@ -103,21 +103,35 @@ class CCHTrainer(pl.LightningModule):
         else:
             w_pred, w_conf = w_smpl, None
 
-        if self.cfg.MODEL.POSE_CORRECTIVES:
+        if self.cfg.MODEL.POSE_BLENDSHAPES:
             dvc_pred, dvc_conf = preds['dvc_pred'], None
         else:
             dvc_pred, dvc_conf = None, None
 
 
+        # vp_pred, _ = general_lbs(
+        #     vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
+        #     pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
+        #     lbs_weights=rearrange(w_smpl, 'b n h w j -> (b n) (h w) j'),
+        #     J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
+        #     parents=self.smpl_model.parents 
+        # )
+        # vp_pred = rearrange(vp_pred, '(b n) (h w) c -> b n h w c', b=B, n=N, h=self.image_size, w=self.image_size)
+
+
+        vc_expanded = vc.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, N, N, H, W, 3)
+        pose_expanded = pose.unsqueeze(1).repeat(1, N, 1, 1) # (B, N, N, 72)
+        w_expanded = w_pred.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, N, N, H, W, 25)
+        
         vp_pred, _ = general_lbs(
-            vc=rearrange(vc_pred, 'b n h w c -> (b n) (h w) c'),
-            pose=rearrange(batch['pose'], 'b n c -> (b n) c'),
-            lbs_weights=rearrange(w_smpl, 'b n h w j -> (b n) (h w) j'),
-            J=joints.repeat_interleave(batch['pose'].shape[1], dim=0),
+            vc=rearrange(vc_expanded, 'b k n h w c -> (b k n) (h w) c'),
+            pose=rearrange(pose_expanded, 'b k n c -> (b k n) c'),
+            lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k n) (h w) j'),
+            J=joints.repeat_interleave(N * N, dim=0),
             parents=self.smpl_model.parents 
         )
-        vp_pred = rearrange(vp_pred, '(b n) (h w) c -> b n h w c', b=B, n=N, h=self.image_size, w=self.image_size)
-
+        vp_pred = rearrange(vp_pred, '(b k n) (h w) c -> b k n h w c', b=B, n=N, k=N, h=self.image_size, w=self.image_size)
+        vp_sampled = vp_sampled.unsqueeze(1).repeat(1, N, 1, 1, 1) # (B, N, N, 6890, 3)
 
         loss, loss_dict = self.criterion(
             vp=vp_sampled,
@@ -139,36 +153,45 @@ class CCHTrainer(pl.LightningModule):
 
 
 
-        self.metrics(
-            vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'), 
-            vc_pred=rearrange(vc_init_pred, 'b n h w c -> (b n) (h w) c'), 
-            vp=rearrange(vp, 'b n v c -> (b n) v c'), 
-            vp_pred=rearrange(vp_pred, 'b n h w c -> (b n) (h w) c'), 
-            conf=rearrange(vc_init_pred_conf, 'b n h w -> (b n) (h w)'), 
-            mask=rearrange(masks, 'b n h w -> (b n) (h w)'), 
-            split=split
-        )
+        # self.metrics(
+        #     vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'), 
+        #     vc_pred=rearrange(vc_init_pred, 'b n h w c -> (b n) (h w) c'), 
+        #     vp=rearrange(vp, 'b n v c -> (b n) v c'), 
+        #     vp_pred=rearrange(vp_pred, 'b n h w c -> (b n) (h w) c'), 
+        #     conf=rearrange(vc_init_pred_conf, 'b n h w -> (b n) (h w)'), 
+        #     mask=rearrange(masks, 'b n h w -> (b n) (h w)'), 
+        #     split=split
+        # )
+        # self.metrics(
+        #     vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'), 
+        #     vc_pred=rearrange(vc_init_pred, 'b n h w c -> (b n) (h w) c'), 
+        #     vp=rearrange(vp.repeat_interleave(N, dim=1), 'b n v c -> (b n) v c'), 
+        #     vp_pred=rearrange(vp_pred, 'b k n h w c -> (b k n) (h w) c'), 
+        #     conf=rearrange(vc_init_pred_conf, 'b n h w -> (b n) (h w)'), 
+        #     mask=rearrange(masks.repeat_interleave(N, dim=1), 'b n h w -> (b n) (h w)'), 
+        #     split=split
+        # )
         
 
         # Visualise
-        if (self.global_step % self.vis_frequency == 0 and self.global_step > 0) or (self.global_step == 1):
-            self.visualiser.visualise(
-                normal_maps=normal_maps.cpu().detach().numpy(),
-                vp=vp.cpu().detach().numpy(),
-                vc=vc.cpu().detach().numpy(),
-                vp_pred=vp_pred.cpu().detach().numpy(),
-                vp_init_pred=vp_init_pred.cpu().detach().numpy(),
-                vc_pred=vc_pred.cpu().detach().numpy(),
-                vc_init_pred=vc_init_pred.cpu().detach().numpy(),
-                conf=vc_init_pred_conf.cpu().detach().numpy(),
-                mask=masks.cpu().detach().numpy(),
-                vertex_visibility=vertex_visibility.cpu().detach().numpy(),
-                color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
-                dvc=dvc_pm_target.cpu().detach().numpy(),
-                dvc_pred=dvc_pred.cpu().detach().numpy(),
-                no_annotations=True,
-                plot_error_heatmap=True
-            )
+        # if (self.global_step % self.vis_frequency == 0 and self.global_step > 0) or (self.global_step == 1):
+        #     self.visualiser.visualise(
+        #         normal_maps=normal_maps.cpu().detach().numpy(),
+        #         vp=vp.cpu().detach().numpy(),
+        #         vc=vc.cpu().detach().numpy(),
+        #         vp_pred=vp_pred.cpu().detach().numpy(),
+        #         vp_init_pred=vp_init_pred.cpu().detach().numpy(),
+        #         vc_pred=vc_pred.cpu().detach().numpy(),
+        #         vc_init_pred=vc_init_pred.cpu().detach().numpy(),
+        #         conf=vc_init_pred_conf.cpu().detach().numpy(),
+        #         mask=masks.cpu().detach().numpy(),
+        #         vertex_visibility=vertex_visibility.cpu().detach().numpy(),
+        #         color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
+        #         dvc=dvc_pm_target.cpu().detach().numpy(),
+        #         dvc_pred=dvc_pred.cpu().detach().numpy(),
+        #         no_annotations=True,
+        #         plot_error_heatmap=True
+        #     )
 
         # For app.animate_pm.py 
         # self.save_avatar(vc_pred, vc_conf, w_pred, joints, masks, w_smpl=w_smpl)
@@ -228,6 +251,8 @@ class CCHTrainer(pl.LightningModule):
             t = batch['transl'] # B, N, 3
             vp = batch['v_posed'] # B, N, 6890, 3
 
+            B, N, V, _ = vp.shape
+
             vp = vp - t[:, :, None, :]
             batch['v_posed'] = vp
 
@@ -280,7 +305,23 @@ class CCHTrainer(pl.LightningModule):
             masks = ret['masks'].permute(0, 1, 4, 2, 3)
             skinning_weights_maps = ret['skinning_weights_maps']
             canonical_color_maps = ret['canonical_color_maps']
-            dvc_maps = ret['dvc_maps']
+            # dvc_maps = ret['dvc_maps']
+
+            verts_in = batch['v_posed'][:, None].repeat(1, N, 1, 1, 1)
+            dvc_in = dvc[:, :, None].repeat(1, 1, N, 1, 1)
+
+            R_in = R[:, None].repeat(1, N, 1, 1, 1)
+            T_in = T[:, None].repeat(1, N, 1, 1)    
+            w_in = w[:, None].repeat(1, N, 1, 1, 1, 1)
+
+            dvc_maps = self.renderer(
+                vertices=rearrange(verts_in, 'b k n v c -> (b k) n v c'), 
+                R=rearrange(R_in, 'b k n x y -> (b k) n x y'), 
+                T=rearrange(T_in, 'b k n x -> (b k) n x'), 
+                temp = rearrange(dvc_in, 'b k n v c -> (b k n) v c')
+            )
+            dvc_maps = rearrange(dvc_maps, '(b k) n h w c -> b k n h w c', b=B, k=N)
+            
 
 
             # import matplotlib.pyplot as plt

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script to untar all tar.gz files from 4DDress_tar to 4DDress directory
-# Organizes files by subject ID and clothing type
+# Organizes files by subject ID (clothing type directories are already in the tar files)
 
 # Source and destination directories
 SOURCE_DIR="/scratches/kyuban/cq244/datasets/4DDress_tar"
@@ -32,23 +32,21 @@ find "$SOURCE_DIR" -name "*.tar.gz" | while read -r tarfile; do
     filename=$(basename "$tarfile")
     echo "[$CURRENT/$TOTAL_FILES] Processing: $filename"
     
-    # Extract subject ID and clothing type from filename
+    # Extract subject ID from filename
     # Pattern: '_4D-DRESS_XXXXX_Type.tar.gz'
     if [[ $filename =~ _4D-DRESS_([0-9]{5})_(Inner|Outer)\.tar\.gz ]]; then
         subject_id="${BASH_REMATCH[1]}"
         clothing_type="${BASH_REMATCH[2]}"
         
-        # Create subject and clothing type directories
+        # Create subject directory
         subject_dir="$DEST_DIR/$subject_id"
-        clothing_dir="$subject_dir/$clothing_type"
-        
-        mkdir -p "$clothing_dir"
+        mkdir -p "$subject_dir"
         
         echo "  Subject ID: $subject_id, Clothing Type: $clothing_type"
-        echo "  Extracting to: $clothing_dir"
+        echo "  Extracting to: $subject_dir"
         
-        # Extract the tar.gz file to the specific directory
-        if tar -xzf "$tarfile" -C "$clothing_dir"; then
+        # Extract the tar.gz file to the subject directory
+        if tar -xzf "$tarfile" -C "$subject_dir"; then
             echo "  ✓ Successfully extracted: $filename"
         else
             echo "  ✗ Failed to extract: $filename"
@@ -67,4 +65,4 @@ find "$SOURCE_DIR" -name "*.tar.gz" | while read -r tarfile; do
 done
 
 echo "Extraction complete! Files organized in: $DEST_DIR"
-echo "Directory structure: $DEST_DIR/SUBJECT_ID/CLOTHING_TYPE/"
+echo "Directory structure: $DEST_DIR/SUBJECT_ID/ (with Inner/Outer subdirectories from tar files)"

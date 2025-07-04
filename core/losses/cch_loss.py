@@ -127,10 +127,16 @@ class CCHLoss(pl.LightningModule):
                 dvc_pred=None, dvc_conf=None, epoch=None, dvc_pm_target=None):
         loss_dict = {}
 
+        # posed_loss = self.posed_pointmap_loss(
+        #     rearrange(vp, 'b n v c -> (b n) v c'), 
+        #     rearrange(vp_pred, 'b n h w c -> (b n) (h w) c'), 
+        #     rearrange(mask, 'b n h w -> (b n) (h w)')
+        # ) 
+        B, K, N, H, W = vp.shape[:5] # K = N 
         posed_loss = self.posed_pointmap_loss(
-            rearrange(vp, 'b n v c -> (b n) v c'), 
-            rearrange(vp_pred, 'b n h w c -> (b n) (h w) c'), 
-            rearrange(mask, 'b n h w -> (b n) (h w)')
+            rearrange(vp, 'b k n v c -> (b k n) v c'), 
+            rearrange(vp_pred, 'b k n h w c -> (b k n) (h w) c'), 
+            rearrange(mask.repeat_interleave(K, dim=1), 'b n h w -> (b n) (h w)')
         ) 
         posed_loss *= self.posed_loss_schedule[epoch]
         loss_dict['vp_chamfer_loss'] = posed_loss
@@ -147,7 +153,8 @@ class CCHLoss(pl.LightningModule):
             total_loss += loss_w
 
         if dvc_pred is not None:
-            dvc_loss = self.dvc_loss(dvc_pred, dvc_pm_target, mask) * self.dvc_loss_schedule[epoch]
+            dvc_loss = self.dvc_loss(dvc_pred, dvc_pm_target, 
+                                     mask[:, :, None].repeat(1, 1, 4, 1, 1)) * self.dvc_loss_schedule[epoch]
             loss_dict['dvc_loss'] = dvc_loss
             total_loss += dvc_loss
 

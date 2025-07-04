@@ -98,7 +98,7 @@ class SurfaceNormalRenderer(pl.LightningModule):
     
 
     def forward(self, vertices, R=None, T=None, faces=None, skinning_weights=None, 
-                first_frame_v_cano=None, part_segmentation=None, dvc=None):
+                first_frame_v_cano=None, part_segmentation=None, dvc=None, temp=None):
         """
         Args:
             vertices: (B, N, V, 3)
@@ -147,6 +147,11 @@ class SurfaceNormalRenderer(pl.LightningModule):
             # invert z axis as per opencv? convention
             surface_normals[..., 2] *= -1
 
+        if temp is not None:
+            mesh.textures = TexturesVertex(verts_features=temp)
+            images = self.renderer(mesh)
+            temp_rend = images[..., :3]#.cpu().numpy()
+            return rearrange(temp_rend, '(b n) h w c -> b n h w c', b=B, n=N)
 
         # normalise to 0 1
         surface_normals = (surface_normals + 1) / 2
