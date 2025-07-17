@@ -103,14 +103,6 @@ class SkinningWeightLoss(nn.Module):
 
 
 class CCHLoss(pl.LightningModule):
-    """
-    vc_gt: (B, N, H, W, 3)
-    vc_pred: (B, N, H, W, 3)
-    conf: (B, N, H, W) in [0, 1]
-    mask: (B, N, H, W)
-    vp: (B, N, 6890, 3)
-    vp_pred: (B, N, V, 3)
-    """
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
@@ -123,29 +115,26 @@ class CCHLoss(pl.LightningModule):
         self._create_loss_weight_schedule(cfg)
 
 
-    def forward(self, vp, vp_pred, vc, vc_pred, conf, mask=None, w_pred=None, w_smpl=None, 
+    def forward(self, vp, vp_pred, vc, vc_pred=None, conf=None, mask=None, w_pred=None, w_smpl=None, 
                 dvc_pred=None, dvc_conf=None, epoch=None, dvc_pm_target=None):
         loss_dict = {}
+        total_loss = 0
 
-        # posed_loss = self.posed_pointmap_loss(
-        #     rearrange(vp, 'b n v c -> (b n) v c'), 
-        #     rearrange(vp_pred, 'b n h w c -> (b n) (h w) c'), 
-        #     rearrange(mask, 'b n h w -> (b n) (h w)')
-        # ) 
-        B, K, N, H, W = vp.shape[:5] # K = N 
+        B, K, N, H, W = vp_pred.shape[:5] # K = N 
         posed_loss = self.posed_pointmap_loss(
-            rearrange(vp, 'b k n v c -> (b k n) v c'), 
-            rearrange(vp_pred, 'b k n h w c -> (b k n) (h w) c'), 
-            rearrange(mask.repeat_interleave(K, dim=1), 'b n h w -> (b n) (h w)')
+            rearrange(vp, 'b k v c -> (b k) v c'), 
+            rearrange(vp_pred, 'b k n h w c -> (b k) (n h w) c'), 
+            rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
         ) 
         posed_loss *= self.posed_loss_schedule[epoch]
         loss_dict['vp_chamfer_loss'] = posed_loss
+        total_loss += posed_loss
 
-        canonical_loss = self.canonical_rgb_loss(vc, vc_pred, conf=conf, mask=mask)
-        canonical_loss *= self.canonical_loss_schedule[epoch]
-        loss_dict['vc_pm_loss'] = canonical_loss
-        
-        total_loss = posed_loss + canonical_loss
+        if vc_pred is not None:
+            canonical_loss = self.canonical_rgb_loss(vc, vc_pred, conf=conf, mask=mask)
+            canonical_loss *= self.canonical_loss_schedule[epoch]
+            loss_dict['vc_pm_loss'] = canonical_loss
+            total_loss += canonical_loss
         
         if w_pred is not None:
             loss_w = self.skinning_weight_loss(w_smpl, w_pred, mask) * self.w_reg_loss_schedule[epoch]
@@ -154,9 +143,11 @@ class CCHLoss(pl.LightningModule):
 
         if dvc_pred is not None:
             dvc_loss = self.dvc_loss(dvc_pred, dvc_pm_target, 
-                                     mask[:, :, None].repeat(1, 1, 4, 1, 1)) * self.dvc_loss_schedule[epoch]
+                                     mask[:, None].repeat(1, 4, 1, 1, 1)) * self.dvc_loss_schedule[epoch]
             loss_dict['dvc_loss'] = dvc_loss
             total_loss += dvc_loss
+        else:
+            assert False
 
 
             # l2 loss to regularise dvc_pred

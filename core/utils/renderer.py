@@ -212,6 +212,12 @@ class SurfaceNormalRenderer(pl.LightningModule):
             ret['dvc_maps'] = rearrange(dvc_map, '(b n) h w c -> b n h w c', b=B, n=N)
 
         return ret
+    
+    def _set_cameras(self, R, T):
+        cameras = FoVPerspectiveCameras(R=R, T=T).to(self.device)
+        self.renderer.rasterizer.cameras = cameras
+        self.renderer.shader.cameras = cameras
+
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt

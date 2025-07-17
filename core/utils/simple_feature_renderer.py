@@ -97,7 +97,7 @@ class FeatureRenderer(pl.LightningModule):
         for key, value in kwargs.items():
             mesh.textures = TexturesVertex(verts_features=value)
             images = self.renderer(mesh)
-            ret[key] = images
+            ret[f'{key}_maps'] = images[..., :3]
 
         return ret
     
@@ -108,7 +108,7 @@ class FeatureRenderer(pl.LightningModule):
 
 
 
-        
+
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt

@@ -54,7 +54,7 @@ class Visualiser(pl.LightningModule):
         plot_error_heatmap=True, 
         dvc=None, 
         dvc_pred=None, 
-        vp_init_pred=None
+        vp_init_pred=None,
     ):
         B, N, H, W, C = vc_pred.shape
 
@@ -86,11 +86,11 @@ class Visualiser(pl.LightningModule):
 
 
         if vp_init_pred is not None:
-            vp_init_pred[~mask.astype(bool)] = 0
+            vp_init_pred[~mask[:, None].repeat(N, axis=1).astype(bool)] = 0
 
             norm_min, norm_max = vp_init_pred.min(), vp_init_pred.max()
             vp_init_pred = (vp_init_pred - norm_min) / (norm_max - norm_min)
-            vp_init_pred[~mask.astype(bool)] = 1
+            vp_init_pred[~mask[:, None].repeat(N, axis=1).astype(bool)] = 1
 
         if dvc_pred is not None:
             dvc_pred = np.linalg.norm(dvc_pred, axis=-1)
@@ -101,9 +101,9 @@ class Visualiser(pl.LightningModule):
         num_rows = 2
         num_rows += 1 if plot_error_heatmap else 0
         num_rows += 1 if conf is not None else 0
-        num_rows += 1 if dvc is not None else 0
-        num_rows += 1 if vp_init_pred is not None else 0
-        num_rows += 1 if dvc_pred is not None else 0
+        num_rows += 4 if vp_init_pred is not None else 0
+        num_rows += 4 if dvc is not None else 0
+        num_rows += 4 if dvc_pred is not None else 0
         fig = plt.figure(figsize=(4*N, num_rows*4*B))
         for b in range(B):
             for n in range(N):
@@ -113,7 +113,7 @@ class Visualiser(pl.LightningModule):
                 if vc is not None:
                     plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
                     plt.imshow(vc[b,n])
-                    plt.title(f'GT Frame {n}')
+                    plt.title(f'Vc GT {n}')
                     plt.axis('off')
                     row += 1
 
@@ -121,7 +121,7 @@ class Visualiser(pl.LightningModule):
                 if vc_pred is not None:
                     plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
                     plt.imshow(vc_pred[b,n])
-                    plt.title(f'Pred Frame {n}')
+                    plt.title(f'Vc pred {n}')
                     plt.axis('off')
                     row += 1
 
@@ -133,7 +133,7 @@ class Visualiser(pl.LightningModule):
                                     norm=matplotlib.colors.LogNorm(vmin=1e-4, vmax=max(1e-3, np.max(error_heatmap[b,n]))))
                     if n == N-1:
                         plt.colorbar(im)
-                    plt.title(f'Error Heatmap Frame {n}')
+                    plt.title(f'Error {n}')
                     plt.axis('off')
                     row += 1
 
@@ -145,258 +145,156 @@ class Visualiser(pl.LightningModule):
                                     norm=matplotlib.colors.LogNorm(vmin=min(1e-3, np.min(conf[b,n]+1e-6)), vmax=max(1e-2, np.max(conf[b,n]))))
                     if n == N-1: 
                         plt.colorbar(im)
-                    plt.title(f'1/conf Frame {n}')
+                    plt.title(f'1/conf {n}')
                     plt.axis('off')
                     row += 1
 
                 # ------------ vp init pred ------------
                 if vp_init_pred is not None:
-                    plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
-                    im = plt.imshow(vp_init_pred[b,n])
-                    plt.title(f'vp init pred no dvc {n}')
-                    plt.axis('off')
-                    row += 1
+                    for k in range(4):
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
+                        im = plt.imshow(vp_init_pred[b,k,n])
+                        plt.title(f'init $vp_{k}^{n}$')
+                        plt.axis('off')
+                        row += 1
 
                 # ------------ dvc ------------
                 if dvc is not None:
-                    plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
-                    dvc_masked = dvc[b,n] * mask[b,n]
-                    im = plt.imshow(dvc_masked, cmap='viridis')
-                    plt.title(f'dvc Frame {n}')
-                    if n == N-1:
-                        plt.colorbar(im)
-                    plt.axis('off')
-                    row += 1
+                    for k in range(4):
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
+                        dvc_masked = dvc[b, k, n] * mask[b,n]
+                        im = plt.imshow(dvc_masked, cmap='viridis')
+                        plt.title(f'GT $dvc_{k}^{n}$')
+                        if n == N-1:
+                            plt.colorbar(im)
+                        plt.axis('off')
+                        row += 1
 
                 # ------------ dvc pred ------------
                 if dvc_pred is not None:
-                    dvc_pred_masked = dvc_pred[b,n] * mask[b,n]
-                    plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
-                    im = plt.imshow(dvc_pred_masked)
-                    if n == N-1:
-                        plt.colorbar(im)
-                    plt.title(f'dvc_pred Frame {n}')
-                    plt.axis('off')
-                    row += 1
-
+                    for k in range(4):
+                        dvc_pred_masked = dvc_pred[b, k, n] * mask[b,n]
+                        plt.subplot(num_rows*B, N, (b*num_rows+row)*N + n + 1)
+                        im = plt.imshow(dvc_pred_masked)
+                        if n == N-1:
+                            plt.colorbar(im)
+                        plt.title(f'pred $dvc_{k}^{n}$')
+                        plt.axis('off')
+                        row += 1
 
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_colormaps.png'))
+        plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_pms.png'))
         plt.close()
 
 
     def visualise_vp_vc(
-        self, 
-        vp, 
+        self,
         vc, 
-        vp_pred, 
-        vc_pred, 
-        vp_init_pred=None, 
-        vc_init_pred=None,
-        bg_mask=None, 
-        conf_mask=None,
-        color=None, 
-        vertex_visibility=None, 
-        no_annotations=True
+        vc_init_pred,
+        vc_pred,
+        vp,
+        vp_init_pred,
+        vp_pred,
+        bg_mask,
+        conf_mask,
+        color,
     ):
+
         """
         Visualise per-frame posed vertices and joined canonical points
 
+        Row 1: ground truth vp, ground truth first frame v_cano
+        Row 2: pred initial vp, red initial vc (w/o pbs)
+        Row 3: pred vp w/ pbs, pred vc
+
         Args:
             vp: (B, N, 6890, 3) CAPE scan vertices
-            vp_init_pred: (B, N, H * W, 3): w/o pose blendshapes
-            vp_pred: (B, N, H * W, 3) predicted per-frame LBS posed vertices
+            vp_init_pred: (B, K, N, H, W, 3): w/o pose blendshapes
+            vp_pred: (B, K, N, H, W, 3)
 
-            vc: (B, N, H, W, 3) per-frame canonical pointmap
-            vc_init_pred: (B, N, H * W, 3): w/o pose blendshapes
-            vc_pred: (B, N, H * W, 3) predicted per-frame canonical pointmap
+            vc: (B, N, H, W, 3)
+            vc_init_pred: (B, N, H, W, 3): w/o pose blendshapes
+            vc_pred: (B, K, N, H, W, 3)
 
             bg_mask: (B, N, H, W) background mask
-            color: (B, N, H, W) argmax of skinning weights
-            vertex_visibility: (B, N, 6890) vp visibility
-            conf_mask: (B, N, H, W) 
-            no_annotations: bool
+            conf_mask: (B, N, H, W) canonical points confidence mask
         """
-        s = 0.05
-        gt_alpha = 0.3
+        gt_alpha = 0.5
         pred_alpha = 0.5
-        B, N, V, C = vp.shape
-        B, N = min(B, 1), min(N, 4)
+        s = 0.1
+        
+        num_rows, num_cols = 3, 5
+        sub_fig_size = 4 
 
+        mask = (bg_mask * conf_mask).astype(bool)
 
-        num_rows = B
-        if vp_init_pred is not None:
-            num_rows *= 2
+        fig = plt.figure(figsize=(sub_fig_size * num_cols, sub_fig_size * num_rows))
 
+        filtered_vc_pred = []
+        filtered_colors = []
 
-        if conf_mask is not None and bg_mask is not None:
-            mask = (bg_mask * conf_mask).astype(np.bool)
-        elif conf_mask is not None:
-            mask = conf_mask.astype(np.bool)
-        elif bg_mask is not None:
-            mask = bg_mask.astype(np.bool)
-        else:
-            mask = None
+        ax = fig.add_subplot(num_rows, num_cols, 5, projection='3d')
+        vc = rearrange(vc, 'b n h w c -> b n (h w) c')
+        ax.scatter(vc[0, 0, :, 0], 
+                   vc[0, 0, :, 1], 
+                   vc[0, 0, :, 2], c='gray', s=s, alpha=gt_alpha, label=f'$vc_{0}$')
+        
+        for n in range(4):
+            ax = fig.add_subplot(num_rows, num_cols, n+1, projection='3d')
+            ax.scatter(vp[0, n, :, 0], 
+                       vp[0, n, :, 1], 
+                       vp[0, n, :, 2], c='gray', s=s, alpha=gt_alpha, label=f'$vp_{n}')
 
-        fig = plt.figure(figsize=(4*(N+2), 4*num_rows))
-
-        for b in range(B):
-            all_vc_points = []
-            all_vc_init_points = []
-            all_colors = []
+            filted_vp_init_pred = vp_init_pred[0, n].reshape(-1, 3)[mask[0].flatten()]
+            ax = fig.add_subplot(num_rows, num_cols, 5+n+1, projection='3d')
+            ax.scatter(filted_vp_init_pred[:, 0], 
+                       filted_vp_init_pred[:, 1], 
+                       filted_vp_init_pred[:, 2], c='red', s=s, alpha=pred_alpha, label=f'$vpinit_{n}$')
             
+            filtered_vp_pred = vp_pred[0, n].reshape(-1, 3)[mask[0].flatten()]
+            ax = fig.add_subplot(num_rows, num_cols, 10+n+1, projection='3d')
+            ax.scatter(filtered_vp_pred[:, 0], 
+                       filtered_vp_pred[:, 1], 
+                       filtered_vp_pred[:, 2], c='orange', s=s, alpha=pred_alpha, label=f'$vp_{n}$')
 
-            for n in range(N):
-                color_masked = color[b, n].flatten() if color is not None else 'red'
-                    
-                # ---------------- vc ----------------
-                vc_pred_to_scatter = vc_pred[b, n]
-                vp_pred_to_scatter = vp_pred[b, n]
-                vp_to_scatter = vp[b, n]
+        max_range = np.array([
+            vc[0, :, :, 0].max() - vc[0, :, :, 0].min(),
+            vc[0, :, :, 1].max() - vc[0, :, :, 1].min(),
+            vc[0, :, :, 2].max() - vc[0, :, :, 2].min()
+        ]).max() / 2.0
+        mid_x = (vc[0, :, :, 0].max() + vc[0, :, :, 0].min()) * 0.5
+        mid_y = (vc[0, :, :, 1].max() + vc[0, :, :, 1].min()) * 0.5
+        mid_z = (vc[0, :, :, 2].max() + vc[0, :, :, 2].min()) * 0.5
 
-                if vc_init_pred is not None:
-                    vc_init_pred_to_scatter = vc_init_pred[b, n]
-
-                if mask is not None:
-                    vp_pred_to_scatter = vp_pred_to_scatter[mask[b, n].astype(np.bool).flatten()]
-                    vc_pred_to_scatter = vc_pred_to_scatter[mask[b, n].astype(np.bool).flatten()]
-                    vc_init_pred_to_scatter = vc_init_pred_to_scatter[mask[b, n].astype(np.bool).flatten()]
-                    color_masked = color_masked[mask[b, n].astype(np.bool).flatten()]
-                    
-                all_vc_points.append(vc_pred_to_scatter)
-                all_vc_init_points.append(vc_init_pred_to_scatter)
-                all_colors.append(color_masked)
-
-
-                # ---------------- vp final ----------------
-                ax = fig.add_subplot(num_rows, N+2, (b)*(N+2) + n + 1, projection='3d')
-
-                if vertex_visibility is not None:
-                    vp_to_scatter = vp_to_scatter[vertex_visibility[b, n].astype(np.bool)]
-                
-                ax.scatter(vp_to_scatter[:,0], vp_to_scatter[:,1], vp_to_scatter[:,2], 
-                           c='gray', s=0.75*s, alpha=gt_alpha, label='Ground Truth')
-                
-                ax.scatter(vp_pred_to_scatter[:,0], vp_pred_to_scatter[:,1], vp_pred_to_scatter[:,2],
-                           c=color_masked, s=s, alpha=pred_alpha, label='Vp final pred')
-
-
-                ax.view_init(elev=10, azim=20, vertical_axis='y')
-                ax.set_box_aspect([1, 1, 1])
-            
-                max_range = np.array([
-                    vp[b,n,:,0].max() - vp[b,n,:,0].min(),
-                    vp[b,n,:,1].max() - vp[b,n,:,1].min(),
-                    vp[b,n,:,2].max() - vp[b,n,:,2].min()
-                ]).max() / 2.0
-                mid_x = (vp[b,n,:,0].max() + vp[b,n,:,0].min()) * 0.5
-                mid_y = (vp[b,n,:,1].max() + vp[b,n,:,1].min()) * 0.5
-                mid_z = (vp[b,n,:,2].max() + vp[b,n,:,2].min()) * 0.5
-                ax.set_xlim(mid_x - max_range, mid_x + max_range)
-                ax.set_ylim(mid_y - max_range, mid_y + max_range)
-                ax.set_zlim(mid_z - max_range, mid_z + max_range)
-
-
-
-                # ---------------- vp init pred ----------------
-                if vp_init_pred is not None:
-                    ax = fig.add_subplot(num_rows, N+2, (1+b)*(N+2) + n + 1, projection='3d')
-
-                    ax.scatter(vp_to_scatter[:,0], vp_to_scatter[:,1], vp_to_scatter[:,2], 
-                            c='gray', s=0.75*s, alpha=gt_alpha, label='Ground Truth')
-                
-                    vp_init_pred_to_scatter = vp_init_pred[b, n]
-                    vp_init_pred_to_scatter = vp_init_pred_to_scatter[mask[b, n].astype(np.bool).flatten()]
-                    
-                    ax.scatter(vp_init_pred_to_scatter[:,0], vp_init_pred_to_scatter[:,1], vp_init_pred_to_scatter[:,2], 
-                               c=color_masked, s=s, alpha=pred_alpha, label='Vp init pred')
-                        
-                    ax.view_init(elev=10, azim=20, vertical_axis='y')
-                    ax.set_box_aspect([1, 1, 1])
-                
-                    max_range = np.array([
-                        vp[b,n,:,0].max() - vp[b,n,:,0].min(),
-                        vp[b,n,:,1].max() - vp[b,n,:,1].min(),
-                        vp[b,n,:,2].max() - vp[b,n,:,2].min()
-                    ]).max() / 2.0
-                    mid_x = (vp[b,n,:,0].max() + vp[b,n,:,0].min()) * 0.5
-                    mid_y = (vp[b,n,:,1].max() + vp[b,n,:,1].min()) * 0.5
-                    mid_z = (vp[b,n,:,2].max() + vp[b,n,:,2].min()) * 0.5
-                    ax.set_xlim(mid_x - max_range, mid_x + max_range)
-                    ax.set_ylim(mid_y - max_range, mid_y + max_range)
-                    ax.set_zlim(mid_z - max_range, mid_z + max_range)
-
-
-
-            # ---------------- joined vc ----------------
-            ax = fig.add_subplot(num_rows, N+2, b*(N+2) + N + 1, projection='3d')
-
-            all_vc_points = np.concatenate(all_vc_points, axis=0)
-            all_colors = np.concatenate(all_colors, axis=0)
-            ax.scatter(all_vc_points[:,0], all_vc_points[:,1], all_vc_points[:,2],
-                    c=all_colors, s=s, alpha=pred_alpha, label='Canonical Points')
-            
-            ax.view_init(elev=10, azim=20, vertical_axis='y')
-            ax.set_box_aspect([1, 1, 1])
-
-            max_range = np.array([
-                all_vc_points[:,0].max() - all_vc_points[:,0].min(),
-                all_vc_points[:,1].max() - all_vc_points[:,1].min(),
-                all_vc_points[:,2].max() - all_vc_points[:,2].min()
-            ]).max() / 2.0
-            mid_x = (all_vc_points[:,0].max() + all_vc_points[:,0].min()) * 0.5
-            mid_y = (all_vc_points[:,1].max() + all_vc_points[:,1].min()) * 0.5
-            mid_z = (all_vc_points[:,2].max() + all_vc_points[:,2].min()) * 0.5
+        for ax in fig.axes:
             ax.set_xlim(mid_x - max_range, mid_x + max_range)
             ax.set_ylim(mid_y - max_range, mid_y + max_range)
             ax.set_zlim(mid_z - max_range, mid_z + max_range)
-
-            # ---------------- joined vc gt ----------------
-            ax = fig.add_subplot(num_rows, N+2, b*(N+2) + N + 2, projection='3d')
-
-            vc_to_scatter = vc[b].reshape(-1, 3)
-            ax.scatter(vc_to_scatter[:,0], vc_to_scatter[:,1], vc_to_scatter[:,2],
-                    c='gray', s=s, alpha=gt_alpha, label='Canonical Points')
-            
             ax.view_init(elev=10, azim=20, vertical_axis='y')
             ax.set_box_aspect([1, 1, 1])
-            ax.set_xlim(mid_x - max_range, mid_x + max_range)
-            ax.set_ylim(mid_y - max_range, mid_y + max_range)
-            ax.set_zlim(mid_z - max_range, mid_z + max_range)
-
-            if vc_init_pred is not None:
-                ax = fig.add_subplot(num_rows, N+2, (b+1)*(N+2) + N + 1, projection='3d')
-
-                all_vc_init_points = np.concatenate(all_vc_init_points, axis=0)
-                ax.scatter(all_vc_init_points[:,0], all_vc_init_points[:,1], all_vc_init_points[:,2],
-                        c=all_colors, s=s, alpha=pred_alpha, label='Canonical Points init pred')
-                
-                ax.view_init(elev=10, azim=20, vertical_axis='y')
-                ax.set_box_aspect([1, 1, 1])
-                ax.set_xlim(mid_x - max_range, mid_x + max_range)
-                ax.set_ylim(mid_y - max_range, mid_y + max_range)
-                ax.set_zlim(mid_z - max_range, mid_z + max_range)
-
-        if no_annotations:
-            for ax in fig.axes:
-                ax.grid(False)
-                ax.xaxis.pane.fill = False
-                ax.yaxis.pane.fill = False
-                ax.zaxis.pane.fill = False
-                ax.xaxis.pane.set_edgecolor('none')
-                ax.yaxis.pane.set_edgecolor('none') 
-                ax.zaxis.pane.set_edgecolor('none')
-                ax.xaxis.line.set_color('none')
-                ax.yaxis.line.set_color('none')
-                ax.zaxis.line.set_color('none')
-                ax.set_xticks([])
-                ax.set_yticks([])
-                ax.set_zticks([])
+            ax.grid(False)
+            ax.xaxis.pane.fill = False
+            ax.yaxis.pane.fill = False
+            ax.zaxis.pane.fill = False
+            ax.xaxis.pane.set_edgecolor('none')
+            ax.yaxis.pane.set_edgecolor('none') 
+            ax.zaxis.pane.set_edgecolor('none')
+            ax.xaxis.line.set_color('none')
+            ax.yaxis.line.set_color('none')
+            ax.zaxis.line.set_color('none')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_zticks([])
 
         plt.tight_layout(pad=0.01)  # Reduce padding between subplots
         plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_vp_vc.png'), dpi=300)
 
         plt.close()
+            
+            
+
+
+
 
 
 
@@ -420,15 +318,19 @@ class Visualiser(pl.LightningModule):
     ):
         """
         Args:
+            K = N, pm_k^n is the k-th pose plotted on the n-th shape/silhouette
             normal_maps: (B, N, H, W, 3)
 
             vc: (B, N, H, W, 3)
             vc_init_pred: (B, N, H, W, 3): w/o pose blendshapes
-            vc_pred: (B, N, H, W, 3)
+            vc_pred: (B, K, N, H, W, 3)
 
             vp: (B, N, 6890, 3)
-            vp_init_pred: (B, N, H, W, 3): w/o pose blendshapes
-            vp_pred: (B, N, H, W, 3)
+            vp_init_pred: (B, K, N, H, W, 3): w/o pose blendshapes
+            vp_pred: (B, K, N, H, W, 3)
+
+            dvc: (B, K, N, H, W, 3)
+            dvc_pred: (B, K, N, H, W, 3)
             
             conf: (B, N, H, W)
             mask: (B, N, H, W)
@@ -437,7 +339,7 @@ class Visualiser(pl.LightningModule):
         """
         if self.rank != 0:
             return None 
-        
+
         if conf is not None:
             conf_threshold = 0.08
             conf_mask = (1/conf) < conf_threshold
@@ -459,29 +361,31 @@ class Visualiser(pl.LightningModule):
         
         self.visualise_vp_vc(
             vp=vp, 
-            vp_init_pred=rearrange(vp_init_pred, 'b n h w c -> b n (h w) c'),
-            vp_pred=rearrange(vp_pred, 'b n h w c -> b n (h w) c'), 
+            vp_init_pred=vp_init_pred,
+            vp_pred=vp_pred, 
             vc=vc, 
-            vc_init_pred=rearrange(vc_init_pred, 'b n h w c -> b n (h w) c'),
-            vc_pred=rearrange(vc_pred, 'b n h w c -> b n (h w) c'), 
+            vc_init_pred=vc_init_pred,
+            vc_pred=vc_pred,
             bg_mask=mask, 
-            color=color, 
-            vertex_visibility=vertex_visibility, 
             conf_mask=conf_mask, 
-            no_annotations=no_annotations
-        )
-        
-        self.visualise_scenepic(
-            vp=vp, 
-            vc=vc, 
-            vp_pred=rearrange(vp_pred, 'b n h w c -> b n (h w) c'), 
-            vc_pred=rearrange(vc_pred, 'b n h w c -> b n (h w) c'), 
-            vp_init_pred=rearrange(vp_init_pred, 'b n h w c -> b n (h w) c'),
-            vc_init_pred=rearrange(vc_init_pred, 'b n h w c -> b n (h w) c'),
             color=color, 
-            masks=mask, 
-            vertex_visibility=vertex_visibility
+            # vertex_visibility=vertex_visibility, 
+            # no_annotations=no_annotations
         )
+
+        # import ipdb; ipdb.set_trace()
+        
+        # self.visualise_scenepic(
+        #     vp=vp, 
+        #     vc=vc, 
+        #     vp_pred=rearrange(vp_pred, 'b n h w c -> b n (h w) c'), 
+        #     vc_pred=rearrange(vc_pred, 'b n h w c -> b n (h w) c'), 
+        #     vp_init_pred=rearrange(vp_init_pred, 'b n h w c -> b n (h w) c'),
+        #     vc_init_pred=rearrange(vc_init_pred, 'b n h w c -> b n (h w) c'),
+        #     color=color, 
+        #     masks=mask, 
+        #     vertex_visibility=vertex_visibility
+        # )
         
 
     def visualise_scenepic(
