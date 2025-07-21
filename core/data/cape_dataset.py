@@ -107,34 +107,6 @@ class CapeDataset(Dataset):
 
         ret = defaultdict(list)
         for i in sampled_frames_indices:
-            # try:
-            #     fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{i:06d}.npz')
-            #     data = np.load(fpath)
-                
-            #     # Seems that even data is loaded, some npys can still be broken, move append here
-            #     ret['transl'].append(torch.from_numpy(data['transl']).float())
-            #     ret['v_cano'].append(torch.from_numpy(data['v_cano']).float()) # NOTE Questionable, this is different for each frame 
-            #     ret['pose'].append(torch.from_numpy(data['pose']).float())
-            #     ret['v_posed'].append(torch.from_numpy(data['v_posed']).float())
-            # except:
-            #     data = None
-            #     while data is None:
-            #         new_idx = np.random.choice(valid_frames_indices, 1, replace=False) # sample a new random frame
-            #         fpath = os.path.join(PATH_TO_DATA, f'sequences/{id}/{sequence_name}/{sequence_name}.{new_idx[0]:06d}.npz')
-            #         try: # some frames are corrupted, so loading here still might fail
-            #             data = np.load(fpath)
-            #             temp_transl = torch.from_numpy(data['transl']).float()
-            #             temp_v_cano = torch.from_numpy(data['v_cano']).float()
-            #             temp_pose = torch.from_numpy(data['pose']).float()
-            #             temp_v_posed = torch.from_numpy(data['v_posed']).float()
-
-            #             # Seems that even data is loaded, some npys can still be broken, move append here
-            #             ret['transl'].append(temp_transl)
-            #             ret['v_cano'].append(temp_v_cano) 
-            #             ret['pose'].append(temp_pose)
-            #             ret['v_posed'].append(temp_v_posed)
-            #         except: # iterate until a valid frame is loaded
-            #             continue
             data = None
             while data is None:
                 try:
@@ -145,8 +117,7 @@ class CapeDataset(Dataset):
                     v_cano = torch.from_numpy(data['v_cano']).float()
                     pose = torch.from_numpy(data['pose']).float() 
                     v_posed = torch.from_numpy(data['v_posed']).float()
-
-                    
+   
                 except:
                     # Sample a new random frame if loading fails
                     i = np.random.choice(valid_frames_indices, 1, replace=False)[0]

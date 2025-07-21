@@ -15,8 +15,10 @@ import sys
 sys.path.append('.')
 
 from core.configs.cch_cfg import get_cch_cfg_defaults
-from core.models.trainer import CCHTrainer
-from core.data.cch_datamodule import CCHDataModule
+# from core.models.trainer import CCHTrainer
+# from core.data.cch_datamodule import CCHDataModule
+from core.models.trainer_4ddress import CCHTrainer
+from core.data.d4dress_datamodule import CCHDataModule
 
 def set_seed(seed=42):
     """Set random seed for reproducibility."""

@@ -8,6 +8,7 @@ from einops import rearrange
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import (
     FoVPerspectiveCameras,
+    PerspectiveCameras,
     RasterizationSettings,
     MeshRenderer,
     MeshRasterizer,
@@ -58,6 +59,7 @@ class FeatureRenderer(pl.LightningModule):
             image_size=self.image_size,
             blur_radius=0.0,
             faces_per_pixel=1,
+            bin_size=0
         )
         
         self.renderer = MeshRenderer(
@@ -66,49 +68,30 @@ class FeatureRenderer(pl.LightningModule):
             ),
             shader=SimpleShader()
         )
-        self.register_buffer('faces', smpl_faces)
+        # self.register_buffer('faces', smpl_faces)
+
+        self._set_cameras(PerspectiveCameras().to(self.device))
     
 
-    def forward(self, vertices, R=None, T=None, faces=None, **kwargs):
-        """
-        Args:
-            vertices: (N, V, 3)
-            faces: (F, 3)
-            R: (N, 3, 3)
-            T: (N, 3)
-        Returns:
-            kwargs_maps: (N, H, W, C)
-        """
-        N, _, _ = vertices.shape
+    def forward(self, mesh, **kwargs):
         ret = {}
 
-        if faces is None:
-            faces = self.faces
-            faces = faces[None].repeat(N, 1, 1)
+        # for key, value in kwargs.items():
+        #     mesh.textures = TexturesVertex(verts_features=value)
+        #     images = self.renderer(mesh)
+        #     ret[f'{key}_maps'] = images[..., :3]
 
-        mesh = Meshes(
-            verts=vertices,
-            faces=faces,
-        )
+        images = self.renderer(mesh)
+        ret[f'maps'] = images[..., :-1]
 
-        if R is not None and T is not None:
-            self._set_cameras_extrinsics(R, T)
-
-        for key, value in kwargs.items():
-            mesh.textures = TexturesVertex(verts_features=value)
-            images = self.renderer(mesh)
-            ret[f'{key}_maps'] = images[..., :3]
 
         return ret
     
-    def _set_cameras_extrinsics(self, R, T):
-        cameras = FoVPerspectiveCameras(R=R, T=T).to(self.device)
-        self.renderer.rasterizer.cameras = cameras
-        self.renderer.shader.cameras = cameras
 
     def _set_cameras(self, cameras):
         self.renderer.rasterizer.cameras = cameras
         self.renderer.shader.cameras = cameras
+
 
 
 

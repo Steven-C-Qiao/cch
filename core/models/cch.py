@@ -21,25 +21,15 @@ class CCH(nn.Module):
         self.model_skinning_weights = cfg.MODEL.SKINNING_WEIGHTS
         self.model_pbs = cfg.MODEL.POSE_BLENDSHAPES
 
-        self.aggregator = Aggregator(
-            img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="conv"
-        )
-        self.canonical_head = DPTHead(
-            dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1"
-        )
+        self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="dinov2_vits14_reg")
+        self.canonical_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
 
         if self.model_skinning_weights:
-            self.skinning_head = DPTHead(
-                dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3
-            )
+            self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3)
 
         if self.model_pbs:
-            self.pbs_aggregator = Aggregator(
-                img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="conv", input_channels=6
-            )
-            self.pbs_head = DPTHead(
-                dim_in=2 * embed_dim, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1"
-            )
+            self.pbs_aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="conv", input_channels=6)
+            self.pbs_head = DPTHead(dim_in=2 * embed_dim, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1")
             
     def forward(self, images, pose=None, joints=None, w_smpl=None, mask=None):
         """
@@ -64,11 +54,10 @@ class CCH(nn.Module):
             images = images.unsqueeze(0)
         B, N, C_in, H, W = images.shape
 
-        with torch.no_grad():
-            aggregated_tokens_list, patch_start_idx = self.aggregator(images) 
+        aggregated_tokens_list, patch_start_idx = self.aggregator(images) 
 
-            vc_init, vc_conf_init = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
-            vc_init = torch.clamp(vc_init, -2, 2)
+        vc_init, vc_conf_init = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+        vc_init = torch.clamp(vc_init, -2, 2)
 
 
         if self.model_skinning_weights:
