@@ -14,6 +14,7 @@ from vggt.layers import PatchEmbed
 from vggt.layers.block import Block
 from vggt.layers.rope import RotaryPositionEmbedding2D, PositionGetter
 from vggt.layers.vision_transformer import vit_small, vit_base, vit_large, vit_giant2
+from core.utils.ckpt_utils import interpolate_dino_pos_embed, load_and_freeze_pretrained_dinov2
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,7 @@ class Aggregator(nn.Module):
                 "dinov2_vitg2_reg": vit_giant2,
             }
 
+
             self.patch_embed = vit_models[patch_embed](
                 img_size=img_size,
                 patch_size=patch_size,
@@ -181,6 +183,9 @@ class Aggregator(nn.Module):
                 block_chunks=block_chunks,
                 init_values=init_values,
             )
+            
+            # Load pretrained DINOv2 weights
+            load_and_freeze_pretrained_dinov2(self)
 
             # Disable gradient updates for mask token
             if hasattr(self.patch_embed, "mask_token"):

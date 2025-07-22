@@ -6,7 +6,9 @@ import random
 import numpy as np
 from PIL import Image
 import trimesh
+from typing import Sequence
 from collections import defaultdict
+from torchvision import transforms
 from torch.utils.data import Dataset
 
 import sys
@@ -14,17 +16,8 @@ sys.path.append('.')
 
 from core.data.d4dress_utils import load_pickle, load_image, rotation_matrix, d4dress_cameras_to_pytorch3d_cameras
 
+
 PATH_TO_DATASET = "/scratches/kyuban/cq244/datasets/4DDress"
-
-
-
-# smpl_model = smplx.create(
-#     'model_files',
-#     gender='neutral',
-#     num_betas=10
-# )
-# smpl_faces = smpl_model.faces
-
 
 """
 4D-DRESS
@@ -59,6 +52,16 @@ PATH_TO_DATASET = "/scratches/kyuban/cq244/datasets/4DDress"
 """
 
 
+# Use timm's names
+IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
+
+
+def make_normalize_transform(
+    mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
+    std: Sequence[float] = IMAGENET_DEFAULT_STD,
+) -> transforms.Normalize:
+    return transforms.Normalize(mean=mean, std=std)
 
 
 def d4dress_collate_fn(batch):
@@ -72,8 +75,8 @@ def d4dress_collate_fn(batch):
         for key, value in sample.items():
             collated[key].append(value)
     
-    nonstackable_keys = ['scan_mesh', 'template_mesh', 'template_mesh_verts', 'template_mesh_faces',
-                         'scan_mesh_verts', 'scan_mesh_faces']
+    nonstackable_keys = ['scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 
+                         'template_mesh', 'template_mesh_verts', 'template_mesh_faces']
 
 
     for key in collated.keys():
@@ -115,6 +118,15 @@ class D4DressDataset(Dataset):
             self.num_of_takes[id] = len(takes)
 
 
+        self.transform = transforms.Compose([
+            transforms.CenterCrop((940, 940)),
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            # make_normalize_transform()
+        ])
+        self.normalise = make_normalize_transform()
+
+
     def __len__(self):
         return len(self.ids) * self.lengthen_by
 
@@ -143,10 +155,14 @@ class D4DressDataset(Dataset):
 
         # ---- template mesh ----
         template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', id)
-        lower_mesh = trimesh.load(os.path.join(template_dir, 'lower.ply'))
+            
         upper_mesh = trimesh.load(os.path.join(template_dir, 'upper.ply'))
         body_mesh = trimesh.load(os.path.join(template_dir, 'body.ply'))
-        full_mesh = trimesh.util.concatenate([lower_mesh, body_mesh, upper_mesh])
+        if os.path.exists(os.path.join(template_dir, 'lower.ply')):
+            lower_mesh = trimesh.load(os.path.join(template_dir, 'lower.ply'))
+            full_mesh = trimesh.util.concatenate([lower_mesh, body_mesh, upper_mesh])
+        else:
+            full_mesh = trimesh.util.concatenate([body_mesh, upper_mesh])
         full_mesh.visual.vertex_colors = full_mesh.vertices
         
         ret['template_mesh'] = full_mesh
@@ -154,14 +170,14 @@ class D4DressDataset(Dataset):
         ret['template_mesh_faces'] = torch.tensor(full_mesh.faces).long()
         
 
-
+        # ---- scan mesh ----
         for i, sampled_frame in enumerate(sampled_frames):
             scan_mesh_fname = os.path.join(take_dir, 'Meshes_pkl', 'mesh-f{}.pkl'.format(sampled_frame))
             scan_mesh = load_pickle(scan_mesh_fname)
             scan_mesh['uv_path'] = scan_mesh_fname.replace('mesh-f', 'atlas-f')
             if 'colors' not in scan_mesh:
                 print(f"No colors in scan_mesh: {scan_mesh_fname}")
-                import ipdb; ipdb.set_trace()
+                assert False
 
                 # load atlas data
                 atlas_data = load_pickle(scan_mesh['uv_path'])
@@ -185,21 +201,37 @@ class D4DressDataset(Dataset):
             ret['scan_mesh_faces'].append(torch.tensor(scan_mesh['faces']).long())
 
 
-            # smpl_mesh_fname = os.path.join(take_dir, 'SMPL', 'mesh-f{}_smpl.ply'.format(sampled_frame))
+            # ---- smpl data ----
             smpl_data_fname = os.path.join(take_dir, 'SMPL', 'mesh-f{}_smpl.pkl'.format(sampled_frame))
+            # smpl_mesh_fname = os.path.join(take_dir, 'SMPL', 'mesh-f{}_smpl.ply'.format(sampled_frame))
 
             smpl_data = load_pickle(smpl_data_fname)
             global_orient, body_pose, transl, betas = smpl_data['global_orient'], smpl_data['body_pose'], smpl_data['transl'], smpl_data['betas']
+            pose = np.concatenate([global_orient, body_pose], axis=0)
             ret['global_orient'].append(global_orient)
             ret['body_pose'].append(body_pose)
+            ret['pose'].append(pose)
             ret['transl'].append(transl)
             ret['betas'].append(betas)
 
-
+            # ---- images ----
             img_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'images', 'capture-f{}.png'.format(sampled_frame))
             mask_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'masks', 'mask-f{}.png'.format(sampled_frame))
-            ret['imgs'].append(load_image(img_fname))
-            ret['masks'].append(load_image(mask_fname))
+            
+            # Load images and apply transforms
+            img = load_image(img_fname)
+            mask = load_image(mask_fname)
+            
+            # Convert to PIL Images for transforms
+            img_pil = Image.fromarray(img)
+            mask_pil = Image.fromarray(mask)
+            
+            # Apply transforms
+            img_transformed = self.normalise(self.transform(img_pil))
+            mask_transformed = self.transform(mask_pil).squeeze()
+            
+            ret['imgs'].append(img_transformed)
+            ret['masks'].append(mask_transformed)
 
         ret['imgs'] = torch.tensor(np.stack(ret['imgs']))
         ret['masks'] = torch.tensor(np.stack(ret['masks']))
@@ -208,6 +240,7 @@ class D4DressDataset(Dataset):
         ret['K'] = torch.tensor(np.stack(ret['K']))
         ret['global_orient'] = torch.tensor(np.stack(ret['global_orient']))
         ret['body_pose'] = torch.tensor(np.stack(ret['body_pose']))
+        ret['pose'] = torch.tensor(np.stack(ret['pose']))
         ret['transl'] = torch.tensor(np.stack(ret['transl']))
         ret['betas'] = torch.tensor(np.stack(ret['betas']))
 

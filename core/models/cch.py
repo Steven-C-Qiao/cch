@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
+from pytorch3d.structures import Pointclouds
+
 from core.heads.dpt_head import DPTHead
 from core.models.cch_aggregator import Aggregator
 from core.utils.general_lbs import general_lbs
@@ -49,6 +51,7 @@ class CCH(nn.Module):
             vp: (B, K, N, H, W, 3): Posed vertices for the k-th pose
             dvc: pose correctives: (B, K, N, H, W, 3) k-th pose blend shape for all N views 
         """
+        ret = {}
 
         if len(images.shape) == 4:
             images = images.unsqueeze(0)
@@ -59,6 +62,13 @@ class CCH(nn.Module):
         vc_init, vc_conf_init = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
         vc_init = torch.clamp(vc_init, -2, 2)
 
+        vc_init = vc_init * mask.unsqueeze(-1) # Mask background to 0, important for backward chamfer metrics
+
+        ret['vc_init'] = vc_init
+        ret['vc_conf_init'] = vc_conf_init
+
+
+
 
         if self.model_skinning_weights:
             w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, 
@@ -67,63 +77,66 @@ class CCH(nn.Module):
         else:
             w, w_conf = w_smpl, None
 
+        ret['w'] = w
+        ret['w_conf'] = w_conf
 
-        assert self.model_pbs
 
+        
         # Generate initial posed vertices without pose blendshapes
         vc_expanded = vc_init.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 3)
         pose_expanded = pose.unsqueeze(2).repeat(1, 1, N, 1) 
         w_expanded = w.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 25)
-        mask = mask.unsqueeze(1).repeat(1, N, 1, 1, 1).unsqueeze(-1) # (B, K, N, H, W)
-
+        mask = mask.unsqueeze(1).repeat(1, N, 1, 1, 1).unsqueeze(-1) # (B, K, N, H, W, 1)
+        joints = joints.unsqueeze(1).repeat(1, N, 1, 1, 1) # (B, K, N, 24, 3)
 
         vp_init, _ = general_lbs(
             vc=rearrange(vc_expanded, 'b k n h w c -> (b k n) (h w) c'),
             pose=rearrange(pose_expanded, 'b k n c -> (b k n) c'),
             lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k n) (h w) j'),
-            J=joints.repeat_interleave(N * N, dim=0),
+            J=rearrange(joints, 'b k n j c -> (b k n) j c'),
             parents=self.smpl_model.parents 
         )
         vp_init = rearrange(vp_init, '(b k n) (h w) c -> b k n h w c', b=B, n=N, k=N, h=H, w=W)
-        vp_init = vp_init * mask 
+        vp_init = vp_init * mask
+        ret['vp_init'] = vp_init
         
-
-        # Stack canonical and posed pointmaps to predict pose blendshapes
-        pbs_aggregator_input = torch.cat([rearrange(vc_expanded, 'b k n h w c -> (b k) n c h w'),
-                                          rearrange(vp_init, 'b k n h w c -> (b k) n c h w')], dim=-3).contiguous()
+        # Reshape to batch of point clouds and mask out invalid points
+        # vp_init = rearrange(vp_init, 'b k n h w c -> (b k) (n h w) c')
+        # mask = rearrange(mask.squeeze(-1), 'b k n h w -> (b k) (n h w)')
+        # valid_points = [points[m] for points, m in zip(vp_init, mask)]
         
-        pbs_aggregated_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
-        
-        dvc, _ = self.pbs_head(pbs_aggregated_tokens_list, images.repeat_interleave(N, dim=0), patch_start_idx=patch_start_idx)
-        dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
-        dvc = rearrange(dvc, '(b k) n h w c -> b k n h w c', b=B, k=N)
+        # vp_init_ptcld = Pointclouds(points=valid_points)
+        # ret['vp_init_ptcld'] = vp_init_ptcld
 
-        # add blendshapes to initial canonical predictions 
-        vc = vc_init[:, None] + dvc
 
-        # Use updated canonical to pose again
-        vp_pred, _ = general_lbs(
-            vc=rearrange(vc, 'b k n h w c -> (b k n) (h w) c'),
-            pose=rearrange(pose_expanded, 'b k n c -> (b k n) c'),
-            lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k n) (h w) j'),
-            J=joints.repeat_interleave(N * N, dim=0),
-            parents=self.smpl_model.parents 
-        )
-        vp_pred = rearrange(vp_pred, '(b k n) (h w) c -> b k n h w c', b=B, n=N, k=N, h=H, w=W)
-        
+        if self.model_pbs:
+            # Stack canonical and posed pointmaps to predict pose blendshapes
+            pbs_aggregator_input = torch.cat([rearrange(vc_expanded, 'b k n h w c -> (b k) n c h w'),
+                                              rearrange(vp_init, 'b k n h w c -> (b k) n c h w')], dim=-3).contiguous()
+            
+            pbs_aggregated_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
+            
+            dvc, _ = self.pbs_head(pbs_aggregated_tokens_list, images.repeat_interleave(N, dim=0), patch_start_idx=patch_start_idx)
+            dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
+            dvc = rearrange(dvc, '(b k) n h w c -> b k n h w c', b=B, k=N)
 
-        pred = {
-            'vc_init_pred': vc_init,
-            'vc_conf_init_pred': vc_conf_init,
-            'vp_init_pred': vp_init,
-            'vp_pred': vp_pred,
-            'w_pred': w,
-            'w_conf_pred': w_conf,
-            'vc_pred': vc,
-            'dvc_pred': dvc
-        }
+            # add blendshapes to initial canonical predictions 
+            vc = vc_init[:, None] + dvc
 
-        return pred 
+            # Use updated canonical to pose again
+            vp, _ = general_lbs(
+                vc=rearrange(vc, 'b k n h w c -> (b k n) (h w) c'),
+                pose=rearrange(pose_expanded, 'b k n c -> (b k n) c'),
+                lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k n) (h w) j'),
+                J=rearrange(joints, 'b k n j c -> (b k n) j c'),
+                parents=self.smpl_model.parents 
+            )
+            vp = rearrange(vp, '(b k n) (h w) c -> b k n h w c', b=B, n=N, k=N, h=H, w=W)
+            ret['vp'] = vp
+            ret['dvc'] = dvc
+            ret['vc'] = vc
+
+        return ret 
     
 
 

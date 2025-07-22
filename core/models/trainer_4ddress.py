@@ -1,22 +1,20 @@
-import os
 import torch
-import numpy as np
 import torch.optim as optim
 import pytorch_lightning as pl
-import torch.nn.functional as F
 from einops import rearrange
+
 from pytorch3d.loss import chamfer_distance
+from pytorch3d.structures import Pointclouds
+from pytorch3d.ops.knn import knn_points
+from pytorch3d.renderer import PerspectiveCameras
+from pytorch3d.structures import Meshes
+from pytorch3d.renderer import TexturesVertex
 
 from core.configs import paths 
-
 from core.models.smpl import SMPL
 from core.models.cch import CCH 
-
 from core.losses.cch_loss import CCHLoss
-
-from core.utils.renderer import SurfaceNormalRenderer 
-from core.utils.sample_utils import sample_cameras
-from core.utils.general_lbs import general_lbs
+from core.losses.cch_metrics import CCHMetrics
 from core.utils.visualiser import Visualiser
 from core.utils.feature_renderer import FeatureRenderer
 
@@ -35,7 +33,7 @@ class CCHTrainer(pl.LightningModule):
         self.image_size = cfg.DATA.IMG_SIZE
  
         # self.feature_renderer = FeatureRenderer(image_size=(224, 224))
-        self.feature_renderer = FeatureRenderer(image_size=(1280, 940))
+        self.feature_renderer = FeatureRenderer(image_size=(256, 188))
 
         self.smpl_model = SMPL(
             model_path=paths.SMPL,
@@ -52,124 +50,103 @@ class CCHTrainer(pl.LightningModule):
             smpl_model=self.smpl_model
         )
 
-        # Freeze aggregator and canonical_head
-        for param in self.model.aggregator.parameters():
-            param.requires_grad = False
-        for param in self.model.canonical_head.parameters():
-            param.requires_grad = False
-
         self.criterion = CCHLoss(cfg)
+        self.metrics = CCHMetrics(cfg)
         self.visualiser = Visualiser(save_dir=vis_save_dir)
 
         self.save_hyperparameters(ignore=['smpl_model'])
+
+        self.first_batch = None
         
 
-    def forward(self, batch, pose=None, joints=None, w_smpl=None, mask=None):
-        return self.model(batch, pose=pose, joints=joints, w_smpl=w_smpl, mask=mask)
+    def forward(self, images, pose=None, joints=None, w_smpl=None, mask=None):
+        return self.model(images, pose=pose, joints=joints, w_smpl=w_smpl, mask=mask)
     
     def on_train_epoch_start(self):
         self.visualiser.set_global_rank(self.global_rank)
 
     def training_step(self, batch, batch_idx, split='train'):
-        if not self.dev:
-            batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
-        if self.global_step == 0:
-            if self.dev:
-                batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
+        if self.first_batch is None:
             self.first_batch = batch
-            # self.visualiser.visualise_input_normal_imgs(batch['normal_imgs'])
-        if self.dev:    
+        if self.dev:
             batch = self.first_batch
 
-        B, N = batch['pose'].shape[:2]
-        vp = batch['v_posed']
-        vp_sampled = batch['v_posed_samples']
-        masks = batch['masks']
-        pose = batch['pose']
-        joints = batch['joints']
-        normal_maps = batch['normal_imgs']
-        w_smpl = batch['w_pm']
-        vc = batch['vc_pm']
-        dvc_pm_target = batch['dvc_pm']
-        vertex_visibility = batch['vertex_visibility']
+        batch = self.process_inputs(batch, batch_idx, normalise=self.normalise)
 
 
-        # ------------------- forward pass -------------------
         preds = self(
-            normal_maps, 
-            pose=pose, 
-            joints=joints, 
-            w_smpl=w_smpl, 
-            mask=masks
+            images=batch['imgs'],
+            pose=batch['pose'], 
+            joints=batch['smpl_T_joints'], 
+            w_smpl=batch['smpl_w_maps'], 
+            mask=batch['masks']
         )
-        vc_init_pred, vc_pred,  vc_init_pred_conf = preds['vc_init_pred'], preds['vc_pred'], preds['vc_conf_init_pred']
-        vp_init_pred, vp_pred = preds['vp_init_pred'], preds['vp_pred']
+        
 
-        if self.cfg.MODEL.SKINNING_WEIGHTS:
-            w_pred, w_conf = preds['w_pred'], preds['w_conf_pred']
-        else:
-            w_pred, w_conf = w_smpl, None
+        loss, loss_dict = self.criterion(preds, batch)
 
-        if self.cfg.MODEL.POSE_BLENDSHAPES:
-            dvc_pred, dvc_conf = preds['dvc_pred'], None
-        else:
-            dvc_pred, dvc_conf = None, None
+        metrics = self.metrics(preds, batch)
 
 
-
-        loss, loss_dict = self.criterion(
-            vp=vp_sampled,
-            vp_pred=vp_pred,
-            vc=vc,
-            # vc_pred=vc_init_pred, 
-            conf=vc_init_pred_conf,
-            mask=masks,
-            w_pred=w_pred,
-            w_smpl=w_smpl,
-            dvc_pred=dvc_pred,
-            dvc_conf=dvc_conf,
-            dvc_pm_target=dvc_pm_target,
-            epoch=self.current_epoch
-        )
         self.log(f'{split}_loss', loss, prog_bar=True, sync_dist=True, rank_zero_only=True)
         self.log_dict(loss_dict, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
+        self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
+
+        # if (self.global_step % self.vis_frequency == 0 and self.global_step > 0) or (self.global_step == 1):
+        self.visualiser.visualise(preds, batch)
+        import ipdb; ipdb.set_trace()
 
 
-        self.metrics(
-            vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'), 
-            vc_pred=rearrange(vc_init_pred, 'b n h w c -> (b n) (h w) c'), 
-            vp=rearrange(vp, 'b k v c -> (b k) v c'), 
-            vp_pred=rearrange(vp_pred, 'b k n h w c -> (b k) (n h w) c'), 
-            conf=rearrange(vc_init_pred_conf, 'b n h w -> (b n) (h w)'), 
-            mask=rearrange(masks, 'b n h w -> (b n) (h w)'), 
-            split=split, 
-            B=B,
-            N=N
-        )
+        # self.metrics(
+        #     # vc=rearrange(vc, 'b n h w c -> (b n) (h w) c'), 
+        #     # vc_pred=rearrange(vc_init_pred, 'b n h w c -> (b n) (h w) c'), 
+        #     vp=batch['vp_ptcld'], 
+        #     vp_pred=rearrange(preds['vp_pred'], 'b k n h w c -> (b k) (n h w) c'), 
+        #     conf=rearrange(preds['vc_conf_init_pred'], 'b n h w -> (b n) (h w)'), 
+        #     mask=rearrange(batch['masks'], 'b n h w -> (b n) (h w)'), 
+        #     split=split, 
+        #     B=B,
+        #     N=N
+        # )
+
+
+        # Convert predictions to numpy if tensor
+        # preds_np = {}
+        # for k, v in preds.items():
+        #     if isinstance(v, torch.Tensor):
+        #         preds_np[k] = v.cpu().detach().numpy()
+        #     else:
+        #         preds_np[k] = v
+
+        # # Convert batch tensors to numpy
+        # batch_np = {}
+        # for k, v in batch.items():
+        #     if isinstance(v, torch.Tensor):
+        #         batch_np[k] = v.cpu().detach().numpy()
+        #     else:
+        #         batch_np[k] = v
         
 
         # Visualise
         # if (self.global_step % self.vis_frequency == 0 and self.global_step > 0) or (self.global_step == 1):
-        self.visualiser.visualise(
-            normal_maps=normal_maps.cpu().detach().numpy(),
-            vp=vp.cpu().detach().numpy(),
-            vc=vc.cpu().detach().numpy(),
-            vp_pred=vp_pred.cpu().detach().numpy(),
-            vp_init_pred=vp_init_pred.cpu().detach().numpy(),
-            vc_pred=vc_pred.cpu().detach().numpy(),
-            vc_init_pred=vc_init_pred.cpu().detach().numpy(),
-            conf=vc_init_pred_conf.cpu().detach().numpy(),
-            mask=masks.cpu().detach().numpy(),
-            vertex_visibility=vertex_visibility.cpu().detach().numpy(),
-            color=np.argmax(w_pred.cpu().detach().numpy(), axis=-1),
-            dvc=dvc_pm_target.cpu().detach().numpy(),
-            dvc_pred=dvc_pred.cpu().detach().numpy(),
-            no_annotations=True,
-            plot_error_heatmap=True
-        )
+        # self.visualiser.visualise(
+        #         # normal_maps=normal_maps.cpu().detach().numpy(),
+        #         vp=batch['vp_ptcld'].points_padded().view(B, N, -1, 3).cpu().detach().numpy(),
+        #         # vc=vc.cpu().detach().numpy(),
+        #         vp_pred=preds['vp_pred'].cpu().detach().numpy(),
+        #         vp_init_pred=preds['vp_init_pred'].cpu().detach().numpy(),
+        #         vc_pred=preds['vc_pred'].cpu().detach().numpy(),
+        #         vc_init_pred=preds['vc_init_pred'].cpu().detach().numpy(),
+        #         conf=preds['vc_conf_init_pred'].cpu().detach().numpy(),
+        #         mask=batch['masks'].cpu().detach().numpy(),
+        #         # vertex_visibility=preds['vertex_visibility'].cpu().detach().numpy(),
+        #         # color=np.argmax(preds['w_pred'].cpu().detach().numpy(), axis=-1),
+        #         # dvc=dvc_pm_target.cpu().detach().numpy(),
+        #         dvc_pred=preds['dvc_pred'].cpu().detach().numpy(),
+        #         no_annotations=True,
+        #         plot_error_heatmap=True
+        #     )
 
-        # import ipdb 
-        # ipdb.set_trace()
 
         # For app.animate_pm.py 
         # self.save_avatar(vc_pred, vc_conf, w_pred, joints, masks, w_smpl=w_smpl)
@@ -177,52 +154,12 @@ class CCHTrainer(pl.LightningModule):
         return loss 
     
 
-    def metrics(self, vc=None, vc_pred=None, vp=None, vp_pred=None,
-                conf=None, mask=None, vp_mask=None, split='train', B=None, N=None):
-        if conf is not None:
-            conf_threshold = 0.08
-            conf_mask = (1/conf) < conf_threshold
-            full_mask = (mask * conf_mask).bool()
-        else:
-            full_mask = mask.bool()
-
-        # ----------------------- vc -----------------------
-        vc_pm_dist = torch.norm(vc - vc_pred, dim=-1) * full_mask 
-        vc_pm_dist = vc_pm_dist.sum() / (full_mask.sum() + 1e-6) * 100.0
-
-
-        # ----------------------- vp -----------------------
-        full_vp_mask = rearrange(full_mask, '(b n) (h w) -> b n h w', 
-                                 b=B, n=N, h=self.image_size, w=self.image_size)
-        full_vp_mask = full_vp_mask[:, None].repeat(1, N, 1, 1, 1)
-        full_vp_mask = rearrange(full_vp_mask, 'b k n h w -> (b k) (n h w)')
-
-        vp_dist_squared, _ = chamfer_distance(vp_pred, vp, batch_reduction=None, point_reduction=None)
-        vpp2vp_dist = torch.sqrt(vp_dist_squared[0])
-        masked_vpp2vp_dist = vpp2vp_dist * full_vp_mask
-        vpp2vp_dist = masked_vpp2vp_dist.sum() / (full_vp_mask.sum() + 1e-6) * 100.0
-
-        vp2vpp_dist = torch.sqrt(vp_dist_squared[1])
-        vp2vpp_dist = vp2vpp_dist.mean() * 100.0
-
-        show_prog_bar = (split == 'train')
-
-        self.log(f'{split}_vc_pm_dist', vc_pm_dist,  on_step=True, on_epoch=True, prog_bar=show_prog_bar, sync_dist=True, rank_zero_only=True)
-        self.log(f'{split}_vpp2vp_cfd', vpp2vp_dist, on_step=True, on_epoch=True, prog_bar=show_prog_bar, sync_dist=True, rank_zero_only=True)
-        self.log(f'{split}_vp2vpp_cfd', vp2vpp_dist, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
-
-        return {
-            'vc_pm_dist': vc_pm_dist,
-            'vpp2vp_cfd': vpp2vp_dist,
-            'vp2vpp_cfd': vp2vpp_dist,
-        }
-
 
     @torch.no_grad()
     def process_inputs(self, batch, batch_idx, normalise=False):
         B, N = batch['imgs'].shape[:2]
 
-        # get joint positions
+        # ----------------------- get T joints -----------------------
         smpl_T_output = self.smpl_model(
             betas=batch['betas'].view(-1, 10),
             body_pose = torch.zeros((B*N, 69)).to(self.device),
@@ -231,6 +168,7 @@ class CCHTrainer(pl.LightningModule):
         )
         smpl_T_joints = smpl_T_output.joints[:, :24].view(B, N, 24, 3)
         smpl_T_vertices = smpl_T_output.vertices.view(B, N, 6890, 3)
+        batch['smpl_T_joints'] = smpl_T_joints
 
         smpl_output = self.smpl_model(
             betas=batch['betas'].view(-1, 10),
@@ -243,113 +181,109 @@ class CCHTrainer(pl.LightningModule):
         smpl_skinning_weights = (self.smpl_model.lbs_weights)[None, None].repeat(B, N, 1, 1)
 
         scan_meshes = batch['scan_mesh']
-        scan_skinning_weights = []
+        scan_mesh_verts = [v for sublist in batch['scan_mesh_verts'] for v in sublist]
+        scan_mesh_faces = [f for sublist in batch['scan_mesh_faces'] for f in sublist]
+
+        scan_mesh_verts_ptcld = Pointclouds(points=scan_mesh_verts)
+
+
+        dists, idx = self.knn_ptcld(scan_mesh_verts_ptcld, smpl_output.vertices, K=1)
         
-        # Assign SMPL skinning weights to scan meshes
-        for i in range(B):
-            batch_scan_weights = []
-            for j in range(N):
-                scan_mesh = scan_meshes[i][j]
-                smpl_verts = smpl_vertices[i, j]  # (6890, 3)
-                scan_verts = torch.tensor(scan_mesh['vertices'], dtype=torch.float32, device=self.device)  # (n_scan_verts, 3)
-                scan_faces = torch.tensor(scan_mesh['faces'], dtype=torch.int32, device=self.device)
-                
-                # Compute distances between scan vertices and SMPL vertices
-                # Use broadcasting to compute all pairwise distances efficiently
-                # scan_verts: (n_scan_verts, 1, 3), smpl_verts: (1, 6890, 3)
-                distances = torch.norm(scan_verts.unsqueeze(1) - smpl_verts.unsqueeze(0), dim=2)  # (n_scan_verts, 6890)
-                
-                # Find nearest SMPL vertex for each scan vertex
-                nearest_indices = torch.argmin(distances, dim=1)  # (n_scan_verts,)
-                
-                # Get skinning weights for the nearest SMPL vertices
-                nearest_weights = smpl_skinning_weights[i, j][nearest_indices]  # (n_scan_verts, 24)
-                
-                # Store the skinning weights for this scan mesh
-                # batch_scan_weights.append(nearest_weights)
-                # print(nearest_weights.shape)
-                scan_skinning_weights.append(nearest_weights)
-            
-            # scan_skinning_weights.append(batch_scan_weights)
+        # Get skinning weights for each scan vertex based on nearest SMPL vertex
+        # smpl_output.vertices has shape (B*N, 6890, 3)
+        # smpl_skinning_weights has shape (B, N, 6890, 24)
+        # idx has shape (num_scan_clouds, num_scan_vertices, 1)
+        
+        # Reshape smpl_skinning_weights to (B*N, 6890, 24) to match smpl_output.vertices
+        smpl_weights_flat = smpl_skinning_weights.view(-1, 6890, 24)
+        
+        # For each scan vertex, get the skinning weights of its nearest SMPL vertex
+        # idx has shape (num_scan_clouds, num_scan_vertices, 1)
+        # We need to expand idx to (num_scan_clouds, num_scan_vertices, 24) for gathering
+        idx_expanded = idx.repeat(1, 1, 24)
+        
+        # Gather the skinning weights using the nearest neighbor indices
+        scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
+
+        scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_mesh_verts)]
         
         # Add scan skinning weights to batch
-        batch['scan_skinning_weights'] = scan_skinning_weights
+        batch['scan_skinning_weights'] = scan_w
+
 
         # build pytorch3d cameras
         R, T, K = batch['R'], batch['T'], batch['K']
-        from pytorch3d.renderer import PerspectiveCameras
+        
         # print(T.shape)
         # print(R.shape)
         # print(K.shape)
         R = R.view(-1, 3, 3).float()
         T = T.view(-1, 3).float()
         K = K.view(-1, 4, 4).float()
+        
+        # Scale K matrix for 2x downsampling
+        # For 2x downsampling, scale focal lengths and principal point by 0.5
+        # scale_factor = 224/940
+        scale_factor = 1
+        K_scaled = K.clone()
+        K_scaled[:, 0, 0] *= scale_factor  # fx
+        K_scaled[:, 1, 1] *= scale_factor  # fy
+        K_scaled[:, 0, 2] *= scale_factor  # cx
+        K_scaled[:, 1, 2] *= scale_factor  # cy
+        
         cameras = PerspectiveCameras(
             R=R,
             T=T,
-            K=K,
-            image_size=[(1280, 940)],
+            K=K_scaled,
+            image_size=[(1280*scale_factor, 940*scale_factor)],  # Scaled down from (1280, 940)
             device=self.device,
             in_ndc=False
         )
         self.feature_renderer._set_cameras(cameras)
         
-        
-
-        from pytorch3d.structures import Meshes
-        from pytorch3d.renderer import TexturesVertex
-
-        verts = [v for sublist in batch['scan_mesh_verts'] for v in sublist]
-        faces = [f for sublist in batch['scan_mesh_faces'] for f in sublist]
 
         pytorch3d_mesh = Meshes(
-            verts=verts,
-            faces=faces,
-            textures=TexturesVertex(verts_features=scan_skinning_weights)
+            verts=scan_mesh_verts,
+            faces=scan_mesh_faces,
+            textures=TexturesVertex(verts_features=scan_w)
         ).to(self.device)
 
 
-        renderer_ret = self.feature_renderer(pytorch3d_mesh)
-        batch['smpl_w_maps'] = renderer_ret['maps']
+
+        w_maps = self.feature_renderer(pytorch3d_mesh)['maps']
+        _, H, W, _ = w_maps.shape
+        target_size = W 
+        crop_amount = (H - target_size) // 2  
+        w_maps = w_maps[:, crop_amount:H-crop_amount, :, :]
+        w_maps = torch.nn.functional.interpolate(w_maps.permute(0,3,1,2), size=(224,224), mode='bilinear', align_corners=False)
+        w_maps = rearrange(w_maps, '(b n) j h w -> b n h w j', b=B, n=N)
+        
+        batch['smpl_w_maps'] = w_maps
 
 
+        vp = [v for sublist in batch['scan_mesh_verts'] for v in sublist]
+        
+        vp_ptcld = Pointclouds(points=vp)
+        batch['vp_ptcld'] = vp_ptcld
 
 
-
-
-        # pytorch3d_mesh = Meshes(
-        #     verts=batch['template_mesh_verts'],
-        #     faces=batch['template_mesh_faces'],
-        # ).to(self.device)
-        # verts_padded = pytorch3d_mesh.verts_padded()
-        # faces_padded = pytorch3d_mesh.faces_padded()
-        # verts_padded_interleaved = verts_padded.repeat_interleave(N, dim=0)
-        # faces_padded_interleaved = faces_padded.repeat_interleave(N, dim=0)
-        # interleaved_pytorch3d_mesh = Meshes(
-        #     verts=verts_padded_interleaved,
-        #     faces=faces_padded_interleaved,
-        #     textures=TexturesVertex(verts_features=verts_padded_interleaved)
-        # ).to(self.device)
-
-        # renderer_ret = self.feature_renderer(interleaved_pytorch3d_mesh)
-        # print(renderer_ret['vc_maps'].shape)
 
         # Visualize rendered maps in a 2x4 grid
-        to_vis = torch.argmax(renderer_ret['maps'], dim=-1).cpu().detach().numpy()
-        import matplotlib.pyplot as plt
+        # to_vis = torch.argmax(w_maps, dim=-1).cpu().detach().numpy()
+        # import matplotlib.pyplot as plt
         
-        fig, axes = plt.subplots(2, 4, figsize=(16, 8))
-        for i in range(2):
-            for j in range(4):
-                idx = i * 4 + j
-                axes[i,j].imshow(to_vis[idx])
-                axes[i,j].axis('off')
+        # fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+        # for i in range(2):
+        #     for j in range(4):
+        #         idx = i * 4 + j
+        #         axes[i,j].imshow(to_vis[i, j])
+        #         axes[i,j].axis('off')
         
-        plt.tight_layout()
-        plt.savefig('rendered_maps.png')
-        plt.close()
+        # plt.tight_layout()
+        # plt.savefig('rendered_maps.png')
+        # plt.close()
 
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
 
         return batch 
 
@@ -420,3 +354,16 @@ class CCHTrainer(pl.LightningModule):
             # ipdb.set_trace()
 
 
+    def knn_ptcld(self, x, y, K=1):
+        from pytorch3d.loss.chamfer import _handle_pointcloud_input
+        from pytorch3d.ops.knn import knn_points
+
+        x_lengths, x_normals = None, None
+        y_lengths, y_normals = None, None
+
+        x, x_lengths, x_normals = _handle_pointcloud_input(x, x_lengths, x_normals)
+        y, y_lengths, y_normals = _handle_pointcloud_input(y, y_lengths, y_normals)
+
+        x_nn = knn_points(x, y, lengths1=x_lengths, lengths2=y_lengths, norm=2, K=K)
+        dist, idx, _ = x_nn
+        return dist, idx
