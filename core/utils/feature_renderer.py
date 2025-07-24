@@ -59,7 +59,8 @@ class FeatureRenderer(pl.LightningModule):
             image_size=self.image_size,
             blur_radius=0.0,
             faces_per_pixel=1,
-            bin_size=0
+            bin_size=None,
+            max_faces_per_bin=80000 # Otherwise overflows 
         )
         
         self.renderer = MeshRenderer(
@@ -82,8 +83,8 @@ class FeatureRenderer(pl.LightningModule):
         #     ret[f'{key}_maps'] = images[..., :3]
 
         images = self.renderer(mesh)
-        ret[f'maps'] = images[..., :-1]
-
+        ret[f'maps'] = images[..., :-1]  # All channels except the last (alpha)
+        ret[f'mask'] = images[..., -1]   # Last channel is the alpha/mask
 
         return ret
     

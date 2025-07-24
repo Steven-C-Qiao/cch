@@ -16,6 +16,8 @@ class CCHLoss(pl.LightningModule):
         self.posed_chamfer_loss = MaskedChamferLoss()
         self.canonical_chamfer_loss = MaskedChamferLoss()
 
+        self.vc_pm_loss = MaskedL2Loss()
+
         self.skinning_weight_loss = MaskedL2Loss()
         self.dvc_loss = MaskedL2Loss()
 
@@ -47,6 +49,21 @@ class CCHLoss(pl.LightningModule):
             loss_dict['vc_chamfer_loss'] = vc_loss
             total_loss = total_loss + vc_loss
 
+        if "vc_init" in predictions:
+            pred_vc = predictions['vc_init']
+            gt_vc_smpl_pm = batch['vc_maps']
+            # mask = batch['masks']
+            # print(batch['smpl_mask'].shape, batch['masks'].shape)
+            mask = batch['smpl_mask'].squeeze()
+            vc_pm_loss = self.vc_pm_loss(
+                pred_vc,
+                gt_vc_smpl_pm,
+                mask
+            )
+            vc_pm_loss *= 10.
+            loss_dict['vc_pm_loss'] = vc_pm_loss
+            total_loss = total_loss + vc_pm_loss
+
         if "vp_init" in predictions:
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp_init']
@@ -77,6 +94,8 @@ class CCHLoss(pl.LightningModule):
             w_loss *= self.cfg.LOSS.W_REGULARISER_WEIGHT
             loss_dict['w_loss'] = w_loss
             total_loss = total_loss + w_loss
+
+
 
         loss_dict['total_loss'] = total_loss
         

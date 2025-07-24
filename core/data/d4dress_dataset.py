@@ -75,7 +75,7 @@ def d4dress_collate_fn(batch):
         for key, value in sample.items():
             collated[key].append(value)
     
-    nonstackable_keys = ['scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 
+    nonstackable_keys = ['scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 'scan_mesh_verts_centered', 'scan_mesh_colors',
                          'template_mesh', 'template_mesh_verts', 'template_mesh_faces']
 
 
@@ -100,7 +100,7 @@ class D4DressDataset(Dataset):
     def __init__(self, debug=False):
         self.debug = debug
         self.num_frames_pp = 4
-        self.lengthen_by = 100
+        self.lengthen_by = 500
 
         self.ids = ['00122', '00123', '00127', '00129', '00134', '00135', '00136', '00137', 
                     '00140', '00147', '00148', '00149', '00151', '00152', '00154', '00156', 
@@ -163,15 +163,30 @@ class D4DressDataset(Dataset):
             full_mesh = trimesh.util.concatenate([lower_mesh, body_mesh, upper_mesh])
         else:
             full_mesh = trimesh.util.concatenate([body_mesh, upper_mesh])
-        full_mesh.visual.vertex_colors = full_mesh.vertices
+        # full_mesh.visual.vertex_colors = full_mesh.vertices
         
         ret['template_mesh'] = full_mesh
         ret['template_mesh_verts'] = torch.tensor(full_mesh.vertices).float()
         ret['template_mesh_faces'] = torch.tensor(full_mesh.faces).long()
         
 
-        # ---- scan mesh ----
         for i, sampled_frame in enumerate(sampled_frames):
+            
+            # ---- smpl data ----
+            smpl_data_fname = os.path.join(take_dir, 'SMPL', 'mesh-f{}_smpl.pkl'.format(sampled_frame))
+            # smpl_mesh_fname = os.path.join(take_dir, 'SMPL', 'mesh-f{}_smpl.ply'.format(sampled_frame))
+
+            smpl_data = load_pickle(smpl_data_fname)
+            global_orient, body_pose, transl, betas = smpl_data['global_orient'], smpl_data['body_pose'], smpl_data['transl'], smpl_data['betas']
+            pose = np.concatenate([global_orient, body_pose], axis=0)
+            ret['global_orient'].append(global_orient)
+            ret['body_pose'].append(body_pose)
+            ret['pose'].append(pose)
+            ret['transl'].append(transl)
+            ret['betas'].append(betas)
+            
+            
+            # ---- scan mesh ----
             scan_mesh_fname = os.path.join(take_dir, 'Meshes_pkl', 'mesh-f{}.pkl'.format(sampled_frame))
             scan_mesh = load_pickle(scan_mesh_fname)
             scan_mesh['uv_path'] = scan_mesh_fname.replace('mesh-f', 'atlas-f')
@@ -194,25 +209,16 @@ class D4DressDataset(Dataset):
                 )
                 scan_mesh['colors'] = scan_trimesh.visual.to_color().vertex_colors
             # rotate scan_mesh to view front
-            if scan_rotation is not None: scan_mesh['vertices'] = np.matmul(scan_rotation, scan_mesh['vertices'].T).T
+            # if scan_rotation is not None: scan_mesh['vertices'] = np.matmul(scan_rotation, scan_mesh['vertices'].T).T
             
             ret['scan_mesh'].append(scan_mesh)
-            ret['scan_mesh_verts'].append(torch.tensor(scan_mesh['vertices']).float())
+            ret['scan_rotation'].append(torch.tensor(scan_rotation).float())
+            ret['scan_mesh_verts'].append(torch.tensor(scan_mesh['vertices']).float()) # - transl[None, :]).float())
+            ret['scan_mesh_verts_centered'].append(torch.tensor(scan_mesh['vertices'] - transl[None, :]).float())
             ret['scan_mesh_faces'].append(torch.tensor(scan_mesh['faces']).long())
+            ret['scan_mesh_colors'].append(torch.tensor(scan_mesh['colors']).float())
 
 
-            # ---- smpl data ----
-            smpl_data_fname = os.path.join(take_dir, 'SMPL', 'mesh-f{}_smpl.pkl'.format(sampled_frame))
-            # smpl_mesh_fname = os.path.join(take_dir, 'SMPL', 'mesh-f{}_smpl.ply'.format(sampled_frame))
-
-            smpl_data = load_pickle(smpl_data_fname)
-            global_orient, body_pose, transl, betas = smpl_data['global_orient'], smpl_data['body_pose'], smpl_data['transl'], smpl_data['betas']
-            pose = np.concatenate([global_orient, body_pose], axis=0)
-            ret['global_orient'].append(global_orient)
-            ret['body_pose'].append(body_pose)
-            ret['pose'].append(pose)
-            ret['transl'].append(transl)
-            ret['betas'].append(betas)
 
             # ---- images ----
             img_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'images', 'capture-f{}.png'.format(sampled_frame))
@@ -243,7 +249,7 @@ class D4DressDataset(Dataset):
         ret['pose'] = torch.tensor(np.stack(ret['pose']))
         ret['transl'] = torch.tensor(np.stack(ret['transl']))
         ret['betas'] = torch.tensor(np.stack(ret['betas']))
-
+        ret['scan_rotation'] = torch.tensor(np.stack(ret['scan_rotation']))
 
         return ret
 

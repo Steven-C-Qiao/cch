@@ -67,44 +67,16 @@ class Visualiser(pl.LightningModule):
             batch
         )
         
-        # self.visualise_vp_vc(
-        #     vp=vp, 
-        #     vp_init_pred=vp_init_pred,
-        #     vp_pred=vp_pred, 
-        #     # vc=vc, 
-        #     vc_init_pred=vc_init_pred,
-        #     vc_pred=vc_pred,
-        #     bg_mask=mask, 
-        #     conf_mask=conf_mask, 
-        #     color=color, 
-        #     # vertex_visibility=vertex_visibility, 
-        #     # no_annotations=no_annotations
-        # )
-
-
-        # import ipdb; ipdb.set_trace()
-        
-        # self.visualise_scenepic(
-        #     vp=vp, 
-        #     vc=vc, 
-        #     vp_pred=rearrange(vp_pred, 'b n h w c -> b n (h w) c'), 
-        #     vc_pred=rearrange(vc_pred, 'b n h w c -> b n (h w) c'), 
-        #     vp_init_pred=rearrange(vp_init_pred, 'b n h w c -> b n (h w) c'),
-        #     vc_init_pred=rearrange(vc_init_pred, 'b n h w c -> b n (h w) c'),
-        #     color=color, 
-        #     masks=mask, 
-        #     vertex_visibility=vertex_visibility
-        # )
         
 
-    def visualise_input_normal_imgs(self, normal_images):
+    def visualise_input_images(self, images):
         if self.rank == 0:
-            B, N = normal_images.shape[:2]
+            B, N = images.shape[:2]
             B = min(B, 2)
             N = min(N, 4)
 
             
-            normal_images = np.transpose(normal_images, (0, 1, 3, 4, 2))
+            images = np.transpose(images, (0, 1, 3, 4, 2))
 
             # Create a grid of subplots
             fig, axes = plt.subplots(B, N, figsize=(4*N, 4*B))
@@ -118,12 +90,12 @@ class Visualiser(pl.LightningModule):
             # Plot each normal image
             for b in range(B):
                 for n in range(N):
-                    axes[b,n].imshow(normal_images[b,n])
+                    axes[b,n].imshow(images[b,n])
                     # axes[b,n].axis('off')
             
             # Save figure
             plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_normal_images.png'))
+            plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_images.png'))
             plt.close()
       
     def visualise_vc_as_image(
@@ -149,10 +121,34 @@ class Visualiser(pl.LightningModule):
             vc_init = (vc_init - norm_min) / (norm_max - norm_min) 
             vc_init[~mask.astype(bool)] = 1
 
+        if 'vc_maps' in batch:
+            num_rows += 1
+            vc_maps = batch['vc_maps']
+            smpl_mask = batch['smpl_mask'].squeeze()
+            vc_maps[~smpl_mask.astype(bool)] = 0
+            vc_maps = (vc_maps - vc_maps.min()) / (vc_maps.max() - vc_maps.min())
+            vc_maps[~smpl_mask.astype(bool)] = 1
+
+        if 'smpl_w_maps' in batch:
+            num_rows += 1
+            smpl_w_maps = np.argmax(batch['smpl_w_maps'], axis=-1)
+
     
         fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
         for n in range(num_cols):
             row = 0
+
+            if 'vc_maps' in batch:
+                plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                plt.imshow(vc_maps[0, n])
+                plt.title(f'Vc maps {n}')
+                row += 1
+
+            if 'smpl_w_maps' in batch:
+                plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                plt.imshow(smpl_w_maps[0, n])
+                plt.title(f'Smpl w maps {n}')
+                row += 1
 
             if 'vc_init' in predictions:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
@@ -200,23 +196,45 @@ class Visualiser(pl.LightningModule):
 
         fig = plt.figure(figsize=(sub_fig_size * num_cols, sub_fig_size * num_rows))
 
-        filtered_vc_pred = []
-        filtered_colors = []
-
         ax = fig.add_subplot(num_rows, num_cols, 5, projection='3d')
         vc_gt = batch['template_mesh_verts'][0].cpu().detach().numpy()
         ax.scatter(vc_gt[:, 0], 
                    vc_gt[:, 1], 
-                   vc_gt[:, 2], c='gray', s=s, alpha=gt_alpha, label=f'$vc_{0}$')
+                   vc_gt[:, 2], c='blue', s=s, alpha=gt_alpha, label=f'$vc_{0}$')
 
         if "vc_init" in predictions:
             ax = fig.add_subplot(num_rows, num_cols, num_cols+5, projection='3d')
-            vc_init = predictions['vc_init']
+            vc_init = predictions['vc_init']#.cpu().detach().numpy()
             vc_init = rearrange(vc_init, 'b n h w c -> b (n h w) c')
             ax.scatter(vc_init[0, :, 0], 
                        vc_init[0, :, 1], 
                        vc_init[0, :, 2], c='red', s=s, alpha=gt_alpha, label=f'$vc_init_{0}$')
             
+        if "scan_mesh_verts_centered" in batch:
+            scan_mesh_verts = batch['scan_mesh_verts_centered'][0]
+            scan_mesh_colors = batch['scan_mesh_colors'][0]
+            for i in range(4):
+                verts = scan_mesh_verts[i].cpu().detach().numpy()
+                colors = (scan_mesh_colors[i].cpu().detach().numpy() / 255.).astype(np.float32)
+                ax = fig.add_subplot(num_rows, num_cols, i+1, projection='3d')
+                ax.scatter(verts[:, 0], 
+                           verts[:, 1], 
+                           verts[:, 2], c=colors, s=s, alpha=gt_alpha, label=f'$scan_{i}$')
+
+        if "vp_init" in predictions:
+            vp_init = predictions['vp_init'][0]#.cpu().detach().numpy()
+            J_init = predictions['J_init'][0]#.cpu().detach().numpy()
+            vp_init = rearrange(vp_init, 'k n h w c -> k (n h w) c')
+            for i in range(4):
+                verts = vp_init[i]
+                ax = fig.add_subplot(num_rows, num_cols, num_cols+i+1, projection='3d')
+                ax.scatter(verts[:, 0], 
+                           verts[:, 1], 
+                           verts[:, 2], c='red', s=s, alpha=gt_alpha, label=f'$vp_init_{i}$')
+                ax.scatter(J_init[i, :, 0], 
+                           J_init[i, :, 1], 
+                           J_init[i, :, 2], c='green', s=1., alpha=gt_alpha, label=f'$J_init_{i}$')
+
         # ax = fig.add_subplot(num_rows, num_cols, 5+num_cols, projection='3d')
         # if vc_init_pred is not None:
         #     ax.scatter(vc_init_pred[0, 0, :, 0], 
@@ -257,24 +275,29 @@ class Visualiser(pl.LightningModule):
             ax.set_zlim(mid_z - max_range, mid_z + max_range)
             ax.view_init(elev=10, azim=20, vertical_axis='y')
             ax.set_box_aspect([1, 1, 1])
-            # ax.grid(False)
-            # ax.xaxis.pane.fill = False
-            # ax.yaxis.pane.fill = False
-            # ax.zaxis.pane.fill = False
-            # ax.xaxis.pane.set_edgecolor('none')
-            # ax.yaxis.pane.set_edgecolor('none') 
-            # ax.zaxis.pane.set_edgecolor('none')
-            # ax.xaxis.line.set_color('none')
-            # ax.yaxis.line.set_color('none')
-            # ax.zaxis.line.set_color('none')
-            # ax.set_xticks([])
-            # ax.set_yticks([])
-            # ax.set_zticks([])
+        # self._no_annotations(fig)
 
         plt.tight_layout(pad=0.01)  # Reduce padding between subplots
         plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_vp_vc.png'), dpi=300)
 
         plt.close()
+
+
+    def _no_annotations(self, fig):
+        for ax in fig.axes:
+            ax.grid(False)
+            ax.xaxis.pane.fill = False
+            ax.yaxis.pane.fill = False
+            ax.zaxis.pane.fill = False
+            ax.xaxis.pane.set_edgecolor('none')
+            ax.yaxis.pane.set_edgecolor('none') 
+            ax.zaxis.pane.set_edgecolor('none')
+            ax.xaxis.line.set_color('none')
+            ax.yaxis.line.set_color('none')
+            ax.zaxis.line.set_color('none')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_zticks([])
             
             
 

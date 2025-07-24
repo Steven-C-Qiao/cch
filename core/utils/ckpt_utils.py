@@ -55,8 +55,8 @@ def load_and_freeze_pretrained_dinov2(model, ckpt_path='/scratches/kyuban/cq244/
 
     # Load all other weights
     msg = model.patch_embed.load_state_dict(ckpt, strict=True)
-    print("Missing keys:", msg.missing_keys)
-    print("Unexpected keys:", msg.unexpected_keys)
+    # print("Missing keys:", msg.missing_keys)
+    # print("Unexpected keys:", msg.unexpected_keys)
 
     # Freeze all parameters in patch_embed
     for param in model.patch_embed.parameters():

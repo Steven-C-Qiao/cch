@@ -80,26 +80,46 @@ class CCH(nn.Module):
         ret['w'] = w
         ret['w_conf'] = w_conf
 
+        vc_init_expanded = vc_init.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 3)
+
+        w_expanded = w.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 25)
+
+
+        vp_init, J_init = general_lbs(
+            vc=rearrange(vc_init_expanded, 'b k n h w c -> (b k) (n h w) c'),
+            pose=rearrange(pose, 'b k c -> (b k) c'),
+            lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k) (n h w) j'),
+            J=rearrange(joints, 'b k j c -> (b k) j c'),
+            parents=self.smpl_model.parents 
+        )
+        vp_init = rearrange(vp_init, '(b k) (n h w) c -> b k n h w c', b=B, k=N, n=N, h=H, w=W)
+        J_init = rearrange(J_init, '(b k) j c -> b k j c', b=B, k=N)
+
+        ret['vp_init'] = vp_init
+        ret['J_init'] = J_init
+
 
         
         # Generate initial posed vertices without pose blendshapes
-        vc_expanded = vc_init.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 3)
-        pose_expanded = pose.unsqueeze(2).repeat(1, 1, N, 1) 
-        w_expanded = w.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 25)
-        mask = mask.unsqueeze(1).repeat(1, N, 1, 1, 1).unsqueeze(-1) # (B, K, N, H, W, 1)
-        joints = joints.unsqueeze(1).repeat(1, N, 1, 1, 1) # (B, K, N, 24, 3)
+        # vc_expanded = vc_init.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 3)
+        # pose_expanded = pose.unsqueeze(2).repeat(1, 1, N, 1) # (B, K, N, 69)
+        # w_expanded = w.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 25)
+        # mask = mask.unsqueeze(1).repeat(1, N, 1, 1, 1).unsqueeze(-1) # (B, K, N, H, W, 1)
+        # joints = joints.unsqueeze(1).repeat(1, N, 1, 1, 1) # (B, K, N, 24, 3)
 
-        vp_init, _ = general_lbs(
-            vc=rearrange(vc_expanded, 'b k n h w c -> (b k n) (h w) c'),
-            pose=rearrange(pose_expanded, 'b k n c -> (b k n) c'),
-            lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k n) (h w) j'),
-            J=rearrange(joints, 'b k n j c -> (b k n) j c'),
-            parents=self.smpl_model.parents 
-        )
-        vp_init = rearrange(vp_init, '(b k n) (h w) c -> b k n h w c', b=B, n=N, k=N, h=H, w=W)
-        vp_init = vp_init * mask
-        ret['vp_init'] = vp_init
-        
+        # vp_init, J_init = general_lbs(
+        #     vc=rearrange(vc_expanded, 'b k n h w c -> (b k n) (h w) c'),
+        #     pose=rearrange(pose_expanded, 'b k n c -> (b k n) c'),
+        #     lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k n) (h w) j'),
+        #     J=rearrange(joints, 'b k n j c -> (b k n) j c'),
+        #     parents=self.smpl_model.parents 
+        # )
+        # vp_init = rearrange(vp_init, '(b k n) (h w) c -> b k n h w c', b=B, n=N, k=N, h=H, w=W)
+        # J_init = rearrange(J_init, '(b k n) j c -> b k n j c', b=B, n=N, k=N)
+        # vp_init = vp_init * mask
+        # ret['vp_init'] = vp_init
+        # ret['J_init'] = J_init
+
         # Reshape to batch of point clouds and mask out invalid points
         # vp_init = rearrange(vp_init, 'b k n h w c -> (b k) (n h w) c')
         # mask = rearrange(mask.squeeze(-1), 'b k n h w -> (b k) (n h w)')
