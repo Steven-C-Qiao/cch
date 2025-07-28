@@ -95,8 +95,8 @@ class CCHTrainer(pl.LightningModule):
         self.log_dict(loss_dict, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
         self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
 
-        if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
-            self.visualiser.visualise(preds, batch) 
+        # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
+        #     self.visualiser.visualise(preds, batch) 
 
         if self.dev:
             self.visualiser.visualise(preds, batch)
@@ -131,11 +131,6 @@ class CCHTrainer(pl.LightningModule):
         smpl_skinning_weights = (self.smpl_model.lbs_weights)[None, None].repeat(B, N, 1, 1)
 
 
-        # scan_rotation = batch['scan_rotation']
-        # smpl_vertices = torch.matmul(scan_rotation.view(-1, 3, 3), 
-        #                              smpl_vertices.view(-1, 6890, 3).transpose(1, 2)).transpose(1, 2)
-        # smpl_vertices = smpl_vertices.view(B, N, 6890, 3)
-
         scan_meshes = batch['scan_mesh']
         scan_mesh_verts = [v for sublist in batch['scan_mesh_verts'] for v in sublist]
         scan_mesh_faces = [f for sublist in batch['scan_mesh_faces'] for f in sublist]
@@ -168,14 +163,14 @@ class CCHTrainer(pl.LightningModule):
 
 
 
-        temp_mask = batch['masks'].unsqueeze(-1)
-        B, N, H, W, _ = temp_mask.shape
-        temp_mask = rearrange(temp_mask, 'b n h w c -> (b n) h w c', b=B, n=N)
-        target_size = W 
-        crop_amount = (H - target_size) // 2  
-        temp_mask = temp_mask[:, crop_amount:H-crop_amount, :, :]
-        temp_mask = torch.nn.functional.interpolate(temp_mask.permute(0,3,1,2), size=(224,224), mode='bilinear', align_corners=False)
-        temp_mask = rearrange(temp_mask, '(b n) j h w -> b n h w j', b=B, n=N)
+        # temp_mask = batch['masks']
+        # B, N, H, W, _ = temp_mask.shape
+        # temp_mask = rearrange(temp_mask, 'b n h w c -> (b n) h w c', b=B, n=N)
+        # target_size = W 
+        # crop_amount = (H - target_size) // 2  
+        # temp_mask = temp_mask[:, crop_amount:H-crop_amount, :, :]
+        # temp_mask = torch.nn.functional.interpolate(temp_mask.permute(0,3,1,2), size=(224,224), mode='bilinear', align_corners=False)
+        # temp_mask = rearrange(temp_mask, '(b n) j h w -> b n h w j', b=B, n=N)
         
 
 
@@ -215,8 +210,7 @@ class CCHTrainer(pl.LightningModule):
         mask = mask[:, crop_amount:H-crop_amount, :, :]
         mask = torch.nn.functional.interpolate(mask.permute(0,3,1,2), size=(224,224), mode='bilinear', align_corners=False)
         mask = rearrange(mask, '(b n) c h w -> b n h w c', b=B, n=N)
-        batch['smpl_mask'] = mask
-
+        batch['smpl_mask'] = mask.squeeze(-1)
 
 
 
@@ -240,7 +234,6 @@ class CCHTrainer(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         return self.validation_step(batch, batch_idx)
     
-
     
 
     def configure_optimizers(self):

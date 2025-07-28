@@ -7,6 +7,10 @@ import matplotlib.colors
 import scenepic as sp 
 from einops import rearrange
 
+IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
+
+
 class Visualiser(pl.LightningModule):
     def __init__(self, save_dir, rank=0):
         super().__init__()
@@ -124,7 +128,7 @@ class Visualiser(pl.LightningModule):
         if 'vc_maps' in batch:
             num_rows += 1
             vc_maps = batch['vc_maps']
-            smpl_mask = batch['smpl_mask'].squeeze()
+            smpl_mask = batch['smpl_mask']
             vc_maps[~smpl_mask.astype(bool)] = 0
             vc_maps = (vc_maps - vc_maps.min()) / (vc_maps.max() - vc_maps.min())
             vc_maps[~smpl_mask.astype(bool)] = 1
@@ -132,6 +136,11 @@ class Visualiser(pl.LightningModule):
         if 'smpl_w_maps' in batch:
             num_rows += 1
             smpl_w_maps = np.argmax(batch['smpl_w_maps'], axis=-1)
+
+        if "w" in predictions:
+            num_rows += 1
+            w = predictions['w']
+            w = np.argmax(w, axis=-1)
 
     
         fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
@@ -143,18 +152,25 @@ class Visualiser(pl.LightningModule):
                 plt.imshow(vc_maps[0, n])
                 plt.title(f'Vc maps {n}')
                 row += 1
+                
+            if 'vc_init' in predictions:
+                plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                plt.imshow(vc_init[0, n])
+                plt.title(f'Vc init {n}')
+                row += 1
 
             if 'smpl_w_maps' in batch:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 plt.imshow(smpl_w_maps[0, n])
                 plt.title(f'Smpl w maps {n}')
                 row += 1
-
-            if 'vc_init' in predictions:
+            
+            if "w" in predictions:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-                plt.imshow(vc_init[0, n])
-                plt.title(f'Vc init {n}')
+                plt.imshow(w[0, n])
+                plt.title(f'Pred w maps {n}')
                 row += 1
+
 
         plt.tight_layout()
         plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_pms.png'))
@@ -194,6 +210,11 @@ class Visualiser(pl.LightningModule):
         sub_fig_size = 4 
 
 
+        color = rearrange(batch['imgs'][0], 'n c h w -> (n h w) c')
+        color = (color * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
+        color = color.astype(np.float32)
+
+
         fig = plt.figure(figsize=(sub_fig_size * num_cols, sub_fig_size * num_rows))
 
         ax = fig.add_subplot(num_rows, num_cols, 5, projection='3d')
@@ -208,7 +229,7 @@ class Visualiser(pl.LightningModule):
             vc_init = rearrange(vc_init, 'b n h w c -> b (n h w) c')
             ax.scatter(vc_init[0, :, 0], 
                        vc_init[0, :, 1], 
-                       vc_init[0, :, 2], c='red', s=s, alpha=gt_alpha, label=f'$vc_init_{0}$')
+                       vc_init[0, :, 2], c=color, s=s, alpha=gt_alpha, label=f'$vc_init_{0}$')
             
         if "scan_mesh_verts_centered" in batch:
             scan_mesh_verts = batch['scan_mesh_verts_centered'][0]
@@ -224,13 +245,15 @@ class Visualiser(pl.LightningModule):
         if "vp_init" in predictions:
             vp_init = predictions['vp_init'][0]#.cpu().detach().numpy()
             J_init = predictions['J_init'][0]#.cpu().detach().numpy()
+            
+
             vp_init = rearrange(vp_init, 'k n h w c -> k (n h w) c')
             for i in range(4):
                 verts = vp_init[i]
                 ax = fig.add_subplot(num_rows, num_cols, num_cols+i+1, projection='3d')
                 ax.scatter(verts[:, 0], 
                            verts[:, 1], 
-                           verts[:, 2], c='red', s=s, alpha=gt_alpha, label=f'$vp_init_{i}$')
+                           verts[:, 2], c=color, s=s, alpha=gt_alpha, label=f'$vp_init_{i}$')
                 ax.scatter(J_init[i, :, 0], 
                            J_init[i, :, 1], 
                            J_init[i, :, 2], c='green', s=1., alpha=gt_alpha, label=f'$J_init_{i}$')

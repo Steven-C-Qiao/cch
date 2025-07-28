@@ -29,7 +29,7 @@ def interpolate_dino_pos_embed(pos_embed_pretrained, model, num_patches_new):
     return torch.cat((cls_token, pos_tokens), dim=1)
 
 
-def load_and_freeze_pretrained_dinov2(model, ckpt_path='/scratches/kyuban/cq244/CCH/cch/model_files/dinov2_vits14_reg4_pretrain.pth'):
+def load_and_freeze_pretrained_dinov2(model, ckpt_path=None):
     """
     Load pretrained DINOv2 weights with positional embedding interpolation if needed.
     

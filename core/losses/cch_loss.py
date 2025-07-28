@@ -52,9 +52,8 @@ class CCHLoss(pl.LightningModule):
         if "vc_init" in predictions:
             pred_vc = predictions['vc_init']
             gt_vc_smpl_pm = batch['vc_maps']
-            # mask = batch['masks']
-            # print(batch['smpl_mask'].shape, batch['masks'].shape)
-            mask = batch['smpl_mask'].squeeze()
+
+            mask = batch['smpl_mask']
             vc_pm_loss = self.vc_pm_loss(
                 pred_vc,
                 gt_vc_smpl_pm,
@@ -78,8 +77,26 @@ class CCHLoss(pl.LightningModule):
                 mask
             ) 
             vp_loss *= self.cfg.LOSS.VP_LOSS_WEIGHT
+            loss_dict['vp_init_chamfer_loss'] = vp_loss
+            total_loss = total_loss + vp_loss
+
+        if "vp" in predictions:
+            gt_vp = batch['vp_ptcld']
+            pred_vp = predictions['vp']
+            mask = batch['masks']
+
+            pred_vp = rearrange(pred_vp, 'b k n h w c -> (b k) (n h w) c')
+            mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+
+            vp_loss = self.posed_chamfer_loss(
+                gt_vp,
+                pred_vp, 
+                mask
+            ) 
+            vp_loss *= self.cfg.LOSS.VP_LOSS_WEIGHT
             loss_dict['vp_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
+  
 
         if "w" in predictions:
             pred_w = predictions['w']
@@ -95,9 +112,10 @@ class CCHLoss(pl.LightningModule):
             loss_dict['w_loss'] = w_loss
             total_loss = total_loss + w_loss
 
-
-
         loss_dict['total_loss'] = total_loss
+
+        # for k, v in loss_dict.items():
+        #     print(k, v.item())
         
         return total_loss, loss_dict
     
@@ -146,35 +164,35 @@ class MaskedL2Loss(nn.Module):
         return loss.sum() / mask.sum()
 
 
-# class CanonicalRGBConfLoss(nn.Module):
-#     """
-#     Masked L2 loss for canonical color maps
+class CanonicalRGBConfLoss(nn.Module):
+    """
+    Masked L2 loss for canonical color maps
     
-#     vc: (B, N, H, W, 3)
-#     vc_pred: (B, N, H, W, 3)
-#     conf: (B, N, H, W) in [0, 1]
-#     mask: (B, N, H, W)
-#     """
-#     def __init__(self, cfg):
-#         self.alpha = cfg.LOSS.ALPHA
-#         super().__init__()
+    vc: (B, N, H, W, 3)
+    vc_pred: (B, N, H, W, 3)
+    conf: (B, N, H, W) in [0, 1]
+    mask: (B, N, H, W)
+    """
+    def __init__(self, cfg):
+        self.alpha = cfg.LOSS.ALPHA
+        super().__init__()
 
-#     def get_conf_log(self, x):
-#         return x, torch.log(x)
+    def get_conf_log(self, x):
+        return x, torch.log(x)
 
-#     def forward(self, vc, vc_pred, conf=None, mask=None):
+    def forward(self, vc, vc_pred, conf=None, mask=None):
 
-#         conf, log_conf = self.get_conf_log(conf)
+        conf, log_conf = self.get_conf_log(conf)
         
-#         loss = torch.norm(vc - vc_pred, dim=-1) 
+        loss = torch.norm(vc - vc_pred, dim=-1) 
 
-#         conf_loss = loss * conf - self.alpha * log_conf
+        conf_loss = loss * conf - self.alpha * log_conf
 
-#         if mask is not None:
-#             conf_loss = conf_loss * mask.squeeze()
+        if mask is not None:
+            conf_loss = conf_loss * mask.squeeze()
 
 
-#         return conf_loss.mean()
+        return conf_loss.mean()
 
 # class PosedPointmapChamferLoss(nn.Module):
 #     """

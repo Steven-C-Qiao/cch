@@ -185,7 +185,7 @@ class Aggregator(nn.Module):
             )
             
             # Load pretrained DINOv2 weights
-            load_and_freeze_pretrained_dinov2(self)
+            load_and_freeze_pretrained_dinov2(self, ckpt_path='/scratches/kyuban/cq244/CCH/cch/model_files/dinov2_vitb14_reg4_pretrain.pth')
 
             # Disable gradient updates for mask token
             if hasattr(self.patch_embed, "mask_token"):

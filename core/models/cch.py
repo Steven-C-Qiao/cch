@@ -11,7 +11,7 @@ from core.utils.general_lbs import general_lbs
 
 
 class CCH(nn.Module):
-    def __init__(self, cfg, smpl_model, img_size=224, patch_size=14, embed_dim=384):
+    def __init__(self, cfg, smpl_model, img_size=224, patch_size=14, embed_dim=768):
         """
         Given a batch of normal images, predict pixel-aligned canonical space position and uv coordinates
         """
@@ -23,15 +23,15 @@ class CCH(nn.Module):
         self.model_skinning_weights = cfg.MODEL.SKINNING_WEIGHTS
         self.model_pbs = cfg.MODEL.POSE_BLENDSHAPES
 
-        self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="dinov2_vits14_reg")
+        self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="dinov2_vitb14_reg")
         self.canonical_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
 
         if self.model_skinning_weights:
             self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3)
 
         if self.model_pbs:
-            self.pbs_aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="conv", input_channels=6)
-            self.pbs_head = DPTHead(dim_in=2 * embed_dim, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1")
+            self.pbs_aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=384, patch_embed="conv", input_channels=6)
+            self.pbs_head = DPTHead(dim_in=2 * 384, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1")
             
     def forward(self, images, pose=None, joints=None, w_smpl=None, mask=None):
         """
@@ -68,11 +68,8 @@ class CCH(nn.Module):
         ret['vc_conf_init'] = vc_conf_init
 
 
-
-
         if self.model_skinning_weights:
-            w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, 
-                                           additional_conditioning=vc_init) # rearrange(vc, 'b n h w c -> (b n) c h w'))
+            w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, additional_conditioning=vc_init)
             w = F.softmax(w, dim=-1)
         else:
             w, w_conf = w_smpl, None
@@ -80,10 +77,9 @@ class CCH(nn.Module):
         ret['w'] = w
         ret['w_conf'] = w_conf
 
+
         vc_init_expanded = vc_init.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 3)
-
         w_expanded = w.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 25)
-
 
         vp_init, J_init = general_lbs(
             vc=rearrange(vc_init_expanded, 'b k n h w c -> (b k) (n h w) c'),
@@ -95,11 +91,38 @@ class CCH(nn.Module):
         vp_init = rearrange(vp_init, '(b k) (n h w) c -> b k n h w c', b=B, k=N, n=N, h=H, w=W)
         J_init = rearrange(J_init, '(b k) j c -> b k j c', b=B, k=N)
 
+        vp_init = vp_init * (mask.unsqueeze(1).repeat(1, N, 1, 1, 1).unsqueeze(-1))
+
         ret['vp_init'] = vp_init
         ret['J_init'] = J_init
 
 
-        
+        if self.model_pbs:
+            pbs_aggregator_input = torch.cat([rearrange(vc_init_expanded, 'b k n h w c -> (b k) n c h w'),
+                                              rearrange(vp_init, 'b k n h w c -> (b k) n c h w')], dim=-3).contiguous()
+            
+            pbs_aggregated_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
+            
+            dvc, _ = self.pbs_head(pbs_aggregated_tokens_list, images.repeat_interleave(N, dim=0), patch_start_idx=patch_start_idx)
+            dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
+            dvc = rearrange(dvc, '(b k) n h w c -> b k n h w c', b=B, k=N)
+
+            vc = vc_init_expanded + dvc
+
+
+            vp, _ = general_lbs(
+                vc=rearrange(vc, 'b k n h w c -> (b k) (n h w) c'),
+                pose=rearrange(pose, 'b k c -> (b k) c'),
+                lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k) (n h w) j'),
+                J=rearrange(joints, 'b k j c -> (b k) j c'),
+                parents=self.smpl_model.parents 
+            )
+            vp = rearrange(vp, '(b k) (n h w) c -> b k n h w c', b=B, n=N, k=N, h=H, w=W)
+            ret['vp'] = vp
+            ret['dvc'] = dvc
+            ret['vc'] = vc
+
+
         # Generate initial posed vertices without pose blendshapes
         # vc_expanded = vc_init.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 3)
         # pose_expanded = pose.unsqueeze(2).repeat(1, 1, N, 1) # (B, K, N, 69)
@@ -128,33 +151,6 @@ class CCH(nn.Module):
         # vp_init_ptcld = Pointclouds(points=valid_points)
         # ret['vp_init_ptcld'] = vp_init_ptcld
 
-
-        if self.model_pbs:
-            # Stack canonical and posed pointmaps to predict pose blendshapes
-            pbs_aggregator_input = torch.cat([rearrange(vc_expanded, 'b k n h w c -> (b k) n c h w'),
-                                              rearrange(vp_init, 'b k n h w c -> (b k) n c h w')], dim=-3).contiguous()
-            
-            pbs_aggregated_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
-            
-            dvc, _ = self.pbs_head(pbs_aggregated_tokens_list, images.repeat_interleave(N, dim=0), patch_start_idx=patch_start_idx)
-            dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
-            dvc = rearrange(dvc, '(b k) n h w c -> b k n h w c', b=B, k=N)
-
-            # add blendshapes to initial canonical predictions 
-            vc = vc_init[:, None] + dvc
-
-            # Use updated canonical to pose again
-            vp, _ = general_lbs(
-                vc=rearrange(vc, 'b k n h w c -> (b k n) (h w) c'),
-                pose=rearrange(pose_expanded, 'b k n c -> (b k n) c'),
-                lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k n) (h w) j'),
-                J=rearrange(joints, 'b k n j c -> (b k n) j c'),
-                parents=self.smpl_model.parents 
-            )
-            vp = rearrange(vp, '(b k n) (h w) c -> b k n h w c', b=B, n=N, k=N, h=H, w=W)
-            ret['vp'] = vp
-            ret['dvc'] = dvc
-            ret['vc'] = vc
 
         return ret 
     
