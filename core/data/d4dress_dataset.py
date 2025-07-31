@@ -11,6 +11,9 @@ from collections import defaultdict
 from torchvision import transforms
 from torch.utils.data import Dataset
 
+from pytorch3d.ops import sample_points_from_meshes
+from pytorch3d.structures import Meshes
+
 import sys
 sys.path.append('.')
 
@@ -75,8 +78,9 @@ def d4dress_collate_fn(batch):
         for key, value in sample.items():
             collated[key].append(value)
     
-    nonstackable_keys = ['scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 'scan_mesh_verts_centered', 'scan_mesh_colors',
-                         'template_mesh', 'template_mesh_verts', 'template_mesh_faces']
+    nonstackable_keys = [
+        'scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 'scan_mesh_verts_centered', 'scan_mesh_colors',
+        'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'gender']
 
 
     for key in collated.keys():
@@ -141,6 +145,8 @@ class D4DressDataset(Dataset):
         take_dir = os.path.join(PATH_TO_DATASET, id, layer, sampled_take)
 
         basic_info = load_pickle(os.path.join(take_dir, 'basic_info.pkl'))
+        gender = basic_info['gender'] # is str
+        ret['gender'] = gender
         scan_frames, scan_rotation = basic_info['scan_frames'], basic_info['rotation']
         sampled_frames = np.random.choice(scan_frames, size=self.num_frames_pp, replace=False)
         
@@ -160,14 +166,52 @@ class D4DressDataset(Dataset):
         body_mesh = trimesh.load(os.path.join(template_dir, 'body.ply'))
         if os.path.exists(os.path.join(template_dir, 'lower.ply')):
             lower_mesh = trimesh.load(os.path.join(template_dir, 'lower.ply'))
-            full_mesh = trimesh.util.concatenate([lower_mesh, body_mesh, upper_mesh])
+            clothing_mesh = trimesh.util.concatenate([lower_mesh, upper_mesh])
         else:
-            full_mesh = trimesh.util.concatenate([body_mesh, upper_mesh])
-        # full_mesh.visual.vertex_colors = full_mesh.vertices
+            clothing_mesh = upper_mesh
+        full_mesh = trimesh.util.concatenate([body_mesh, clothing_mesh])
+
+        visibility_path = os.path.join('/scratches/kyuban/cq244/CCH/cch/model_files/4DDress_visible_vertices', f'{id}.npy')
+        visible_vertices = np.load(visibility_path)
+        naked_vertices = body_mesh.vertices 
+        clothing_vertices = clothing_mesh.vertices
         
-        ret['template_mesh'] = full_mesh
-        ret['template_mesh_verts'] = torch.tensor(full_mesh.vertices).float()
-        ret['template_mesh_faces'] = torch.tensor(full_mesh.faces).long()
+        # Create a set of visible vertex indices for efficient lookup
+        visible_vertex_set = set(visible_vertices)
+        
+        # Filter body mesh faces to only include faces where all vertices are visible
+        body_faces = body_mesh.faces
+        # Use numpy operations to check if all vertices in each face are visible
+        face_visibility_mask = np.all(np.isin(body_faces, visible_vertices), axis=1)
+        visible_body_faces = body_faces[face_visibility_mask]
+        
+        # Create mapping from original body vertex indices to new filtered indices
+        body_vertex_mapping = np.zeros(len(naked_vertices), dtype=int)
+        body_vertex_mapping[visible_vertices] = np.arange(len(visible_vertices))
+        
+        # Remap face indices for body faces to new vertex indices
+        remapped_body_faces = body_vertex_mapping[visible_body_faces]
+        
+        # Get clothing faces and remap their indices to account for the new vertex ordering
+        clothing_faces = clothing_mesh.faces
+        num_filtered_body_vertices = len(visible_vertices)
+        remapped_clothing_faces = clothing_faces + num_filtered_body_vertices
+        
+        # Combine filtered body vertices and clothing vertices
+        filtered_naked_vertices = naked_vertices[visible_vertices]
+        full_filtered_vertices = np.concatenate([filtered_naked_vertices, clothing_vertices])
+        
+        # Combine remapped faces
+        full_filtered_faces = np.concatenate([remapped_body_faces, remapped_clothing_faces])
+
+        full_filtered_mesh = trimesh.Trimesh(
+            vertices=full_filtered_vertices,
+            faces=full_filtered_faces,
+        )
+        
+        ret['template_mesh'] = full_filtered_mesh
+        ret['template_mesh_verts'] = torch.tensor(full_filtered_vertices).float()
+        ret['template_mesh_faces'] = torch.tensor(full_filtered_faces).long()
         
 
         for i, sampled_frame in enumerate(sampled_frames):

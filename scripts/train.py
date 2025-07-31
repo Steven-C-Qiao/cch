@@ -54,7 +54,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
     #                 logger.info(f"Loaded hyperparameters from: {hparams_file}")
 
     if dev:
-        cfg.TRAIN.BATCH_SIZE = 2
+        cfg.TRAIN.BATCH_SIZE = 1
 
     # Create directories
     model_save_dir = os.path.join(exp_dir, 'saved_models')
@@ -81,11 +81,11 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
     checkpoint_callbacks = [
         # ModelCheckpoint(
         #     dirpath=model_save_dir,
-        #     filename='val_vc_pm_dist_{epoch:03d}',
+        #     filename='val_vp_cfd_{epoch:03d}',
         #     save_top_k=1,
         #     save_last=False,
         #     verbose=True,
-        #     monitor='val_vc_pm_dist',
+        #     monitor='val_vp_cfd',
         #     mode='min'
         # ),
         ModelCheckpoint(

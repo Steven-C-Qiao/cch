@@ -103,7 +103,7 @@ class CCHTrainer(pl.LightningModule):
             w_smpl=w_smpl, 
             mask=masks
         )
-        vc_init_pred, vc_pred,  vc_init_pred_conf = preds['vc_init_pred'], preds['vc_pred'], preds['vc_conf_init_pred']
+        vc_init_pred, vc_pred,  vc_conf = preds['vc_init_pred'], preds['vc_pred'], preds['vc_conf']
         vp_init_pred, vp_pred = preds['vp_init_pred'], preds['vp_pred']
 
         if self.cfg.MODEL.SKINNING_WEIGHTS:

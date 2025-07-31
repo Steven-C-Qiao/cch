@@ -6,16 +6,19 @@ import pytorch_lightning as pl
 import matplotlib.colors
 import scenepic as sp 
 from einops import rearrange
+from collections import defaultdict
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 
 
 class Visualiser(pl.LightningModule):
-    def __init__(self, save_dir, rank=0):
+    def __init__(self, save_dir, cfg=None, rank=0):
         super().__init__()
         self.save_dir = save_dir
         self.rank = rank
+        self.cfg = cfg
+        self.threshold = cfg.LOSS.CONFIDENCE_THRESHOLD if cfg is not None else 100
 
     def set_global_rank(self, global_rank):
         self.rank = global_rank
@@ -61,15 +64,18 @@ class Visualiser(pl.LightningModule):
         #     normal_maps
         # )
 
-        self.visualise_vc_as_image(
+        self.visualise_initial_pms(
             predictions,
             batch
         )
+
 
         self.visualise_vp_vc(
             predictions,
             batch
         )
+
+
         
         
 
@@ -102,7 +108,7 @@ class Visualiser(pl.LightningModule):
             plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_images.png'))
             plt.close()
       
-    def visualise_vc_as_image(
+    def visualise_initial_pms(
         self, 
         predictions,
         batch
@@ -116,6 +122,13 @@ class Visualiser(pl.LightningModule):
         num_cols = 4
 
         num_rows = 0
+
+        if 'imgs' in batch:
+            num_rows += 1
+            images = rearrange(batch['imgs'][0], 'n c h w -> n h w c')
+            images = (images * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
+            images = images.astype(np.float32)
+
         if 'vc_init' in predictions:
             num_rows += 1
             vc_init = predictions['vc_init']
@@ -124,6 +137,11 @@ class Visualiser(pl.LightningModule):
             norm_min, norm_max = vc_init.min(), vc_init.max()
             vc_init = (vc_init - norm_min) / (norm_max - norm_min) 
             vc_init[~mask.astype(bool)] = 1
+        
+        if 'vc_conf' in predictions:
+            num_rows += 1
+            vc_conf = predictions['vc_conf']
+            vc_conf = vc_conf * mask 
 
         if 'vc_maps' in batch:
             num_rows += 1
@@ -141,40 +159,97 @@ class Visualiser(pl.LightningModule):
             num_rows += 1
             w = predictions['w']
             w = np.argmax(w, axis=-1)
+            w = w * mask 
 
     
         fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
         for n in range(num_cols):
             row = 0
 
+            if 'imgs' in batch:
+                plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                plt.imshow(images[n])
+                plt.title(f'Image {n}')
+                row += 1
+
             if 'vc_maps' in batch:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 plt.imshow(vc_maps[0, n])
-                plt.title(f'Vc maps {n}')
+                plt.title(f'$V_c$ maps {n}')
                 row += 1
                 
             if 'vc_init' in predictions:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 plt.imshow(vc_init[0, n])
-                plt.title(f'Vc init {n}')
+                plt.title(f'$V_c$ init {n}')
+                row += 1
+
+            if 'vc_conf' in predictions:
+                plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                plt.imshow(vc_conf[0, n])
+                plt.title(f'$V_c$ conf {n}')
+                if n == 3:
+                    plt.colorbar()
                 row += 1
 
             if 'smpl_w_maps' in batch:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 plt.imshow(smpl_w_maps[0, n])
-                plt.title(f'Smpl w maps {n}')
+                plt.title(f'Smpl $w$ maps {n}')
                 row += 1
             
             if "w" in predictions:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 plt.imshow(w[0, n])
-                plt.title(f'Pred w maps {n}')
+                plt.title(f'Pred $w$ maps {n}')
                 row += 1
+
+        # for ax in fig.axes:
+            # ax.set_xticks([])
+            # ax.set_yticks([])
 
 
         plt.tight_layout()
         plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_pms.png'))
         plt.close()
+
+
+
+    def visualise_pbs_pms(
+        self,
+        predictions,
+        batch
+    ):
+        
+        B, N, H, W, C = predictions['vc_init'].shape
+        mask = batch['masks']
+
+        B = 1
+        N = min(N, 4)
+        sub_fig_size = 4
+        num_cols = 4
+
+        num_rows = 0
+
+        if 'vp_init' in predictions:
+            num_rows += 1
+            vp_init = predictions['vp_init'] # bknhwc
+
+        if 'vp' in predictions:
+            num_rows += 1
+            vp = predictions['vp'] # bknhwc
+
+
+        fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
+        for n in range(num_cols):
+            row = 0
+
+            if 'vp_init' in predictions:
+                plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                plt.imshow(vp_init[0, n])
+
+
+
 
 
     def visualise_vp_vc(
@@ -210,26 +285,40 @@ class Visualiser(pl.LightningModule):
         sub_fig_size = 4 
 
 
-        color = rearrange(batch['imgs'][0], 'n c h w -> (n h w) c')
+        mask = batch['masks'][0].astype(np.bool) # nhw
+        if "vc_conf" in predictions:
+            confidence = predictions['vc_conf']
+            confidence = confidence > self.threshold
+        else:
+            confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(np.bool)
+        mask = mask * confidence[0].astype(np.bool)
+
+
+        color = rearrange(batch['imgs'][0], 'n c h w -> n h w c')
+        color = color[mask]
         color = (color * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
         color = color.astype(np.float32)
+        
 
 
         fig = plt.figure(figsize=(sub_fig_size * num_cols, sub_fig_size * num_rows))
 
         ax = fig.add_subplot(num_rows, num_cols, 5, projection='3d')
-        vc_gt = batch['template_mesh_verts'][0].cpu().detach().numpy()
+        vc_gt = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
         ax.scatter(vc_gt[:, 0], 
                    vc_gt[:, 1], 
                    vc_gt[:, 2], c='blue', s=s, alpha=gt_alpha, label=f'$vc_{0}$')
+        ax.set_title(f'gt $V_c$ {0}')
 
         if "vc_init" in predictions:
             ax = fig.add_subplot(num_rows, num_cols, num_cols+5, projection='3d')
-            vc_init = predictions['vc_init']#.cpu().detach().numpy()
-            vc_init = rearrange(vc_init, 'b n h w c -> b (n h w) c')
-            ax.scatter(vc_init[0, :, 0], 
-                       vc_init[0, :, 1], 
-                       vc_init[0, :, 2], c=color, s=s, alpha=gt_alpha, label=f'$vc_init_{0}$')
+            vc_init = predictions['vc_init'][0] # n h w 3 
+            
+            verts = vc_init[mask]
+            ax.scatter(verts[:, 0], 
+                       verts[:, 1], 
+                       verts[:, 2], c=color, s=s, alpha=gt_alpha, label=f'$vc_init_{0}$')
+            ax.set_title(f'pred $V_c$ init')
             
         if "scan_mesh_verts_centered" in batch:
             scan_mesh_verts = batch['scan_mesh_verts_centered'][0]
@@ -241,15 +330,14 @@ class Visualiser(pl.LightningModule):
                 ax.scatter(verts[:, 0], 
                            verts[:, 1], 
                            verts[:, 2], c=colors, s=s, alpha=gt_alpha, label=f'$scan_{i}$')
+                ax.set_title(f'scan {i}')
 
         if "vp_init" in predictions:
-            vp_init = predictions['vp_init'][0]#.cpu().detach().numpy()
-            J_init = predictions['J_init'][0]#.cpu().detach().numpy()
-            
+            vp_init = predictions['vp_init'][0] # k n h w 3
+            J_init = predictions['J_init'][0]
 
-            vp_init = rearrange(vp_init, 'k n h w c -> k (n h w) c')
             for i in range(4):
-                verts = vp_init[i]
+                verts = vp_init[i, mask]
                 ax = fig.add_subplot(num_rows, num_cols, num_cols+i+1, projection='3d')
                 ax.scatter(verts[:, 0], 
                            verts[:, 1], 
@@ -257,32 +345,21 @@ class Visualiser(pl.LightningModule):
                 ax.scatter(J_init[i, :, 0], 
                            J_init[i, :, 1], 
                            J_init[i, :, 2], c='green', s=1., alpha=gt_alpha, label=f'$J_init_{i}$')
+                ax.set_title(f'pred $V_p$ init {i}')
+                
+        if "vp" in predictions:
+            vp = predictions['vp'][0] # k n h w 3
 
-        # ax = fig.add_subplot(num_rows, num_cols, 5+num_cols, projection='3d')
-        # if vc_init_pred is not None:
-        #     ax.scatter(vc_init_pred[0, 0, :, 0], 
-        #             vc_init_pred[0, 0, :, 1], 
-        #             vc_init_pred[0, 0, :, 2], c='red', s=s, alpha=gt_alpha, label=f'$vc_init_pred_{0}$')
-            
-        # for n in range(4):
-        #     ax = fig.add_subplot(num_rows, num_cols, n+1, projection='3d')
-        #     ax.scatter(vp[0, n, :, 0], 
-        #                vp[0, n, :, 1], 
-        #                vp[0, n, :, 2], c='gray', s=s, alpha=gt_alpha, label=f'$vp_{n}')
+            for i in range(4):
+                verts = vp[i, mask]
+                ax = fig.add_subplot(num_rows, num_cols, 2*num_cols+i+1, projection='3d')
+                ax.scatter(verts[:, 0], 
+                           verts[:, 1], 
+                           verts[:, 2], c=color, s=s, alpha=gt_alpha, label=f'$vp_{i}$')
+                ax.set_title(f'pred $V_p$ {i}')
 
-        #     filted_vp_init_pred = vp_init_pred[0, n].reshape(-1, 3)# [mask[0].flatten()]
-        #     ax = fig.add_subplot(num_rows, num_cols, 5+n+1, projection='3d')
-        #     ax.scatter(filted_vp_init_pred[:, 0], 
-        #                filted_vp_init_pred[:, 1], 
-        #                filted_vp_init_pred[:, 2], c='red', s=s, alpha=pred_alpha, label=f'$vpinit_{n}$')
-            
-        #     filtered_vp_pred = vp_pred[0, n].reshape(-1, 3)# [mask[0].flatten()]
-        #     ax = fig.add_subplot(num_rows, num_cols, 10+n+1, projection='3d')
-        #     ax.scatter(filtered_vp_pred[:, 0], 
-        #                filtered_vp_pred[:, 1], 
-        #                filtered_vp_pred[:, 2], c='orange', s=s, alpha=pred_alpha, label=f'$vp_{n}$')
 
-        x = batch['template_mesh_verts'][0].cpu().detach().numpy()
+        x = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
         max_range = np.array([
             x[:, 0].max() - x[:, 0].min(),
             x[:, 1].max() - x[:, 1].min(),
@@ -298,12 +375,53 @@ class Visualiser(pl.LightningModule):
             ax.set_zlim(mid_z - max_range, mid_z + max_range)
             ax.view_init(elev=10, azim=20, vertical_axis='y')
             ax.set_box_aspect([1, 1, 1])
+            ax.xaxis.set_major_locator(plt.MaxNLocator(5))
+            ax.yaxis.set_major_locator(plt.MaxNLocator(5)) 
+            ax.zaxis.set_major_locator(plt.MaxNLocator(3))
         # self._no_annotations(fig)
 
-        plt.tight_layout(pad=0.01)  # Reduce padding between subplots
+        plt.tight_layout(h_pad=4)
         plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_vp_vc.png'), dpi=300)
 
         plt.close()
+
+        # fig = plt.figure(figsize=(8, 4))
+
+        # ax = fig.add_subplot(1, 2, 1)
+        # vc_gt = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
+        # ax.scatter(vc_gt[:, 0], 
+        #            vc_gt[:, 1], c='blue', s=s, alpha=gt_alpha, label=f'$vc_{0}$')
+        # ax.set_title(f'gt $V_c$ {0}')
+
+        # ax = fig.add_subplot(1, 2, 2)
+        # vc_init = predictions['vc_init'][0] # n h w 3 
+        
+        # verts = vc_init[mask]
+        # ax.scatter(verts[:, 0], 
+        #             verts[:, 1], c=color, s=s, alpha=gt_alpha, label=f'$vc_init_{0}$')
+        # ax.set_title(f'pred $V_c$ init')
+
+        # # Set equal plot range based on vc_gt
+        # max_range = np.array([
+        #     vc_gt[:, 0].max() - vc_gt[:, 0].min(),
+        #     vc_gt[:, 1].max() - vc_gt[:, 1].min()
+        # ]).max() / 2.0
+        # mid_x = (vc_gt[:, 0].max() + vc_gt[:, 0].min()) * 0.5
+        # mid_y = (vc_gt[:, 1].max() + vc_gt[:, 1].min()) * 0.5
+
+        # for ax in fig.axes:
+        #     ax.set_xlim(mid_x - max_range - 0.1, mid_x + max_range + 0.1)
+        #     ax.set_ylim(mid_y - max_range - 0.1, mid_y + max_range + 0.1)
+        #     ax.set_aspect('equal')
+
+        # plt.tight_layout()
+        # plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_test.png'), dpi=300)
+
+        # import ipdb; ipdb.set_trace()
+
+
+        # plt.close()
+
 
 
     def _no_annotations(self, fig):
@@ -328,15 +446,8 @@ class Visualiser(pl.LightningModule):
 
     def visualise_scenepic(
         self,
-        vp, 
-        vc, 
-        vp_pred, 
-        vc_pred, 
-        vp_init_pred=None,
-        vc_init_pred=None,
-        color=None, 
-        masks=None, 
-        vertex_visibility=None
+        predictions,
+        batch
     ):
         viridis = plt.colormaps.get_cmap('viridis')
         
