@@ -17,7 +17,7 @@ class CCHLoss(pl.LightningModule):
         self.posed_chamfer_loss = MaskedUncertaintyChamferLoss()
         self.canonical_chamfer_loss = MaskedUncertaintyChamferLoss()
 
-        self.vc_pm_loss = MaskedUncertaintyExpL2Loss()
+        self.vc_pm_loss = MaskedUncertaintyL2Loss()
 
         self.skinning_weight_loss = MaskedUncertaintyL2Loss()
         self.dvc_loss = MaskedUncertaintyL2Loss()

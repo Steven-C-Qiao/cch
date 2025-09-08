@@ -10,8 +10,39 @@ from core.models.cch_aggregator import Aggregator
 from core.utils.general_lbs import general_lbs
 
 
+model_configs = {
+    'base': {
+        'patch_embed': "dinov2_vitb14_reg",
+        'img_size': 224,
+        'patch_size': 14,
+        'embed_dim': 768,
+        'pbs_embed_dim': 384,
+        'features': 256,
+        'out_channels': [256, 512, 1024, 1024]
+    },
+    'small': {
+        'patch_embed': "dinov2_vits14_reg",
+        'img_size': 224,
+        'patch_size': 14,
+        'embed_dim': 384,
+        'pbs_embed_dim': 384,
+        'features': 128,
+        'out_channels': [96, 192, 384, 768]
+    },
+        'tiny': {
+        'patch_embed': "dinov2_vits14_reg",
+        'img_size': 224,
+        'patch_size': 14,
+        'embed_dim': 384,
+        'pbs_embed_dim': 384,
+        'features': 64,
+        'out_channels': [48, 96, 192, 384]
+    },
+}
+
+
 class CCH(nn.Module):
-    def __init__(self, cfg, smpl_male, smpl_female, img_size=224, patch_size=14, embed_dim=768):
+    def __init__(self, cfg, smpl_male, smpl_female):
         """
         Given a batch of normal images, predict pixel-aligned canonical space position and uv coordinates
         """
@@ -21,18 +52,53 @@ class CCH(nn.Module):
         self.parents = smpl_male.parents
         self.cfg = cfg
 
+        model_cfg = model_configs[cfg.MODEL.SIZE]
+
         self.model_skinning_weights = cfg.MODEL.SKINNING_WEIGHTS
         self.model_pbs = cfg.MODEL.POSE_BLENDSHAPES
 
-        self.aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=embed_dim, patch_embed="dinov2_vitb14_reg")
-        self.canonical_head = DPTHead(dim_in=2 * embed_dim, output_dim=4, activation="inv_log", conf_activation="expp1")
+        self.aggregator = Aggregator(
+            img_size=model_cfg['img_size'], 
+            patch_size=model_cfg['patch_size'], 
+            embed_dim=model_cfg['embed_dim'], 
+            patch_embed=model_cfg['patch_embed']
+        )
+        self.canonical_head = DPTHead(
+            dim_in=2*model_cfg['embed_dim'], 
+            output_dim=4, 
+            activation="inv_log", 
+            conf_activation="expp1",
+            out_channels=model_cfg['out_channels'],
+            features=model_cfg['features']
+        )
 
         if self.model_skinning_weights:
-            self.skinning_head = DPTHead(dim_in=2 * embed_dim, output_dim=25, activation="inv_log", conf_activation="expp1", additional_conditioning_dim=3)
+            self.skinning_head = DPTHead(
+                dim_in=2*model_cfg['embed_dim'], 
+                output_dim=25, 
+                activation="inv_log", 
+                conf_activation="expp1", 
+                additional_conditioning_dim=3,
+                out_channels=model_cfg['out_channels'],
+                features=model_cfg['features']
+            )
 
         if self.model_pbs:
-            self.pbs_aggregator = Aggregator(img_size=img_size, patch_size=patch_size, embed_dim=384, patch_embed="conv", input_channels=6)
-            self.pbs_head = DPTHead(dim_in=2 * 384, output_dim= 3 + 1, activation="inv_log", conf_activation="expp1")
+            self.pbs_aggregator = Aggregator(
+                img_size=model_cfg['img_size'], 
+                patch_size=model_cfg['patch_size'], 
+                embed_dim=model_cfg['pbs_embed_dim'], 
+                patch_embed="conv", 
+                input_channels=6
+            )
+            self.pbs_head = DPTHead(
+                dim_in=2*model_cfg['pbs_embed_dim'], 
+                output_dim= 3+1, 
+                activation="inv_log", 
+                conf_activation="expp1",
+                out_channels=model_cfg['out_channels'],
+                features=model_cfg['features']
+            )
 
         # self._count_parameters()
             
@@ -60,12 +126,12 @@ class CCH(nn.Module):
             images = images.unsqueeze(0)
         B, N, C_in, H, W = images.shape
 
-        assert len(gender) == B and B==1, 'only supporting batch size 1 for now'
+        # assert len(gender) == B and B==1, 'only supporting batch size 1 for now'
 
-        if gender[0] == 'male':
-            smpl_model = self.smpl_male
-        else:
-            smpl_model = self.smpl_female
+        # if gender[0] == 'male':
+        #     smpl_model = self.smpl_male
+        # else:
+        #     smpl_model = self.smpl_female
 
         aggregated_tokens_list, patch_start_idx = self.aggregator(images) 
 
@@ -96,7 +162,7 @@ class CCH(nn.Module):
             pose=rearrange(pose, 'b k c -> (b k) c'),
             lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k) (n h w) j'),
             J=rearrange(joints, 'b k j c -> (b k) j c'),
-            parents=smpl_model.parents 
+            parents=self.parents 
         )
         vp_init = rearrange(vp_init, '(b k) (n h w) c -> b k n h w c', b=B, k=N, n=N, h=H, w=W)
         J_init = rearrange(J_init, '(b k) j c -> b k j c', b=B, k=N)
@@ -125,7 +191,7 @@ class CCH(nn.Module):
                 pose=rearrange(pose, 'b k c -> (b k) c'),
                 lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k) (n h w) j'),
                 J=rearrange(joints, 'b k j c -> (b k) j c'),
-                parents=smpl_model.parents 
+                parents=self.parents 
             )
             vp = rearrange(vp, '(b k) (n h w) c -> b k n h w c', b=B, n=N, k=N, h=H, w=W)
 

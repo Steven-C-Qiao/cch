@@ -53,10 +53,12 @@ class CCHTrainer(pl.LightningModule):
         for param in self.smpl_female.parameters():
             param.requires_grad = False
 
+        self.parents = self.smpl_male.parents
+
         self.model = CCH(
             cfg=cfg,
             smpl_male=self.smpl_male,
-            smpl_female=self.smpl_female
+            smpl_female=self.smpl_female,
         )
 
         self.criterion = CCHLoss(cfg)
@@ -121,6 +123,9 @@ class CCHTrainer(pl.LightningModule):
         metrics = self.metrics(preds, batch)
 
         self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, self.global_step)
+
+        # print(loss_dict)
+        import ipdb; ipdb.set_trace()
         
         return loss 
     
