@@ -72,7 +72,7 @@ class CCH(nn.Module):
         vc_init, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
         vc_init = torch.clamp(vc_init, -2, 2)
 
-        vc_init = vc_init * mask.unsqueeze(-1) # Mask background to 0, important for backward chamfer metrics
+        vc_init = vc_init * mask.unsqueeze(-1) # Mask background pixels to origin, important for backward chamfer metrics
 
         ret['vc_init'] = vc_init
         ret['vc_conf'] = vc_conf
@@ -128,6 +128,9 @@ class CCH(nn.Module):
                 parents=smpl_model.parents 
             )
             vp = rearrange(vp, '(b k) (n h w) c -> b k n h w c', b=B, n=N, k=N, h=H, w=W)
+
+            vp = vp * (mask.unsqueeze(1).repeat(1, N, 1, 1, 1).unsqueeze(-1))
+            
             ret['vp'] = vp
             ret['dvc'] = dvc
             ret['vc'] = vc

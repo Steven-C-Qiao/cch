@@ -23,7 +23,8 @@ class CCHTrainer(pl.LightningModule):
     def __init__(self, 
                  cfg, 
                  dev=False, 
-                 vis_save_dir=None):
+                 vis_save_dir=None,
+                 plot=False):
         
         super().__init__()
         self.save_scenepic = True 
@@ -32,19 +33,10 @@ class CCHTrainer(pl.LightningModule):
         self.normalise = cfg.DATA.NORMALISE
         self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 5
         self.image_size = cfg.DATA.IMG_SIZE
- 
+        self.plot = plot
+
         # self.feature_renderer = FeatureRenderer(image_size=(224, 224))
         self.feature_renderer = FeatureRenderer(image_size=(256, 188))
-
-        # self.smpl_model = SMPL(
-        #     model_path=paths.SMPL,
-        #     num_betas=10,
-        #     gender=cfg.MODEL.GENDER
-        # )
-        # # smpl_faces = torch.tensor(smpl_model.faces, dtype=torch.int32)
-        # # self.register_buffer('smpl_faces', smpl_faces)
-        # for param in self.smpl_model.parameters():
-        #     param.requires_grad = False
 
         self.smpl_male = SMPL(
             model_path=paths.SMPL,
@@ -89,6 +81,31 @@ class CCHTrainer(pl.LightningModule):
             batch = self.first_batch
 
         batch = self._process_inputs(batch, batch_idx, normalise=self.normalise)
+
+
+        # import matplotlib.pyplot as plt
+        
+        # B, N = batch['imgs'].shape[:2]
+        # fig, axes = plt.subplots(B, N, figsize=(4*N, 4*B))
+        
+        # # Handle single batch/frame case
+        # if B == 1 and N == 1:
+        #     axes = np.array([[axes]])
+        # elif B == 1:
+        #     axes = axes[None, :]
+        # elif N == 1: 
+        #     axes = axes[:, None]
+            
+        # for b in range(B):
+        #     for n in range(N):
+        #         img = batch['imgs'][b,n].detach().cpu().permute(1,2,0).numpy()
+        #         axes[b,n].imshow(img)
+        #         # axes[b,n].axis('off')
+                
+        # plt.tight_layout()
+        # plt.show()
+        # plt.savefig('test_input_images.png')
+        # import ipdb; ipdb.set_trace()
     
         preds = self(
             images=batch['imgs'],
@@ -116,11 +133,11 @@ class CCHTrainer(pl.LightningModule):
         # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
         # self.visualiser.visualise(preds, batch) 
 
-        if self.dev:
+        if self.dev or self.plot:
             self.visualiser.visualise(preds, batch)
-            import ipdb; ipdb.set_trace()
+            if self.dev:
+                import ipdb; ipdb.set_trace()
     
-
 
     @torch.no_grad()
     def _process_inputs(self, batch, batch_idx, normalise=False):
@@ -128,7 +145,6 @@ class CCHTrainer(pl.LightningModule):
         B, N = batch['imgs'].shape[:2]
 
         # ----------------------- get T joints -----------------------
-        # iterate through the batch, use properly gendered smpl models 
         smpl_T_joints_list = []
         smpl_T_vertices_list = []
         smpl_vertices_list = []
@@ -203,6 +219,8 @@ class CCHTrainer(pl.LightningModule):
 
 
 
+
+        # Render skinning weight pointmaps
         pytorch3d_mesh = Meshes(
             verts=scan_mesh_verts,
             faces=scan_mesh_faces,
@@ -220,6 +238,8 @@ class CCHTrainer(pl.LightningModule):
         batch['smpl_w_maps'] = w_maps
 
 
+
+        # Render SMPL pointmaps
         smpl_pytorch3d_mesh = Meshes(
             verts=smpl_vertices.view(-1, 6890, 3),
             faces=smpl_faces[None].repeat(B*N, 1, 1).to(self.device),
@@ -248,6 +268,7 @@ class CCHTrainer(pl.LightningModule):
         # batch['vp_ptcld'] = vp_ptcld
 
 
+        # Sample from Vp
         scan_mesh_centered = Meshes(
             verts=scan_mesh_verts_centered,
             faces=scan_mesh_faces,
@@ -257,11 +278,13 @@ class CCHTrainer(pl.LightningModule):
         batch['vp_ptcld'] = vp_ptcld
 
 
+        # Sample from Template Mesh
         template_mesh = batch['template_mesh']
         template_mesh_verts = [mesh.vertices for mesh in template_mesh]
         template_mesh_faces = [mesh.faces for mesh in template_mesh]
 
 
+        # Align Template Mesh with SMPL
         smpl_T_vertices_midpoint = (torch.max(smpl_T_vertices[..., 1], dim=-1)[0] + torch.min(smpl_T_vertices[..., 1], dim=-1)[0]) / 2
         template_mesh_verts_midpoint = torch.stack([(torch.max(torch.tensor(verts[:, 1], device=self.device)) + torch.min(torch.tensor(verts[:, 1], device=self.device))) / 2 for verts in template_mesh_verts])
         offset = (smpl_T_vertices_midpoint[:, 0] - template_mesh_verts_midpoint)
@@ -275,9 +298,9 @@ class CCHTrainer(pl.LightningModule):
             faces=[torch.tensor(f, device=self.device, dtype=torch.int32) for f in template_mesh_faces]
         )
 
-        # batch['template_mesh_verts'] = template_mesh_verts
-
         batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, 48000)
+
+
 
 
         # # Create 2D plot comparing SMPL and template vertices

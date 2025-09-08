@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
+import numpy as np
 
 from einops import rearrange
 
@@ -16,7 +17,7 @@ class CCHLoss(pl.LightningModule):
         self.posed_chamfer_loss = MaskedUncertaintyChamferLoss()
         self.canonical_chamfer_loss = MaskedUncertaintyChamferLoss()
 
-        self.vc_pm_loss = MaskedUncertaintyL2Loss()
+        self.vc_pm_loss = MaskedUncertaintyExpL2Loss()
 
         self.skinning_weight_loss = MaskedUncertaintyL2Loss()
         self.dvc_loss = MaskedUncertaintyL2Loss()
@@ -198,6 +199,33 @@ class MaskedUncertaintyL2Loss(nn.Module):
     def forward(self, x, y, mask=None, uncertainty=None):
 
         loss = torch.norm(x - y, dim=-1)
+
+        if uncertainty is not None:
+            conf, log_conf = self.get_conf_log(uncertainty)
+            loss = loss * conf - self.alpha * log_conf
+
+        if mask is not None:
+            loss = loss * mask
+
+        return loss.sum() / mask.sum()
+    
+
+
+class MaskedUncertaintyExpL2Loss(nn.Module):
+    def __init__(self, alpha=1.0):
+        """
+        Loss for finetuning Vc_pm, penalise only the large deviations from SMPL 
+        """
+        super().__init__()
+        self.alpha = alpha
+
+    def get_conf_log(self, x):
+        return x, torch.log(x)
+
+    def forward(self, x, y, mask=None, uncertainty=None):
+        offset = 3
+
+        loss = torch.exp(torch.norm(x - y, dim=-1) - offset) - np.exp( - offset)
 
         if uncertainty is not None:
             conf, log_conf = self.get_conf_log(uncertainty)

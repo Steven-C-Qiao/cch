@@ -33,7 +33,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None):
+def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None, plot=False):
     set_seed(42)
     
     # Get config
@@ -70,7 +70,8 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
     model = CCHTrainer(
         cfg=cfg,
         dev=dev,
-        vis_save_dir=vis_save_dir
+        vis_save_dir=vis_save_dir,
+        plot=plot
     )
 
     datamodule = CCHDataModule(cfg)
@@ -121,6 +122,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
         # logger.log_hyperparams(ckpt['hyper_parameters'])
 
     trainer.fit(model, datamodule, ckpt_path=resume_path)
+    # trainer.test(model, datamodule)
 
 
 if __name__ == '__main__':
@@ -163,6 +165,10 @@ if __name__ == '__main__':
         "--dev", 
         action="store_true"
     )  
+    parser.add_argument(
+        "--plot", 
+        action="store_true"
+    )  
     args = parser.parse_args()
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -181,5 +187,7 @@ if __name__ == '__main__':
         dev=args.dev,
         device_ids=device_ids,
         resume_path=args.resume_training_states,
-        load_path=args.load_from_ckpt
+        load_path=args.load_from_ckpt,
+        plot=args.plot
+
     )

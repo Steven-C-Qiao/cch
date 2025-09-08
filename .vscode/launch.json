@@ -1,0 +1,31 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Train Script",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/scripts/train.py",
+            "args": [
+                "-E", "exp/exp_066_vc_exp_loss",
+                "-R", "exp/exp_066_vc_exp_loss/saved_models/last.ckpt",
+                "--gpus", "0",
+                "--plot"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
