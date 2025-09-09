@@ -30,6 +30,7 @@ class CCHTrainer(pl.LightningModule):
         self.save_scenepic = True 
         self.dev = dev
         self.cfg = cfg
+        self.use_sapiens = cfg.MODEL.USE_SAPIENS
         self.normalise = cfg.DATA.NORMALISE
         self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 5
         self.image_size = cfg.DATA.IMG_SIZE
@@ -68,10 +69,16 @@ class CCHTrainer(pl.LightningModule):
         self.save_hyperparameters(ignore=['smpl_model'])
 
         self.first_batch = None
+
+        if self.use_sapiens:
+            from core.models.sapiens_wrapper import SapiensWrapper
+            self.sapiens = SapiensWrapper()
+        else:
+            self.sapiens = None
         
 
-    def forward(self, images, pose=None, joints=None, w_smpl=None, mask=None, gender=None):
-        return self.model(images, pose=pose, joints=joints, w_smpl=w_smpl, mask=mask, gender=gender)
+    def forward(self, batch, sapiens=None):
+        return self.model(batch, sapiens=sapiens)
     
     def on_train_epoch_start(self):
         self.visualiser.set_global_rank(self.global_rank)
@@ -110,12 +117,8 @@ class CCHTrainer(pl.LightningModule):
         # import ipdb; ipdb.set_trace()
     
         preds = self(
-            images=batch['imgs'],
-            pose=batch['pose'], 
-            joints=batch['smpl_T_joints'], 
-            w_smpl=batch['smpl_w_maps'], 
-            mask=batch['masks'],
-            gender=batch['gender']
+            batch,
+            sapiens=self.sapiens
         )
 
         loss, loss_dict = self.criterion(preds, batch)
@@ -125,7 +128,7 @@ class CCHTrainer(pl.LightningModule):
         self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, self.global_step)
 
         # print(loss_dict)
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
         
         return loss 
     

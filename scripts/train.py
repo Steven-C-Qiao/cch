@@ -82,20 +82,20 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
     checkpoint_callbacks = [
         ModelCheckpoint(
             dirpath=model_save_dir,
-            filename='val_vc_cfd_{epoch:03d}',
-            save_top_k=1,
-            save_last=False,
-            verbose=True,
-            monitor='val_vc_cfd',
-            mode='min'
-        ),
-        ModelCheckpoint(
-            dirpath=model_save_dir,
             filename='val_loss_{epoch:03d}',
             save_top_k=1,
             save_last=True,
             verbose=True,
             monitor='val_loss',
+            mode='min'
+        ),
+        ModelCheckpoint( # this is the vc_init cfd 
+            dirpath=model_save_dir,
+            filename='vc_cfd_{epoch:03d}',
+            save_top_k=1,
+            save_last=False,
+            verbose=True,
+            monitor='vc_cfd',
             mode='min'
         ),
     ]

@@ -3,6 +3,7 @@ import torch
 import smplx 
 import pickle
 import random
+import kornia 
 import numpy as np
 from PIL import Image
 import trimesh
@@ -100,6 +101,21 @@ def d4dress_collate_fn(batch):
     return dict(collated)
 
 
+def sapiens_transform(
+    image: torch.tensor
+) -> torch.tensor:
+    transform = transforms.Compose([
+        transforms.CenterCrop((940, 940)),
+        transforms.Resize((1024, 1024)),
+        transforms.ToTensor(),
+        make_normalize_transform()
+    ])
+    image = transform(image)
+
+    return image
+
+
+
 class D4DressDataset(Dataset):
     def __init__(self, debug=False):
         self.debug = debug
@@ -129,6 +145,8 @@ class D4DressDataset(Dataset):
             # make_normalize_transform()
         ])
         self.normalise = make_normalize_transform()
+
+        self.sapiens_transform = sapiens_transform
 
 
     def __len__(self):
@@ -279,7 +297,10 @@ class D4DressDataset(Dataset):
             # Apply transforms
             img_transformed = self.normalise(self.transform(img_pil))
             mask_transformed = self.transform(mask_pil).squeeze()
-            
+
+            sapiens_image = sapiens_transform(img_pil)
+
+            ret['sapiens_images'].append(sapiens_image)
             ret['imgs'].append(img_transformed)
             ret['masks'].append(mask_transformed)
 
@@ -294,6 +315,7 @@ class D4DressDataset(Dataset):
         ret['transl'] = torch.tensor(np.stack(ret['transl']))
         ret['betas'] = torch.tensor(np.stack(ret['betas']))
         ret['scan_rotation'] = torch.tensor(np.stack(ret['scan_rotation']))
+        ret['sapiens_images'] = torch.tensor(np.stack(ret['sapiens_images']))
 
         return ret
 

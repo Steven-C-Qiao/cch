@@ -20,6 +20,8 @@ class Visualiser(pl.LightningModule):
         self.cfg = cfg
         self.threshold = cfg.LOSS.CONFIDENCE_THRESHOLD if cfg is not None else 100
 
+        self.threshold = 50
+
     def set_global_rank(self, global_rank):
         self.rank = global_rank
 
@@ -69,11 +71,20 @@ class Visualiser(pl.LightningModule):
             batch
         )
 
-
-        self.visualise_vp_vc(
+        self.visualise_pbs_pms(
             predictions,
             batch
         )
+
+        self.visualise_full(
+            predictions,
+            batch
+        )
+
+        # self.visualise_vp_vc(
+        #     predictions,
+        #     batch
+        # )
 
 
         
@@ -108,6 +119,7 @@ class Visualiser(pl.LightningModule):
             plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_images.png'))
             plt.close()
       
+
     def visualise_initial_pms(
         self, 
         predictions,
@@ -222,7 +234,8 @@ class Visualiser(pl.LightningModule):
     ):
         
         B, N, H, W, C = predictions['vc_init'].shape
-        mask = batch['masks']
+        K = N 
+        mask = np.repeat(batch['masks'][:, None], K, axis=1) # B, K, N, H, W
 
         B = 1
         N = min(N, 4)
@@ -232,21 +245,74 @@ class Visualiser(pl.LightningModule):
         num_rows = 0
 
         if 'vp_init' in predictions:
-            num_rows += 1
+            num_rows += 4
             vp_init = predictions['vp_init'] # bknhwc
+            vp_init[~mask.astype(bool)] = 0
+            norm_min, norm_max = vp_init.min(), vp_init.max()
+            vp_init = (vp_init - norm_min) / (norm_max - norm_min) 
+            vp_init[~mask.astype(bool)] = 1
+
+
+        if 'vc' in predictions:
+            num_rows += 4
+            vc = predictions['vc'] # bknhwc
+            vc[~mask.astype(bool)] = 0
+            norm_min, norm_max = vc.min(), vc.max()
+            vc = (vc - norm_min) / (norm_max - norm_min) 
+            vc[~mask.astype(bool)] = 1
 
         if 'vp' in predictions:
-            num_rows += 1
+            num_rows += 4
             vp = predictions['vp'] # bknhwc
+            vp[~mask.astype(bool)] = 0
+            norm_min, norm_max = vp.min(), vp.max()
+            vp = (vp - norm_min) / (norm_max - norm_min) 
+            vp[~mask.astype(bool)] = 1
+
+        if 'dvc' in predictions:
+            num_rows += 4
+            dvc = predictions['dvc'] # bknhwc
+            dvc = np.linalg.norm(dvc, axis=-1)
+            dvc = dvc * mask
 
 
         fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
-        for n in range(num_cols):
-            row = 0
-
+        row = 0
+        for k in range(num_cols):
             if 'vp_init' in predictions:
-                plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-                plt.imshow(vp_init[0, n])
+                for n in range(4):
+                    plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                    plt.imshow(vp_init[0, k, n])
+                    plt.title(f'Pred init $V_{n+1}^{k+1}$')
+                row += 1
+
+            if 'dvc' in predictions:
+                for n in range(4):
+                    ax = plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                    im = ax.imshow(dvc[0, k, n])
+                    plt.title(f'Pred $\\Delta V_{n+1}^{{c,{k+1}}}$')
+                    plt.colorbar(im, ax=ax)
+                row += 1
+
+            if 'vc' in predictions:
+                for n in range(4):
+                    plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                    plt.imshow(vc[0, k, n])
+                    plt.title(f'Pred $V_{n+1}^{{c,{k+1}}}$')
+                row += 1
+
+            if 'vp' in predictions:
+                for n in range(4):
+                    plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                    plt.imshow(vp[0, k, n])
+                    plt.title(f'Pred final $V_{n+1}^{k+1}$')
+                row += 1
+            
+
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_pbs_pms.png'))
+        plt.close()
 
 
 
@@ -281,7 +347,7 @@ class Visualiser(pl.LightningModule):
         pred_alpha = 0.5
         s = 0.1
         
-        num_rows, num_cols = 3, 5
+        num_rows, num_cols = 4, 5
         sub_fig_size = 4 
 
 
@@ -307,8 +373,8 @@ class Visualiser(pl.LightningModule):
         vc_gt = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
         ax.scatter(vc_gt[:, 0], 
                    vc_gt[:, 1], 
-                   vc_gt[:, 2], c='blue', s=s, alpha=gt_alpha, label=f'$vc_{0}$')
-        ax.set_title(f'gt $V_c$ {0}')
+                   vc_gt[:, 2], c='blue', s=s, alpha=gt_alpha, label=f'$V^c$')
+        ax.set_title(f'gt $V^c$')
 
         if "vc_init" in predictions:
             ax = fig.add_subplot(num_rows, num_cols, num_cols+5, projection='3d')
@@ -317,8 +383,8 @@ class Visualiser(pl.LightningModule):
             verts = vc_init[mask]
             ax.scatter(verts[:, 0], 
                        verts[:, 1], 
-                       verts[:, 2], c=color, s=s, alpha=gt_alpha, label=f'$vc_init_{0}$')
-            ax.set_title(f'pred $V_c$ init')
+                       verts[:, 2], c=color, s=s, alpha=gt_alpha, label=f'$V^c$ init')
+            ax.set_title(f'pred init $V^c$')
             
         if "scan_mesh_verts_centered" in batch:
             scan_mesh_verts = batch['scan_mesh_verts_centered'][0]
@@ -329,8 +395,8 @@ class Visualiser(pl.LightningModule):
                 ax = fig.add_subplot(num_rows, num_cols, i+1, projection='3d')
                 ax.scatter(verts[:, 0], 
                            verts[:, 1], 
-                           verts[:, 2], c=colors, s=s, alpha=gt_alpha, label=f'$scan_{i}$')
-                ax.set_title(f'scan {i}')
+                           verts[:, 2], c=colors, s=s, alpha=gt_alpha)
+                ax.set_title(f'gt scan $V^{i+1}$')
 
         if "vp_init" in predictions:
             vp_init = predictions['vp_init'][0] # k n h w 3
@@ -341,22 +407,34 @@ class Visualiser(pl.LightningModule):
                 ax = fig.add_subplot(num_rows, num_cols, num_cols+i+1, projection='3d')
                 ax.scatter(verts[:, 0], 
                            verts[:, 1], 
-                           verts[:, 2], c=color, s=s, alpha=gt_alpha, label=f'$vp_init_{i}$')
-                ax.scatter(J_init[i, :, 0], 
-                           J_init[i, :, 1], 
-                           J_init[i, :, 2], c='green', s=1., alpha=gt_alpha, label=f'$J_init_{i}$')
-                ax.set_title(f'pred $V_p$ init {i}')
+                           verts[:, 2], c=color, s=s, alpha=gt_alpha)
+                # ax.scatter(J_init[i, :, 0], 
+                #            J_init[i, :, 1], 
+                #            J_init[i, :, 2], c='green', s=1., alpha=gt_alpha')
+                ax.set_title(f'pred init $V^{i+1}$')
+
+
+        if "vc" in predictions:
+            vc = predictions['vc'][0] # k n h w 3
+
+            for i in range(4):
+                verts = vc[i, mask]
+                ax = fig.add_subplot(num_rows, num_cols, 2*num_cols+i+1, projection='3d')
+                ax.scatter(verts[:, 0], 
+                           verts[:, 1], 
+                           verts[:, 2], c=color, s=s, alpha=gt_alpha)
+                ax.set_title(f'pred $V^{{c,{i+1}}}$')
                 
         if "vp" in predictions:
             vp = predictions['vp'][0] # k n h w 3
 
             for i in range(4):
                 verts = vp[i, mask]
-                ax = fig.add_subplot(num_rows, num_cols, 2*num_cols+i+1, projection='3d')
+                ax = fig.add_subplot(num_rows, num_cols, 3*num_cols+i+1, projection='3d')
                 ax.scatter(verts[:, 0], 
                            verts[:, 1], 
-                           verts[:, 2], c=color, s=s, alpha=gt_alpha, label=f'$vp_{i}$')
-                ax.set_title(f'pred $V_p$ {i}')
+                           verts[:, 2], c=color, s=s, alpha=gt_alpha)
+                ax.set_title(f'pred final $V^{i+1}$')
 
 
         x = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
@@ -439,187 +517,417 @@ class Visualiser(pl.LightningModule):
             ax.set_xticks([])
             ax.set_yticks([])
             ax.set_zticks([])
-            
-            
 
 
 
-    def visualise_scenepic(
+
+    def visualise_full(
         self,
         predictions,
         batch
     ):
-        viridis = plt.colormaps.get_cmap('viridis')
+        subfig_size = 4
+        s = 0.1 # scatter point size
+        gt_alpha, pred_alpha = 0.5, 0.5
+
+        B, N, H, W, C = predictions['vc_init'].shape
+        K = N
+
+        mask = batch['masks']
+
+        num_rows = 0
+
+
+
+
+        scatter_mask = batch['masks'][0].astype(np.bool) # nhw
+        if "vc_conf" in predictions:
+            confidence = predictions['vc_conf']
+            confidence = confidence > self.threshold
+        else:
+            confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(np.bool)
+        scatter_mask = scatter_mask * confidence[0].astype(np.bool)
+        # Color for predicted scatters 
+        color = rearrange(batch['imgs'][0], 'n c h w -> n h w c')
+        color = color[scatter_mask]
+        color = (color * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
+        color = color.astype(np.float32)
         
-        B, N = vp.shape[:2]
-        B, N = min(B, 1), min(N, 4)
-
-        scene = sp.Scene()
 
 
-        # ----------------------- vc pred -----------------------
-        positions = []
-        colors = []
-        for n in range(N):
-            vc_plot = vc_pred[0, n, masks[0, n].astype(np.bool).flatten()].reshape(-1, 3)
-            vc_plot[..., 0] += 2.0
-            positions.append(vc_plot)
-            colors.append(color[0, n, masks[0, n].astype(np.bool)].flatten())
+        def _normalise_to_rgb_range(x, mask):
+            x_min, x_max = -1.4, 1.1 
+            assert x_min <= x.min() and x.max() <= x_max
+            x[~mask.astype(bool)] = 0
+            x = (x - x_min) / (x_max - x_min) 
+            x[~mask.astype(bool)] = 1
+            return x
+        
 
-        positions = np.concatenate(positions, axis=0)
-        colors = np.concatenate(colors, axis=0)
-        colors_normalized = colors / colors.max()
-        colors_rgb = viridis(colors_normalized)[:, :3] 
+        x = batch['template_mesh_verts'][0]
+        def _set_scatter_limits(ax, x):
+            max_range = np.array([
+                x[:, 0].max() - x[:, 0].min(),
+                x[:, 1].max() - x[:, 1].min(),
+                x[:, 2].max() - x[:, 2].min()
+            ]).max() / 2.0
+            mid_x = (x[:, 0].max() + x[:, 0].min()) * 0.5
+            mid_y = (x[:, 1].max() + x[:, 1].min()) * 0.5
+            mid_z = (x[:, 2].max() + x[:, 2].min()) * 0.5
 
-        mesh_vc_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vc_pred")
-        mesh_vc_pred.add_sphere() 
-        mesh_vc_pred.apply_transform(sp.Transforms.Scale(0.005)) 
-        mesh_vc_pred.enable_instancing(positions = positions, colors = colors_rgb) 
+            ax.set_xlim(mid_x - max_range, mid_x + max_range)
+            ax.set_ylim(mid_y - max_range, mid_y + max_range)
+            ax.set_zlim(mid_z - max_range, mid_z + max_range)
+            ax.view_init(elev=10, azim=20, vertical_axis='y')
+            ax.set_box_aspect([1, 1, 1])
+            ax.xaxis.set_major_locator(plt.MaxNLocator(5))
+            ax.yaxis.set_major_locator(plt.MaxNLocator(5)) 
+            ax.zaxis.set_major_locator(plt.MaxNLocator(3))
 
+        # ---------------------- Canonical stage ----------------------
+        if 'imgs' in batch:
+            images = rearrange(batch['imgs'][0], 'n c h w -> n h w c')
+            images = (images * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
+            images = images.astype(np.float32)
 
-        # ----------------------- vc gt -----------------------
-        positions = []
-        for n in range(N):
-            vc_gt = vc[0, n, masks[0, n].astype(np.bool)].reshape(-1, 3)
-            vc_gt[..., 0] += 2.0
-            positions.append(vc_gt)
-        positions = np.concatenate(positions, axis=0)
+        if 'vc_init' in predictions:
+            vc_init = _normalise_to_rgb_range(predictions['vc_init'], mask)
+        
+        if 'vc_conf' in predictions:
+            vc_conf = predictions['vc_conf']
+            vc_conf = vc_conf * mask 
 
-        mesh_vc_gt = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vc_gt")
-        mesh_vc_gt.add_sphere() 
-        mesh_vc_gt.apply_transform(sp.Transforms.Scale(0.005)) 
-        mesh_vc_gt.enable_instancing(positions = positions) 
+        if 'vc_maps' in batch:
+            vc_maps = _normalise_to_rgb_range(batch['vc_maps'], batch['smpl_mask'])
 
+        if 'smpl_w_maps' in batch:
+            smpl_w_maps = np.argmax(batch['smpl_w_maps'], axis=-1)
 
+        if "w" in predictions:
+            w = predictions['w']
+            w = np.argmax(w, axis=-1)
+            w = w * mask 
 
-        # ----------------------- vp pred -----------------------
-        positions = []
-        colors = []
+        # ---------------------- Blendshape stage ----------------------
+        mask = np.repeat(mask[:, None, :, :], K, axis=1) # B, K, N, H, W 
+    
+        if 'vp_init' in predictions:
+            vp_init = _normalise_to_rgb_range(predictions['vp_init'], mask)
 
-        for n in range(N):
-            vp_plot = vp_pred[0, n, masks[0, n].astype(np.bool).flatten()]
-            vp_plot[..., 0] += 0.8 * n - 1.6
-            positions.append(vp_plot)
-            colors.append(color[0, n, masks[0, n].astype(np.bool)].flatten())
+        if 'vc' in predictions:
+            vc = _normalise_to_rgb_range(predictions['vc'], mask)
 
+        if 'vp' in predictions:
+            vp = _normalise_to_rgb_range(predictions['vp'], mask)
 
-        positions = np.concatenate(positions, axis=0)
-        colors = np.concatenate(colors, axis=0)
-
-
-        colors_normalized = colors / colors.max()
-        colors_rgb = viridis(colors_normalized)[:, :3] 
-
-        mesh_vp_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vp_pred")
-        mesh_vp_pred.add_sphere() 
-        mesh_vp_pred.apply_transform(sp.Transforms.Scale(0.005)) 
-        mesh_vp_pred.enable_instancing(positions = positions, colors = colors_rgb) 
-
-
-        # ----------------------- vp gt -----------------------
-        positions = []
-        for n in range(N):
-            vp_gt_plot = vp[0, n, vertex_visibility[0, n].astype(np.bool).flatten()]
-            vp_gt_plot[..., 0] += 0.8 * n - 1.6
-            positions.append(vp_gt_plot)
-        positions = np.concatenate(positions, axis=0)
-
-        mesh_vp_gt = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vp_gt")
-        mesh_vp_gt.add_sphere() 
-        mesh_vp_gt.apply_transform(sp.Transforms.Scale(0.005)) 
-        mesh_vp_gt.enable_instancing(positions = positions) 
+        if 'dvc' in predictions:
+            dvc = predictions['dvc'] # bknhwc
+            dvc = np.linalg.norm(dvc, axis=-1)
+            dvc = dvc * mask
 
 
+        num_rows = 8
+            
+            
+        fig = plt.figure(figsize=(subfig_size * N, subfig_size * num_rows))
+        r = 0
 
-        # ----------------------- vp init pred -----------------------
-        if vp_init_pred is not None:
-
-            # vp gt overlay 
-            positions = []
+        # input images
+        if 'imgs' in batch:
             for n in range(N):
-                vp_gt_plot = vp[0, n, vertex_visibility[0, n].astype(np.bool).flatten()]
-                vp_gt_plot[..., 0] += 0.8 * n - 1.6
-                vp_gt_plot[..., 1] -= 2.0
-                positions.append(vp_gt_plot)
-            positions = np.concatenate(positions, axis=0)
+                ax = fig.add_subplot(num_rows, N, r*N+n+1)
+                ax.imshow(images[n])
+                ax.set_title(f'Input Image {n}')
+                ax.axis('off')
+            r += 1
 
-            mesh_vp_gt_row_2 = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vp_gt_row_2")
-            mesh_vp_gt_row_2.add_sphere() 
-            mesh_vp_gt_row_2.apply_transform(sp.Transforms.Scale(0.005)) 
-            mesh_vp_gt_row_2.enable_instancing(positions = positions) 
-
-            # vp init pred 
-            positions = []
-            colors = []
+        # scan meshes
+        if "scan_mesh_verts_centered" in batch:
+            scan_mesh_verts = batch['scan_mesh_verts_centered'][0]
+            scan_mesh_colors = batch['scan_mesh_colors'][0]
             for n in range(N):
-                vp_init_pred_plot = vp_init_pred[0, n, masks[0, n].astype(np.bool).flatten()]
-                vp_init_pred_plot[..., 0] += 0.8 * n - 1.6
-                vp_init_pred_plot[..., 1] -= 2.0
-                positions.append(vp_init_pred_plot)
-                colors.append(color[0, n, masks[0, n].astype(np.bool)].flatten())
-            positions = np.concatenate(positions, axis=0)
-            colors = np.concatenate(colors, axis=0)
-            colors_normalized = colors / colors.max()
-            colors_rgb = viridis(colors_normalized)[:, :3] 
+                verts = scan_mesh_verts[n].cpu().detach().numpy()
+                colors = (scan_mesh_colors[n].cpu().detach().numpy() / 255.).astype(np.float32)
+                ax = fig.add_subplot(num_rows, N, r*N+n+1, projection='3d')
+                ax.scatter(verts[:, 0], 
+                           verts[:, 1], 
+                           verts[:, 2], c=colors, s=s, alpha=gt_alpha)
+                ax.set_title(f'gt scan $V^{n+1}$')
+                _set_scatter_limits(ax, x)
+            r += 1
 
-            mesh_vp_init_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vp_init_pred")
-            mesh_vp_init_pred.add_sphere() 
-            mesh_vp_init_pred.apply_transform(sp.Transforms.Scale(0.005)) 
-            mesh_vp_init_pred.enable_instancing(positions = positions, colors = colors_rgb) 
-
-        if vc_init_pred is not None:
-            # vc gt overlay 
-            positions = []
+        # predicted initial V_n^c
+        if 'vc_maps' in batch:
             for n in range(N):
-                vc_gt = vc[0, n, masks[0, n].astype(np.bool)].reshape(-1, 3)
-                vc_gt[..., 0] += 2.0
-                positions.append(vc_gt)
-            positions = np.concatenate(positions, axis=0)
+                ax = fig.add_subplot(num_rows, N, r*N+n+1)
+                ax.imshow(vc_maps[0, n])
+                ax.set_title(f'gt SMPL $V_{n}^c$')
+            r += 1
 
-            mesh_vc_gt_row_2 = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vc_gt_row_2")
-            mesh_vc_gt_row_2.add_sphere() 
-            mesh_vc_gt_row_2.apply_transform(sp.Transforms.Scale(0.005)) 
-            mesh_vc_gt_row_2.enable_instancing(positions = positions) 
-
-
-
-            positions = []
-            colors = []
+        if 'vc_init' in predictions:
             for n in range(N):
-                vc_init_pred_plot = vc_init_pred[0, n, masks[0, n].astype(np.bool).flatten()]
-                vc_init_pred_plot[..., 0] += 2.0
-                vc_init_pred_plot[..., 1] -= 2.0
-                positions.append(vc_init_pred_plot)
-                colors.append(color[0, n, masks[0, n].astype(np.bool)].flatten())
-            positions = np.concatenate(positions, axis=0)
-            colors = np.concatenate(colors, axis=0)
-            colors_normalized = colors / colors.max()
-            colors_rgb = viridis(colors_normalized)[:, :3] 
-
-            mesh_vc_init_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vc_init_pred")
-            mesh_vc_init_pred.add_sphere() 
-            mesh_vc_init_pred.apply_transform(sp.Transforms.Scale(0.005)) 
-            mesh_vc_init_pred.enable_instancing(positions = positions, colors = colors_rgb) 
+                ax = fig.add_subplot(num_rows, N, r*N+n+1)
+                ax.imshow(vc_init[0, n])
+                ax.set_title(f'$V_c$ init {n}')
+            r += 1
 
 
-        # ----------------------- canvas -----------------------
-        golden_ratio = (1 + np.sqrt(5)) / 2
-        canvas = scene.create_canvas_3d(width = 1600, height = 1600 / golden_ratio, shading=sp.Shading(bg_color=sp.Colors.White))
-        frame = canvas.create_frame()
+        # Additional row for gt canonical scatter and initial predictions
+        ax = fig.add_subplot(num_rows, N, r*N+1, projection='3d')
+        vc_gt = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
+        ax.scatter(vc_gt[:, 0], 
+                   vc_gt[:, 1], 
+                   vc_gt[:, 2], c='blue', s=s, alpha=gt_alpha, label=f'$V^c$')
+        _set_scatter_limits(ax, x)
+        ax.set_title(f'gt $V^c$')
 
-        frame.add_mesh(mesh_vp_pred)
-        frame.add_mesh(mesh_vp_gt)
 
-        frame.add_mesh(mesh_vc_pred)
-        frame.add_mesh(mesh_vc_gt)
+        if "vc_init" in predictions:
+            ax = fig.add_subplot(num_rows, N, r*N+2, projection='3d')
+            vc_init = predictions['vc_init'][0] # n h w 3 
+            
+            v = vc_init[scatter_mask]
+            ax.scatter(v[:, 0], 
+                       v[:, 1], 
+                       v[:, 2], c=color, s=s, alpha=gt_alpha, label=f'$V^c$ init')
+            _set_scatter_limits(ax, x)
+            ax.set_title(f'pred init $V^c$')
+        r += 1
 
-        if vp_init_pred is not None:
-            frame.add_mesh(mesh_vp_init_pred)
-            frame.add_mesh(mesh_vp_gt_row_2)
-        if vc_init_pred is not None:
-            frame.add_mesh(mesh_vc_init_pred)
-            frame.add_mesh(mesh_vc_gt_row_2)
 
-        path = os.path.join(self.save_dir, f'{self.global_step:06d}_sp.html')
+        # predicted initial V^k scatter
+        if "vp_init" in predictions:
+            vp_init = predictions['vp_init'][0] # k n h w 3
 
-        scene.save_as_html(path)
+            for n in range(N):
+                verts = vp_init[n, scatter_mask]
+                ax = fig.add_subplot(num_rows, N, r*N+n+1, projection='3d')
+                ax.scatter(verts[:, 0], 
+                           verts[:, 1], 
+                           verts[:, 2], c=color, s=s, alpha=gt_alpha)
+                ax.set_title(f'pred init $V^{n+1}$')
+                _set_scatter_limits(ax, x)
+            r += 1
+
+        
+
+        if "vc" in predictions:
+            vc = predictions['vc'][0] # k n h w 3
+
+            for n in range(N):
+                verts = vc[n, scatter_mask]
+                ax = fig.add_subplot(num_rows, N, r*N+n+1, projection='3d')
+                ax.scatter(verts[:, 0], 
+                           verts[:, 1], 
+                           verts[:, 2], c=color, s=s, alpha=gt_alpha)
+                _set_scatter_limits(ax, x)
+                ax.set_title(f'pred $V^{{c,{n+1}}}$')
+            r += 1
+
+        if "vp" in predictions:
+            vp = predictions['vp'][0] # k n h w 3
+
+            for n in range(N):
+                verts = vp[n, scatter_mask]
+                ax = fig.add_subplot(num_rows, N, r*N+n+1, projection='3d')
+                ax.scatter(verts[:, 0], 
+                           verts[:, 1], 
+                           verts[:, 2], c=color, s=s, alpha=gt_alpha)
+                _set_scatter_limits(ax, x)
+                ax.set_title(f'pred final $V^{n+1}$')
+
+
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}.png'), dpi=200)
+
+        plt.close()
+
+            
+            
+            
+            
+
+
+
+
+
+    # def visualise_scenepic(
+    #     self,
+    #     predictions,
+    #     batch
+    # ):
+    #     viridis = plt.colormaps.get_cmap('viridis')
+        
+    #     B, N = vp.shape[:2]
+    #     B, N = min(B, 1), min(N, 4)
+
+    #     scene = sp.Scene()
+
+
+    #     # ----------------------- vc pred -----------------------
+    #     positions = []
+    #     colors = []
+    #     for n in range(N):
+    #         vc_plot = vc_pred[0, n, masks[0, n].astype(np.bool).flatten()].reshape(-1, 3)
+    #         vc_plot[..., 0] += 2.0
+    #         positions.append(vc_plot)
+    #         colors.append(color[0, n, masks[0, n].astype(np.bool)].flatten())
+
+    #     positions = np.concatenate(positions, axis=0)
+    #     colors = np.concatenate(colors, axis=0)
+    #     colors_normalized = colors / colors.max()
+    #     colors_rgb = viridis(colors_normalized)[:, :3] 
+
+    #     mesh_vc_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vc_pred")
+    #     mesh_vc_pred.add_sphere() 
+    #     mesh_vc_pred.apply_transform(sp.Transforms.Scale(0.005)) 
+    #     mesh_vc_pred.enable_instancing(positions = positions, colors = colors_rgb) 
+
+
+    #     # ----------------------- vc gt -----------------------
+    #     positions = []
+    #     for n in range(N):
+    #         vc_gt = vc[0, n, masks[0, n].astype(np.bool)].reshape(-1, 3)
+    #         vc_gt[..., 0] += 2.0
+    #         positions.append(vc_gt)
+    #     positions = np.concatenate(positions, axis=0)
+
+    #     mesh_vc_gt = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vc_gt")
+    #     mesh_vc_gt.add_sphere() 
+    #     mesh_vc_gt.apply_transform(sp.Transforms.Scale(0.005)) 
+    #     mesh_vc_gt.enable_instancing(positions = positions) 
+
+
+
+    #     # ----------------------- vp pred -----------------------
+    #     positions = []
+    #     colors = []
+
+    #     for n in range(N):
+    #         vp_plot = vp_pred[0, n, masks[0, n].astype(np.bool).flatten()]
+    #         vp_plot[..., 0] += 0.8 * n - 1.6
+    #         positions.append(vp_plot)
+    #         colors.append(color[0, n, masks[0, n].astype(np.bool)].flatten())
+
+
+    #     positions = np.concatenate(positions, axis=0)
+    #     colors = np.concatenate(colors, axis=0)
+
+
+    #     colors_normalized = colors / colors.max()
+    #     colors_rgb = viridis(colors_normalized)[:, :3] 
+
+    #     mesh_vp_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vp_pred")
+    #     mesh_vp_pred.add_sphere() 
+    #     mesh_vp_pred.apply_transform(sp.Transforms.Scale(0.005)) 
+    #     mesh_vp_pred.enable_instancing(positions = positions, colors = colors_rgb) 
+
+
+    #     # ----------------------- vp gt -----------------------
+    #     positions = []
+    #     for n in range(N):
+    #         vp_gt_plot = vp[0, n, vertex_visibility[0, n].astype(np.bool).flatten()]
+    #         vp_gt_plot[..., 0] += 0.8 * n - 1.6
+    #         positions.append(vp_gt_plot)
+    #     positions = np.concatenate(positions, axis=0)
+
+    #     mesh_vp_gt = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vp_gt")
+    #     mesh_vp_gt.add_sphere() 
+    #     mesh_vp_gt.apply_transform(sp.Transforms.Scale(0.005)) 
+    #     mesh_vp_gt.enable_instancing(positions = positions) 
+
+
+
+    #     # ----------------------- vp init pred -----------------------
+    #     if vp_init_pred is not None:
+
+    #         # vp gt overlay 
+    #         positions = []
+    #         for n in range(N):
+    #             vp_gt_plot = vp[0, n, vertex_visibility[0, n].astype(np.bool).flatten()]
+    #             vp_gt_plot[..., 0] += 0.8 * n - 1.6
+    #             vp_gt_plot[..., 1] -= 2.0
+    #             positions.append(vp_gt_plot)
+    #         positions = np.concatenate(positions, axis=0)
+
+    #         mesh_vp_gt_row_2 = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vp_gt_row_2")
+    #         mesh_vp_gt_row_2.add_sphere() 
+    #         mesh_vp_gt_row_2.apply_transform(sp.Transforms.Scale(0.005)) 
+    #         mesh_vp_gt_row_2.enable_instancing(positions = positions) 
+
+    #         # vp init pred 
+    #         positions = []
+    #         colors = []
+    #         for n in range(N):
+    #             vp_init_pred_plot = vp_init_pred[0, n, masks[0, n].astype(np.bool).flatten()]
+    #             vp_init_pred_plot[..., 0] += 0.8 * n - 1.6
+    #             vp_init_pred_plot[..., 1] -= 2.0
+    #             positions.append(vp_init_pred_plot)
+    #             colors.append(color[0, n, masks[0, n].astype(np.bool)].flatten())
+    #         positions = np.concatenate(positions, axis=0)
+    #         colors = np.concatenate(colors, axis=0)
+    #         colors_normalized = colors / colors.max()
+    #         colors_rgb = viridis(colors_normalized)[:, :3] 
+
+    #         mesh_vp_init_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vp_init_pred")
+    #         mesh_vp_init_pred.add_sphere() 
+    #         mesh_vp_init_pred.apply_transform(sp.Transforms.Scale(0.005)) 
+    #         mesh_vp_init_pred.enable_instancing(positions = positions, colors = colors_rgb) 
+
+    #     if vc_init_pred is not None:
+    #         # vc gt overlay 
+    #         positions = []
+    #         for n in range(N):
+    #             vc_gt = vc[0, n, masks[0, n].astype(np.bool)].reshape(-1, 3)
+    #             vc_gt[..., 0] += 2.0
+    #             positions.append(vc_gt)
+    #         positions = np.concatenate(positions, axis=0)
+
+    #         mesh_vc_gt_row_2 = scene.create_mesh(shared_color = sp.Colors.Gray, layer_id = "vc_gt_row_2")
+    #         mesh_vc_gt_row_2.add_sphere() 
+    #         mesh_vc_gt_row_2.apply_transform(sp.Transforms.Scale(0.005)) 
+    #         mesh_vc_gt_row_2.enable_instancing(positions = positions) 
+
+
+
+    #         positions = []
+    #         colors = []
+    #         for n in range(N):
+    #             vc_init_pred_plot = vc_init_pred[0, n, masks[0, n].astype(np.bool).flatten()]
+    #             vc_init_pred_plot[..., 0] += 2.0
+    #             vc_init_pred_plot[..., 1] -= 2.0
+    #             positions.append(vc_init_pred_plot)
+    #             colors.append(color[0, n, masks[0, n].astype(np.bool)].flatten())
+    #         positions = np.concatenate(positions, axis=0)
+    #         colors = np.concatenate(colors, axis=0)
+    #         colors_normalized = colors / colors.max()
+    #         colors_rgb = viridis(colors_normalized)[:, :3] 
+
+    #         mesh_vc_init_pred = scene.create_mesh(shared_color = sp.Color(0,1,0), layer_id = "vc_init_pred")
+    #         mesh_vc_init_pred.add_sphere() 
+    #         mesh_vc_init_pred.apply_transform(sp.Transforms.Scale(0.005)) 
+    #         mesh_vc_init_pred.enable_instancing(positions = positions, colors = colors_rgb) 
+
+
+    #     # ----------------------- canvas -----------------------
+    #     golden_ratio = (1 + np.sqrt(5)) / 2
+    #     canvas = scene.create_canvas_3d(width = 1600, height = 1600 / golden_ratio, shading=sp.Shading(bg_color=sp.Colors.White))
+    #     frame = canvas.create_frame()
+
+    #     frame.add_mesh(mesh_vp_pred)
+    #     frame.add_mesh(mesh_vp_gt)
+
+    #     frame.add_mesh(mesh_vc_pred)
+    #     frame.add_mesh(mesh_vc_gt)
+
+    #     if vp_init_pred is not None:
+    #         frame.add_mesh(mesh_vp_init_pred)
+    #         frame.add_mesh(mesh_vp_gt_row_2)
+    #     if vc_init_pred is not None:
+    #         frame.add_mesh(mesh_vc_init_pred)
+    #         frame.add_mesh(mesh_vc_gt_row_2)
+
+    #     path = os.path.join(self.save_dir, f'{self.global_step:06d}_sp.html')
+
+    #     scene.save_as_html(path)

@@ -102,7 +102,7 @@ class CCH(nn.Module):
 
         # self._count_parameters()
             
-    def forward(self, images, pose=None, joints=None, w_smpl=None, mask=None, gender=None):
+    def forward(self, batch, sapiens=None):
         """
         Given surface normal images, predict the canonical human, and global pose blendshapes for each pose.
         Inputs:
@@ -120,6 +120,14 @@ class CCH(nn.Module):
             vp: (B, K, N, H, W, 3): Posed vertices for the k-th pose
             dvc: pose correctives: (B, K, N, H, W, 3) k-th pose blend shape for all N views 
         """
+        images = batch['imgs']
+        pose = batch['pose']
+        joints = batch['smpl_T_joints']
+        w_smpl = batch['smpl_w_maps']
+        mask = batch['masks']
+        
+
+
         ret = {}
 
         if len(images.shape) == 4:
@@ -133,9 +141,24 @@ class CCH(nn.Module):
         # else:
         #     smpl_model = self.smpl_female
 
+        if sapiens is not None:
+            sapiens_images = batch['sapiens_images']
+            sapiens_images = rearrange(sapiens_images, 'b n c h w -> (b n) c h w')
+            sapiens_features = sapiens(sapiens_images)
+            # sapiens_features = torch.nn.functional.adaptive_avg_pool2d(sapiens_features, (16, 16))
+            sapiens_features = nn.Conv2d(1024, 256, kernel_size=1)(sapiens_features)
+        else:
+            sapiens_features = None
+
+
         aggregated_tokens_list, patch_start_idx = self.aggregator(images) 
 
-        vc_init, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+        # for tokens in aggregated_tokens_list:
+        #     print(tokens.shape) # (4, 4, 261, 768) patch_start_idx = 5, so 256 tokens 16 * 16, img_size 224 * 224, patch_size 14 * 14, 224 / 14 = 16
+        # print(sapiens_features.shape)
+        # import ipdb; ipdb.set_trace()
+
+        vc_init, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, sapiens_features=sapiens_features)
         vc_init = torch.clamp(vc_init, -2, 2)
 
         vc_init = vc_init * mask.unsqueeze(-1) # Mask background pixels to origin, important for backward chamfer metrics

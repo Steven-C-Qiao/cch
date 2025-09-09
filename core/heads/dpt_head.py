@@ -138,6 +138,7 @@ class DPTHead(nn.Module):
         patch_start_idx: int,
         frames_chunk_size: int = 8,
         additional_conditioning: torch.Tensor = None,
+        sapiens_features: torch.Tensor = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Forward pass through the DPT head, supports processing by chunking frames.
@@ -149,6 +150,7 @@ class DPTHead(nn.Module):
             frames_chunk_size (int, optional): Number of frames to process in each chunk.
                 If None or larger than S, all frames are processed at once. Default: 8.
             additional_conditioning (Tensor, optional): Additional conditioning tensor with shape [B, S, C, H, W].
+            sapiens_features: If given, concatenate with the highest resolution features for the final fusion layer.
 
         Returns:
             Tensor or Tuple[Tensor, Tensor]:
@@ -239,7 +241,8 @@ class DPTHead(nn.Module):
 
             x = x.permute(0, 2, 1).reshape((x.shape[0], x.shape[-1], patch_h, patch_w))
 
-            x = self.projects[dpt_idx](x)
+            x = self.projects[dpt_idx](x) 
+
             if self.pos_embed:
                 x = self._apply_pos_embed(x, W, H)
             x = self.resize_layers[dpt_idx](x)
@@ -276,6 +279,7 @@ class DPTHead(nn.Module):
 
         preds = preds.view(B, S, *preds.shape[1:])
         conf = conf.view(B, S, *conf.shape[1:])
+
         return preds, conf
 
     def _apply_pos_embed(self, x: torch.Tensor, W: int, H: int, ratio: float = 0.1) -> torch.Tensor:
@@ -306,6 +310,8 @@ class DPTHead(nn.Module):
         layer_2_rn = self.scratch.layer2_rn(layer_2)
         layer_3_rn = self.scratch.layer3_rn(layer_3)
         layer_4_rn = self.scratch.layer4_rn(layer_4)
+
+        # import ipdb; ipdb.set_trace()
 
         out = self.scratch.refinenet4(layer_4_rn, size=layer_3_rn.shape[2:])
         del layer_4_rn, layer_4

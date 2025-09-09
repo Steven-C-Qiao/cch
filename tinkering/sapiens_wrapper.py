@@ -154,7 +154,7 @@ class SapiensWrapper(nn.Module):
             )  # sapiens is too larger to finetune the model end-to-end.
 
     def _preprocess_image(
-        self, image: torch.tensor, resolution: int = 1024
+        self, image: torch.tensor, resolution: int = 224 # 1024
     ) -> torch.Tensor:
 
         _, __, H, W = image.shape
@@ -228,6 +228,7 @@ class SapiensWrapper(nn.Module):
             raise NotImplementedError("Global feature is not supported yet.")
         else:
             ret = out_local.permute(0, 2, 3, 1).flatten(1, 2)
+            import ipdb; ipdb.set_trace()
 
         return ret
 
@@ -280,10 +281,11 @@ def main():
         dtype = torch.float32  # TorchScript models use float32
         model = model.cuda()
 
-    imgs = torch.randn(2, 3, 1024, 1024).float().cuda()
+    imgs = torch.randn(2, 3, 224, 224).float().cuda()
 
     with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         (results,) = model(imgs.cuda())
+        # (2, 1024, 64, 64)
 
     import ipdb; ipdb.set_trace()
 
