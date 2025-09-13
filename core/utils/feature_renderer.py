@@ -16,12 +16,12 @@ from pytorch3d.renderer import (
 )
 from pytorch3d.renderer.blending import hard_rgb_blend, BlendParams
 
-smpl_model = smplx.create(
-    model_path='model_files',
-    model_type='smpl',
-    gender='neutral',
-)
-smpl_faces = torch.tensor(smpl_model.faces, dtype=torch.int32)
+# smpl_model = smplx.create(
+#     model_path='model_files',
+#     model_type='smpl',
+#     gender='neutral',
+# )
+# smpl_faces = torch.tensor(smpl_model.faces, dtype=torch.int32)
 
 
 

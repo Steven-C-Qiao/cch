@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
+import os 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,6 +16,7 @@ from vggt.layers.block import Block
 from vggt.layers.rope import RotaryPositionEmbedding2D, PositionGetter
 from vggt.layers.vision_transformer import vit_small, vit_base, vit_large, vit_giant2
 from core.utils.ckpt_utils import interpolate_dino_pos_embed, load_and_freeze_pretrained_dinov2
+from core.configs.paths import BASE_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -184,9 +186,10 @@ class Aggregator(nn.Module):
                 init_values=init_values,
             )
 
+
             ckpt_paths = {
-                "dinov2_vitb14_reg": '/scratches/kyuban/cq244/CCH/cch/model_files/dinov2_vitb14_reg4_pretrain.pth',
-                "dinov2_vits14_reg": '/scratches/kyuban/cq244/CCH/cch/model_files/dinov2_vits14_reg4_pretrain.pth',
+                "dinov2_vitb14_reg": os.path.join(BASE_PATH, 'model_files/dinov2_vitb14_reg4_pretrain.pth'),
+                "dinov2_vits14_reg": os.path.join(BASE_PATH, 'model_files/dinov2_vits14_reg4_pretrain.pth'),
             }
             # Load pretrained DINOv2 weights
             load_and_freeze_pretrained_dinov2(self, ckpt_path=ckpt_paths[patch_embed])

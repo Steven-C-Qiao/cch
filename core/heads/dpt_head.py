@@ -311,8 +311,6 @@ class DPTHead(nn.Module):
         layer_3_rn = self.scratch.layer3_rn(layer_3)
         layer_4_rn = self.scratch.layer4_rn(layer_4)
 
-        # import ipdb; ipdb.set_trace()
-
         out = self.scratch.refinenet4(layer_4_rn, size=layer_3_rn.shape[2:])
         del layer_4_rn, layer_4
 

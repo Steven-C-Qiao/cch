@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl 
 import matplotlib.colors
-import scenepic as sp 
+# import scenepic as sp 
 from einops import rearrange
 from collections import defaultdict
 
@@ -20,7 +20,7 @@ class Visualiser(pl.LightningModule):
         self.cfg = cfg
         self.threshold = cfg.LOSS.CONFIDENCE_THRESHOLD if cfg is not None else 100
 
-        self.threshold = 50
+        # self.threshold = 50
 
     def set_global_rank(self, global_rank):
         self.rank = global_rank
@@ -540,13 +540,13 @@ class Visualiser(pl.LightningModule):
 
 
 
-        scatter_mask = batch['masks'][0].astype(np.bool) # nhw
+        scatter_mask = batch['masks'][0].astype(bool) # nhw
         if "vc_conf" in predictions:
             confidence = predictions['vc_conf']
             confidence = confidence > self.threshold
         else:
-            confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(np.bool)
-        scatter_mask = scatter_mask * confidence[0].astype(np.bool)
+            confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
+        scatter_mask = scatter_mask * confidence[0].astype(bool)
         # Color for predicted scatters 
         color = rearrange(batch['imgs'][0], 'n c h w -> n h w c')
         color = color[scatter_mask]
@@ -556,8 +556,9 @@ class Visualiser(pl.LightningModule):
 
 
         def _normalise_to_rgb_range(x, mask):
-            x_min, x_max = -1.4, 1.1 
-            assert x_min <= x.min() and x.max() <= x_max
+            # x_min, x_max = -1.4, 1.1 
+            x_min, x_max = x.min(), x.max()
+            # assert x_min <= x.min() and x.max() <= x_max
             x[~mask.astype(bool)] = 0
             x = (x - x_min) / (x_max - x_min) 
             x[~mask.astype(bool)] = 1

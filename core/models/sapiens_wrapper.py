@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
 
+import os 
+from core.configs.paths import BASE_PATH
+
 from loguru import logger
 
 
@@ -22,7 +25,7 @@ class SapiensWrapper(nn.Module):
 
     @staticmethod
     def _build_sapiens():
-        model = load_model('/scratches/kyuban/cq244/CCH/cch/model_files/sapiens_0.3b_epoch_1600_torchscript.pt2', 
+        model = load_model(os.path.join(BASE_PATH, 'model_files/sapiens_0.3b_epoch_1600_torchscript.pt2'), 
                            use_torchscript=True)
         dtype = torch.float32  # TorchScript models use float32
         model = model.cuda()

@@ -10,6 +10,8 @@ from pytorch3d.renderer import PerspectiveCameras
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import TexturesVertex
 from pytorch3d.ops import sample_points_from_meshes
+from pytorch3d.loss.chamfer import _handle_pointcloud_input
+from pytorch3d.ops.knn import knn_points
 
 from core.configs import paths 
 from core.models.smpl import SMPL
@@ -18,6 +20,38 @@ from core.losses.cch_loss import CCHLoss
 from core.losses.cch_metrics import CCHMetrics
 from core.utils.visualiser import Visualiser
 from core.utils.feature_renderer import FeatureRenderer
+from core.models.sapiens_wrapper import SapiensWrapper
+
+
+model_configs = {
+    'base': {
+        'patch_embed': "dinov2_vitb14_reg",
+        'img_size': 224,
+        'patch_size': 14,
+        'embed_dim': 768,
+        'pbs_embed_dim': 384,
+        'features': 256,
+        'out_channels': [256, 512, 1024, 1024]
+    },
+    'small': {
+        'patch_embed': "dinov2_vits14_reg",
+        'img_size': 224,
+        'patch_size': 14,
+        'embed_dim': 384,
+        'pbs_embed_dim': 384,
+        'features': 128,
+        'out_channels': [96, 192, 384, 768]
+    },
+        'tiny': {
+        'patch_embed': "dinov2_vits14_reg",
+        'img_size': 224,
+        'patch_size': 14,
+        'embed_dim': 384,
+        'pbs_embed_dim': 384,
+        'features': 64,
+        'out_channels': [48, 96, 192, 384]
+    },
+}
 
 class CCHTrainer(pl.LightningModule):
     def __init__(self, 
@@ -56,10 +90,19 @@ class CCHTrainer(pl.LightningModule):
 
         self.parents = self.smpl_male.parents
 
+        if self.use_sapiens:
+            model_cfg = model_configs[cfg.MODEL.SIZE]
+            self.sapiens = SapiensWrapper()
+            for param in self.sapiens.parameters():
+                param.requires_grad = False
+        else:
+            self.sapiens = None
+
         self.model = CCH(
             cfg=cfg,
             smpl_male=self.smpl_male,
             smpl_female=self.smpl_female,
+            sapiens=self.sapiens
         )
 
         self.criterion = CCHLoss(cfg)
@@ -70,15 +113,9 @@ class CCHTrainer(pl.LightningModule):
 
         self.first_batch = None
 
-        if self.use_sapiens:
-            from core.models.sapiens_wrapper import SapiensWrapper
-            self.sapiens = SapiensWrapper()
-        else:
-            self.sapiens = None
-        
 
-    def forward(self, batch, sapiens=None):
-        return self.model(batch, sapiens=sapiens)
+    def forward(self, batch):
+        return self.model(batch)
     
     def on_train_epoch_start(self):
         self.visualiser.set_global_rank(self.global_rank)
@@ -117,8 +154,7 @@ class CCHTrainer(pl.LightningModule):
         # import ipdb; ipdb.set_trace()
     
         preds = self(
-            batch,
-            sapiens=self.sapiens
+            batch
         )
 
         loss, loss_dict = self.criterion(preds, batch)
@@ -436,8 +472,7 @@ class CCHTrainer(pl.LightningModule):
 
 
     def knn_ptcld(self, x, y, K=1):
-        from pytorch3d.loss.chamfer import _handle_pointcloud_input
-        from pytorch3d.ops.knn import knn_points
+        
 
         x_lengths, x_normals = None, None
         y_lengths, y_normals = None, None

@@ -7,6 +7,7 @@ from pytorch3d.structures import Pointclouds
 
 from core.heads.dpt_head import DPTHead
 from core.models.cch_aggregator import Aggregator
+from core.models.sapiens_wrapper import SapiensWrapper
 from core.utils.general_lbs import general_lbs
 
 
@@ -34,7 +35,7 @@ model_configs = {
         'img_size': 224,
         'patch_size': 14,
         'embed_dim': 384,
-        'pbs_embed_dim': 384,
+        'pbs_embed_dim': 192,
         'features': 64,
         'out_channels': [48, 96, 192, 384]
     },
@@ -42,7 +43,7 @@ model_configs = {
 
 
 class CCH(nn.Module):
-    def __init__(self, cfg, smpl_male, smpl_female):
+    def __init__(self, cfg, smpl_male, smpl_female, sapiens=None):
         """
         Given a batch of normal images, predict pixel-aligned canonical space position and uv coordinates
         """
@@ -51,11 +52,19 @@ class CCH(nn.Module):
         self.smpl_female = smpl_female
         self.parents = smpl_male.parents
         self.cfg = cfg
+        self.use_sapiens = cfg.MODEL.USE_SAPIENS
 
         model_cfg = model_configs[cfg.MODEL.SIZE]
 
         self.model_skinning_weights = cfg.MODEL.SKINNING_WEIGHTS
         self.model_pbs = cfg.MODEL.POSE_BLENDSHAPES
+
+        self.sapiens = sapiens
+        if self.sapiens is not None:
+            self.sapiens_project = nn.Conv2d(1024, model_cfg['out_channels'][0], kernel_size=1, stride=1, padding=0)
+            
+
+
 
         self.aggregator = Aggregator(
             img_size=model_cfg['img_size'], 
@@ -102,7 +111,7 @@ class CCH(nn.Module):
 
         # self._count_parameters()
             
-    def forward(self, batch, sapiens=None):
+    def forward(self, batch):
         """
         Given surface normal images, predict the canonical human, and global pose blendshapes for each pose.
         Inputs:
@@ -141,12 +150,12 @@ class CCH(nn.Module):
         # else:
         #     smpl_model = self.smpl_female
 
-        if sapiens is not None:
+        if self.use_sapiens:
             sapiens_images = batch['sapiens_images']
             sapiens_images = rearrange(sapiens_images, 'b n c h w -> (b n) c h w')
-            sapiens_features = sapiens(sapiens_images)
+            sapiens_features = self.sapiens(sapiens_images)
             # sapiens_features = torch.nn.functional.adaptive_avg_pool2d(sapiens_features, (16, 16))
-            sapiens_features = nn.Conv2d(1024, 256, kernel_size=1)(sapiens_features)
+            sapiens_features = self.sapiens_project(sapiens_features)
         else:
             sapiens_features = None
 
@@ -154,7 +163,7 @@ class CCH(nn.Module):
         aggregated_tokens_list, patch_start_idx = self.aggregator(images) 
 
         # for tokens in aggregated_tokens_list:
-        #     print(tokens.shape) # (4, 4, 261, 768) patch_start_idx = 5, so 256 tokens 16 * 16, img_size 224 * 224, patch_size 14 * 14, 224 / 14 = 16
+        #     print(tokens.shape) # (B, S, 256 + 5, 768)
         # print(sapiens_features.shape)
         # import ipdb; ipdb.set_trace()
 
@@ -168,7 +177,7 @@ class CCH(nn.Module):
 
 
         if self.model_skinning_weights:
-            w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, additional_conditioning=vc_init)
+            w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, additional_conditioning=vc_init, sapiens_features=sapiens_features)
             w = F.softmax(w, dim=-1)
         else:
             w, w_conf = w_smpl, None
@@ -202,7 +211,7 @@ class CCH(nn.Module):
             
             pbs_aggregated_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
             
-            dvc, _ = self.pbs_head(pbs_aggregated_tokens_list, images.repeat_interleave(N, dim=0), patch_start_idx=patch_start_idx)
+            dvc, _ = self.pbs_head(pbs_aggregated_tokens_list, images.repeat_interleave(N, dim=0), patch_start_idx=patch_start_idx, sapiens_features=sapiens_features)
             dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
             dvc = rearrange(dvc, '(b k) n h w c -> b k n h w c', b=B, k=N)
 
