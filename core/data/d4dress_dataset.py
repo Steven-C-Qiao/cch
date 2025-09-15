@@ -14,6 +14,7 @@ from torch.utils.data import Dataset
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.structures import Meshes
 from core.configs.paths import BASE_PATH, DATA_PATH as PATH_TO_DATASET
+from core.configs.model_size_cfg import MODEL_CONFIGS
 
 import sys
 sys.path.append('.')
@@ -101,26 +102,18 @@ def d4dress_collate_fn(batch):
     return dict(collated)
 
 
-def sapiens_transform(
-    image: torch.tensor
-) -> torch.tensor:
-    transform = transforms.Compose([
-        transforms.CenterCrop((940, 940)),
-        transforms.Resize((1024, 1024)),
-        transforms.ToTensor(),
-        make_normalize_transform()
-    ])
-    image = transform(image)
 
-    return image
 
 
 
 class D4DressDataset(Dataset):
-    def __init__(self, debug=False):
+    def __init__(self, cfg, debug=False):
         self.debug = debug
+        self.cfg = cfg
         self.num_frames_pp = 4
         self.lengthen_by = 500
+
+        self.img_size = cfg.DATA.IMAGE_SIZE
 
         self.ids = ['00122', '00123', '00127', '00129', '00134', '00135', '00136', '00137', 
                     '00140', '00147', '00148', '00149', '00151', '00152', '00154', '00156', 
@@ -141,7 +134,7 @@ class D4DressDataset(Dataset):
 
         self.transform = transforms.Compose([
             transforms.CenterCrop((940, 940)),
-            transforms.Resize((224, 224)),
+            transforms.Resize((self.img_size, self.img_size)),
             transforms.ToTensor(),
             # make_normalize_transform()
         ])
@@ -319,6 +312,19 @@ class D4DressDataset(Dataset):
         ret['sapiens_images'] = torch.tensor(np.stack(ret['sapiens_images']))
 
         return ret
+
+def sapiens_transform(
+    image: torch.tensor
+) -> torch.tensor:
+    transform = transforms.Compose([
+        transforms.CenterCrop((940, 940)),
+        transforms.Resize((1024, 1024)),
+        transforms.ToTensor(),
+        make_normalize_transform()
+    ])
+    image = transform(image)
+
+    return image
 
 
 

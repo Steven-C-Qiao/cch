@@ -22,64 +22,67 @@ class CCH(nn.Module):
         self.smpl_female = smpl_female
         self.parents = smpl_male.parents
         self.cfg = cfg
+        self.image_size = cfg.DATA.IMAGE_SIZE
         self.use_sapiens = cfg.MODEL.USE_SAPIENS
 
-        model_cfg = MODEL_CONFIGS[cfg.MODEL.SIZE]
+        # model_cfg = MODEL_CONFIGS[cfg.MODEL.SIZE]
+        s1_cfg = MODEL_CONFIGS[cfg.MODEL.CANONICAL_STAGE_SIZE]
+        s2_cfg = MODEL_CONFIGS[cfg.MODEL.PBS_STAGE_SIZE]
 
         self.model_skinning_weights = cfg.MODEL.SKINNING_WEIGHTS
         self.model_pbs = cfg.MODEL.POSE_BLENDSHAPES
 
         self.sapiens = sapiens
         if self.sapiens is not None:
-            self.sapiens_project = nn.Conv2d(1024, model_cfg['out_channels'][0], kernel_size=1, stride=1, padding=0)
+            self.sapiens_project = nn.Conv2d(1024, s1_cfg['out_channels'][0], kernel_size=1, stride=1, padding=0)
 
 
         self.aggregator = Aggregator(
-            img_size=model_cfg['img_size'], 
-            patch_size=model_cfg['patch_size'], 
-            embed_dim=model_cfg['embed_dim'], 
-            patch_embed=model_cfg['patch_embed'],
-            depth=model_cfg['depth']
+            patch_embed=s1_cfg['patch_embed'],
+            img_size=self.image_size, 
+            patch_size=s1_cfg['patch_size'], 
+            embed_dim=s1_cfg['embed_dim'], 
+            depth=s1_cfg['depth']
         )
         self.canonical_head = DPTHead(
-            dim_in=2*model_cfg['embed_dim'], 
+            dim_in=2*s1_cfg['embed_dim'], 
             output_dim=4, 
             activation="inv_log", 
             conf_activation="expp1",
-            out_channels=model_cfg['out_channels'],
-            features=model_cfg['features'],
-            intermediate_layer_idx=model_cfg['intermediate_layer_idx']
+            out_channels=s1_cfg['out_channels'],
+            features=s1_cfg['features'],
+            intermediate_layer_idx=s1_cfg['intermediate_layer_idx']
         )
 
         if self.model_skinning_weights:
             self.skinning_head = DPTHead(
-                dim_in=2*model_cfg['embed_dim'], 
+                dim_in=2*s1_cfg['embed_dim'], 
                 output_dim=25, 
                 activation="inv_log", 
                 conf_activation="expp1", 
                 additional_conditioning_dim=3,
-                out_channels=model_cfg['out_channels'],
-                features=model_cfg['features'],
-                intermediate_layer_idx=model_cfg['intermediate_layer_idx']
+                out_channels=s1_cfg['out_channels'],
+                features=s1_cfg['features'],
+                intermediate_layer_idx=s1_cfg['intermediate_layer_idx']
             )
 
         if self.model_pbs:
             self.pbs_aggregator = Aggregator(
-                img_size=model_cfg['img_size'], 
-                patch_size=model_cfg['patch_size'], 
-                embed_dim=model_cfg['pbs_embed_dim'], 
                 patch_embed="conv", 
                 input_channels=6,
-                depth=model_cfg['depth']
+                img_size=self.image_size, 
+                patch_size=s2_cfg['patch_size'], 
+                embed_dim=s2_cfg['embed_dim'], 
+                depth=s2_cfg['depth']
             )
             self.pbs_head = DPTHead(
-                dim_in=2*model_cfg['pbs_embed_dim'], 
-                output_dim= 3+1, 
+                dim_in=2*s2_cfg['embed_dim'] + 2*s1_cfg['embed_dim'], 
+                output_dim=4, 
                 activation="inv_log", 
                 conf_activation="expp1",
-                out_channels=model_cfg['out_channels'],
-                features=model_cfg['features'],
-                intermediate_layer_idx=model_cfg['intermediate_layer_idx']
+                out_channels=s2_cfg['out_channels'],
+                features=s2_cfg['features'],
+                intermediate_layer_idx=s2_cfg['intermediate_layer_idx']
             )
 
         # self._count_parameters()
@@ -116,13 +119,6 @@ class CCH(nn.Module):
             images = images.unsqueeze(0)
         B, N, C_in, H, W = images.shape
 
-        # assert len(gender) == B and B==1, 'only supporting batch size 1 for now'
-
-        # if gender[0] == 'male':
-        #     smpl_model = self.smpl_male
-        # else:
-        #     smpl_model = self.smpl_female
-
         if self.use_sapiens:
             sapiens_images = batch['sapiens_images']
             sapiens_images = rearrange(sapiens_images, 'b n c h w -> (b n) c h w')
@@ -133,24 +129,19 @@ class CCH(nn.Module):
             sapiens_features = None
 
 
-        aggregated_tokens_list, patch_start_idx = self.aggregator(images) 
+        canonical_aggregated_tokens_list, patch_start_idx = self.aggregator(images) 
 
-        # for tokens in aggregated_tokens_list:
-        #     print(tokens.shape) # (B, S, 256 + 5, 768)
-        # print(sapiens_features.shape)
-        # import ipdb; ipdb.set_trace()
-
-        vc_init, vc_conf = self.canonical_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, sapiens_features=sapiens_features)
+        vc_init, vc_init_conf = self.canonical_head(canonical_aggregated_tokens_list, images, patch_start_idx=patch_start_idx, sapiens_features=sapiens_features)
         vc_init = torch.clamp(vc_init, -2, 2)
 
         vc_init = vc_init * mask.unsqueeze(-1) # Mask background pixels to origin, important for backward chamfer metrics
 
         ret['vc_init'] = vc_init
-        ret['vc_conf'] = vc_conf
+        ret['vc_init_conf'] = vc_init_conf
 
 
         if self.model_skinning_weights:
-            w, w_conf = self.skinning_head(aggregated_tokens_list, images, patch_start_idx=patch_start_idx, additional_conditioning=vc_init, sapiens_features=sapiens_features)
+            w, w_conf = self.skinning_head(canonical_aggregated_tokens_list, images, patch_start_idx=patch_start_idx, additional_conditioning=vc_init, sapiens_features=sapiens_features)
             w = F.softmax(w, dim=-1)
         else:
             w, w_conf = w_smpl, None
@@ -183,10 +174,16 @@ class CCH(nn.Module):
                                               rearrange(vp_init, 'b k n h w c -> (b k) n c h w')], dim=-3).contiguous()
             
             pbs_aggregated_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
+
+
+            # expand aggregated_tokens_list and concat with pbs_aggregated_tokens_list
+            full_tokens_list = [torch.concat([pbs_tokens, agg_tokens.expand(pbs_tokens.shape[0], *agg_tokens.shape[1:])], dim=-1) 
+                                for pbs_tokens, agg_tokens in zip(pbs_aggregated_tokens_list, canonical_aggregated_tokens_list)]
             
-            dvc, _ = self.pbs_head(pbs_aggregated_tokens_list, images.repeat_interleave(N, dim=0), patch_start_idx=patch_start_idx, sapiens_features=sapiens_features)
+            dvc, dvc_conf = self.pbs_head(full_tokens_list, images.repeat_interleave(N, dim=0), patch_start_idx=patch_start_idx, sapiens_features=sapiens_features)
             dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
             dvc = rearrange(dvc, '(b k) n h w c -> b k n h w c', b=B, k=N)
+            dvc_conf = rearrange(dvc_conf, '(b k) n h w -> b k n h w', b=B, k=N)
 
             vc = vc_init_expanded + dvc
 
@@ -204,6 +201,7 @@ class CCH(nn.Module):
             
             ret['vp'] = vp
             ret['dvc'] = dvc
+            ret['dvc_conf'] = dvc_conf
             ret['vc'] = vc
 
 

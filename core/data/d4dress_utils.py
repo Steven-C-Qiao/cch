@@ -6,7 +6,13 @@ from torchvision import transforms
 
 # load data from pkl_dir
 def load_pickle(pkl_dir):
-    return pickle.load(open(pkl_dir, "rb"))
+    with open(pkl_dir, "rb") as f:
+        try:
+            return pickle.load(f)
+        except LookupError as e:
+            # Try with encoding for python2 pickles loaded in python3
+            f.seek(0)
+            return pickle.load(f, encoding="latin1")
 
 # save data to pkl_dir
 def save_pickle(pkl_dir, data):

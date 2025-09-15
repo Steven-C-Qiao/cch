@@ -11,7 +11,7 @@ class CCHDataModule(pl.LightningDataModule):
         self.fraction = 1.0
 
     def setup(self, stage=None):
-        dataset = D4DressDataset()
+        dataset = D4DressDataset(cfg=self.cfg)
         
         self.train_dataset, self.val_dataset = torch.utils.data.random_split(dataset, [0.9, 0.1])
 

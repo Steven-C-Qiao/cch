@@ -109,7 +109,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         # num_nodes=4,
         accelerator='auto',
         devices='auto', 
-        strategy=DDPStrategy(find_unused_parameters=True) if not dev else 'auto',
+        strategy='auto',
         # strategy=DDPStrategy() if not dev else 'auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
@@ -179,7 +179,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f'Device: {device}')
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+    # os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
 
     # device_ids = list(map(int, args.gpus.split(",")))
     # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")

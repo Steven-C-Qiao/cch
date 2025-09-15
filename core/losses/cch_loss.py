@@ -81,7 +81,7 @@ class CCHLoss(pl.LightningModule):
             pred_w = predictions['w']
             gt_w = batch['smpl_w_maps']
             mask = batch['masks']
-            confidence = predictions['vc_conf'] if "vc_conf" in predictions else None
+            confidence = predictions['w_conf'] if "w_conf" in predictions else None
 
             w_loss = self.skinning_weight_loss(
                 gt_w, 
@@ -120,11 +120,12 @@ class CCHLoss(pl.LightningModule):
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp']
             mask = batch['masks']
-            confidence = predictions['vc_conf'] if "vc_conf" in predictions else None
+            confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
 
             mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             if confidence is not None:
-                confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+                # confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+                confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
 
             pred_vp = rearrange(pred_vp, 'b k n h w c -> (b k) (n h w) c')
 

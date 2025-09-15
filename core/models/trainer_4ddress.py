@@ -39,7 +39,7 @@ class CCHTrainer(pl.LightningModule):
         self.use_sapiens = cfg.MODEL.USE_SAPIENS
         self.normalise = cfg.DATA.NORMALISE
         self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 5
-        self.image_size = MODEL_CONFIGS[cfg.MODEL.SIZE]['img_size']
+        self.image_size = cfg.DATA.IMAGE_SIZE
         self.plot = plot
 
         # self.feature_renderer = FeatureRenderer(image_size=(224, 224))
@@ -63,7 +63,6 @@ class CCHTrainer(pl.LightningModule):
         self.parents = self.smpl_male.parents
 
         if self.use_sapiens:
-            model_cfg = MODEL_CONFIGS[cfg.MODEL.SIZE]
             self.sapiens = SapiensWrapper()
             for param in self.sapiens.parameters():
                 param.requires_grad = False
@@ -249,7 +248,7 @@ class CCHTrainer(pl.LightningModule):
         target_size = W 
         crop_amount = (H - target_size) // 2  
         w_maps = w_maps[:, crop_amount:H-crop_amount, :, :]
-        w_maps = torch.nn.functional.interpolate(w_maps.permute(0,3,1,2), size=(224,224), mode='bilinear', align_corners=False)
+        w_maps = torch.nn.functional.interpolate(w_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
         w_maps = rearrange(w_maps, '(b n) j h w -> b n h w j', b=B, n=N)
         
         batch['smpl_w_maps'] = w_maps
@@ -269,12 +268,12 @@ class CCHTrainer(pl.LightningModule):
         target_size = W 
         crop_amount = (H - target_size) // 2  
         vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
-        vc_maps = torch.nn.functional.interpolate(vc_maps.permute(0,3,1,2), size=(224,224), mode='bilinear', align_corners=False)
+        vc_maps = torch.nn.functional.interpolate(vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
         vc_maps = rearrange(vc_maps, '(b n) c h w -> b n h w c', b=B, n=N)
         batch['vc_maps'] = vc_maps
 
         mask = mask[:, crop_amount:H-crop_amount, :, :]
-        mask = torch.nn.functional.interpolate(mask.permute(0,3,1,2), size=(224,224), mode='nearest')
+        mask = torch.nn.functional.interpolate(mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest')
         mask = rearrange(mask, '(b n) c h w -> b n h w c', b=B, n=N)
         batch['smpl_mask'] = mask.squeeze(-1)
 
