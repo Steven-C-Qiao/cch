@@ -9,37 +9,7 @@ from core.heads.dpt_head import DPTHead
 from core.models.cch_aggregator import Aggregator
 from core.models.sapiens_wrapper import SapiensWrapper
 from core.utils.general_lbs import general_lbs
-
-
-model_configs = {
-    'base': {
-        'patch_embed': "dinov2_vitb14_reg",
-        'img_size': 224,
-        'patch_size': 14,
-        'embed_dim': 768,
-        'pbs_embed_dim': 384,
-        'features': 256,
-        'out_channels': [256, 512, 1024, 1024]
-    },
-    'small': {
-        'patch_embed': "dinov2_vits14_reg",
-        'img_size': 224,
-        'patch_size': 14,
-        'embed_dim': 384,
-        'pbs_embed_dim': 384,
-        'features': 128,
-        'out_channels': [96, 192, 384, 768]
-    },
-        'tiny': {
-        'patch_embed': "dinov2_vits14_reg",
-        'img_size': 224,
-        'patch_size': 14,
-        'embed_dim': 384,
-        'pbs_embed_dim': 192,
-        'features': 64,
-        'out_channels': [48, 96, 192, 384]
-    },
-}
+from core.configs.model_size_cfg import MODEL_CONFIGS
 
 
 class CCH(nn.Module):
@@ -54,7 +24,7 @@ class CCH(nn.Module):
         self.cfg = cfg
         self.use_sapiens = cfg.MODEL.USE_SAPIENS
 
-        model_cfg = model_configs[cfg.MODEL.SIZE]
+        model_cfg = MODEL_CONFIGS[cfg.MODEL.SIZE]
 
         self.model_skinning_weights = cfg.MODEL.SKINNING_WEIGHTS
         self.model_pbs = cfg.MODEL.POSE_BLENDSHAPES
@@ -62,15 +32,14 @@ class CCH(nn.Module):
         self.sapiens = sapiens
         if self.sapiens is not None:
             self.sapiens_project = nn.Conv2d(1024, model_cfg['out_channels'][0], kernel_size=1, stride=1, padding=0)
-            
-
 
 
         self.aggregator = Aggregator(
             img_size=model_cfg['img_size'], 
             patch_size=model_cfg['patch_size'], 
             embed_dim=model_cfg['embed_dim'], 
-            patch_embed=model_cfg['patch_embed']
+            patch_embed=model_cfg['patch_embed'],
+            depth=model_cfg['depth']
         )
         self.canonical_head = DPTHead(
             dim_in=2*model_cfg['embed_dim'], 
@@ -78,7 +47,8 @@ class CCH(nn.Module):
             activation="inv_log", 
             conf_activation="expp1",
             out_channels=model_cfg['out_channels'],
-            features=model_cfg['features']
+            features=model_cfg['features'],
+            intermediate_layer_idx=model_cfg['intermediate_layer_idx']
         )
 
         if self.model_skinning_weights:
@@ -89,7 +59,8 @@ class CCH(nn.Module):
                 conf_activation="expp1", 
                 additional_conditioning_dim=3,
                 out_channels=model_cfg['out_channels'],
-                features=model_cfg['features']
+                features=model_cfg['features'],
+                intermediate_layer_idx=model_cfg['intermediate_layer_idx']
             )
 
         if self.model_pbs:
@@ -98,7 +69,8 @@ class CCH(nn.Module):
                 patch_size=model_cfg['patch_size'], 
                 embed_dim=model_cfg['pbs_embed_dim'], 
                 patch_embed="conv", 
-                input_channels=6
+                input_channels=6,
+                depth=model_cfg['depth']
             )
             self.pbs_head = DPTHead(
                 dim_in=2*model_cfg['pbs_embed_dim'], 
@@ -106,7 +78,8 @@ class CCH(nn.Module):
                 activation="inv_log", 
                 conf_activation="expp1",
                 out_channels=model_cfg['out_channels'],
-                features=model_cfg['features']
+                features=model_cfg['features'],
+                intermediate_layer_idx=model_cfg['intermediate_layer_idx']
             )
 
         # self._count_parameters()

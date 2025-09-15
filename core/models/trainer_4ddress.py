@@ -21,37 +21,9 @@ from core.losses.cch_metrics import CCHMetrics
 from core.utils.visualiser import Visualiser
 from core.utils.feature_renderer import FeatureRenderer
 from core.models.sapiens_wrapper import SapiensWrapper
+from core.configs.model_size_cfg import MODEL_CONFIGS
 
 
-model_configs = {
-    'base': {
-        'patch_embed': "dinov2_vitb14_reg",
-        'img_size': 224,
-        'patch_size': 14,
-        'embed_dim': 768,
-        'pbs_embed_dim': 384,
-        'features': 256,
-        'out_channels': [256, 512, 1024, 1024]
-    },
-    'small': {
-        'patch_embed': "dinov2_vits14_reg",
-        'img_size': 224,
-        'patch_size': 14,
-        'embed_dim': 384,
-        'pbs_embed_dim': 384,
-        'features': 128,
-        'out_channels': [96, 192, 384, 768]
-    },
-        'tiny': {
-        'patch_embed': "dinov2_vits14_reg",
-        'img_size': 224,
-        'patch_size': 14,
-        'embed_dim': 384,
-        'pbs_embed_dim': 384,
-        'features': 64,
-        'out_channels': [48, 96, 192, 384]
-    },
-}
 
 class CCHTrainer(pl.LightningModule):
     def __init__(self, 
@@ -67,11 +39,11 @@ class CCHTrainer(pl.LightningModule):
         self.use_sapiens = cfg.MODEL.USE_SAPIENS
         self.normalise = cfg.DATA.NORMALISE
         self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 5
-        self.image_size = cfg.DATA.IMG_SIZE
+        self.image_size = MODEL_CONFIGS[cfg.MODEL.SIZE]['img_size']
         self.plot = plot
 
         # self.feature_renderer = FeatureRenderer(image_size=(224, 224))
-        self.feature_renderer = FeatureRenderer(image_size=(256, 188))
+        self.feature_renderer = FeatureRenderer(image_size=(512, 376)) # fixed according to 4DDress size 1280 * 940, interpolated later to img_size * img_size for CCH input 
 
         self.smpl_male = SMPL(
             model_path=paths.SMPL,
@@ -91,7 +63,7 @@ class CCHTrainer(pl.LightningModule):
         self.parents = self.smpl_male.parents
 
         if self.use_sapiens:
-            model_cfg = model_configs[cfg.MODEL.SIZE]
+            model_cfg = MODEL_CONFIGS[cfg.MODEL.SIZE]
             self.sapiens = SapiensWrapper()
             for param in self.sapiens.parameters():
                 param.requires_grad = False
@@ -253,6 +225,7 @@ class CCHTrainer(pl.LightningModule):
         R = R.view(-1, 3, 3).float()
         T = T.view(-1, 3).float()
         K = K.view(-1, 4, 4).float()
+
         cameras = PerspectiveCameras(
             R=R, T=T, K=K,
             image_size=[(1280, 940)],
@@ -301,7 +274,7 @@ class CCHTrainer(pl.LightningModule):
         batch['vc_maps'] = vc_maps
 
         mask = mask[:, crop_amount:H-crop_amount, :, :]
-        mask = torch.nn.functional.interpolate(mask.permute(0,3,1,2), size=(224,224), mode='bilinear', align_corners=False)
+        mask = torch.nn.functional.interpolate(mask.permute(0,3,1,2), size=(224,224), mode='nearest')
         mask = rearrange(mask, '(b n) c h w -> b n h w c', b=B, n=N)
         batch['smpl_mask'] = mask.squeeze(-1)
 
@@ -526,7 +499,7 @@ class CCHTrainer(pl.LightningModule):
             to_vis = maps.cpu().detach().numpy()
 
         if masks is not None:
-            mask = masks.cpu().detach().numpy().squeeze()
+            mask = masks.cpu().detach().numpy().squeeze(-1)
             to_vis[~mask.astype(bool)] = 0
             norm_min, norm_max = to_vis.min(), to_vis.max()
             to_vis = (to_vis - norm_min) / (norm_max - norm_min) 
@@ -535,17 +508,18 @@ class CCHTrainer(pl.LightningModule):
         import matplotlib.pyplot as plt
         
         fig, axes = plt.subplots(2, 4, figsize=(16, 8))
-        for i in range(2):
+        for i in range(1):
             for j in range(4):
                 idx = i * 4 + j
                 axes[i,j].imshow(to_vis[i, j])
-                axes[i,j].axis('off')
+                # axes[i,j].axis('off')
         
         plt.tight_layout()
         plt.savefig(f'{name}_rendered_maps.png')
         plt.close()
 
-        # import ipdb; ipdb.set_trace()
+        import ipdb; ipdb.set_trace()
+        return None
 
     def _test_sampling(self, scan_mesh_centered, vp_ptcld):
 

@@ -35,7 +35,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None, plot=False):
+def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=None, plot=False):
     set_seed(42)
     
     # Get config
@@ -106,7 +106,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
 
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
-        num_nodes=4,
+        # num_nodes=4,
         accelerator='auto',
         devices='auto', 
         strategy=DDPStrategy(find_unused_parameters=True) if not dev else 'auto',
@@ -179,8 +179,10 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f'Device: {device}')
 
-    device_ids = list(map(int, args.gpus.split(",")))
-    logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+
+    # device_ids = list(map(int, args.gpus.split(",")))
+    # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")
 
     assert ((args.resume_training_states is not None) * (args.load_from_ckpt is not None) == 0), 'Specify either resume_training_states or load_from_ckpt, not both'
 
@@ -189,7 +191,7 @@ if __name__ == '__main__':
         exp_dir=args.experiment_dir,
         cfg_opts=args.cfg_opts,
         dev=args.dev,
-        device_ids=device_ids,
+        # device_ids=device_ids,
         resume_path=args.resume_training_states,
         load_path=args.load_from_ckpt,
         plot=args.plot

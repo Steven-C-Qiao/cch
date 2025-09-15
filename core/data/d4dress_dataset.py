@@ -13,7 +13,7 @@ from torch.utils.data import Dataset
 
 from pytorch3d.ops import sample_points_from_meshes
 from pytorch3d.structures import Meshes
-from core.configs.paths import BASE_PATH
+from core.configs.paths import BASE_PATH, DATA_PATH as PATH_TO_DATASET
 
 import sys
 sys.path.append('.')
@@ -21,7 +21,7 @@ sys.path.append('.')
 from core.data.d4dress_utils import load_pickle, load_image, rotation_matrix, d4dress_cameras_to_pytorch3d_cameras
 
 
-PATH_TO_DATASET = os.path.join(BASE_PATH, "4DDress")
+# PATH_TO_DATASET = os.path.join(BASE_PATH, "4DDress")
 
 """
 4D-DRESS
@@ -125,7 +125,8 @@ class D4DressDataset(Dataset):
         self.ids = ['00122', '00123', '00127', '00129', '00134', '00135', '00136', '00137', 
                     '00140', '00147', '00148', '00149', '00151', '00152', '00154', '00156', 
                     '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175', 
-                    '00176', '00179', '00180', '00185', '00187', '00188', '00190', '00191']        
+                    '00176', '00179', '00180', '00185', '00187', '00190']    
+        # self.exclude_ids = ['00188', '00191']    
         self.layer = 'Inner'
         self.camera_ids = ['0004', '0028', '0052', '0076']
 
@@ -189,7 +190,7 @@ class D4DressDataset(Dataset):
             clothing_mesh = upper_mesh
         full_mesh = trimesh.util.concatenate([body_mesh, clothing_mesh])
 
-        visibility_path = os.path.join('/home/u5au/chexuan.u5au/cch/model_files/4DDress_visible_vertices', f'{id}.npy')
+        visibility_path = os.path.join(BASE_PATH, 'model_files/4DDress_visible_vertices', f'{id}.npy')
         visible_vertices = np.load(visibility_path)
         naked_vertices = body_mesh.vertices 
         clothing_vertices = clothing_mesh.vertices

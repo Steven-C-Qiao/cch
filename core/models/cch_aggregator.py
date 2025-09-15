@@ -190,6 +190,7 @@ class Aggregator(nn.Module):
             ckpt_paths = {
                 "dinov2_vitb14_reg": os.path.join(BASE_PATH, 'model_files/dinov2_vitb14_reg4_pretrain.pth'),
                 "dinov2_vits14_reg": os.path.join(BASE_PATH, 'model_files/dinov2_vits14_reg4_pretrain.pth'),
+                "dinov2_vitl14_reg": os.path.join(BASE_PATH, 'model_files/dinov2_vitl14_reg4_pretrain.pth'),
             }
             # Load pretrained DINOv2 weights
             load_and_freeze_pretrained_dinov2(self, ckpt_path=ckpt_paths[patch_embed])
