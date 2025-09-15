@@ -147,7 +147,7 @@ class CCH(nn.Module):
             w, w_conf = w_smpl, None
 
         ret['w'] = w
-        ret['w_conf'] = w_conf
+        ret['w_conf'] = vc_init_conf #w_conf
 
 
         vc_init_expanded = vc_init.unsqueeze(1).repeat(1, N, 1, 1, 1, 1) # (B, K, N, H, W, 3)

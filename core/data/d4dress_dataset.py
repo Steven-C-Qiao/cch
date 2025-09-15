@@ -111,7 +111,7 @@ class D4DressDataset(Dataset):
         self.debug = debug
         self.cfg = cfg
         self.num_frames_pp = 4
-        self.lengthen_by = 500
+        self.lengthen_by = 1000
 
         self.img_size = cfg.DATA.IMAGE_SIZE
 
@@ -135,6 +135,12 @@ class D4DressDataset(Dataset):
         self.transform = transforms.Compose([
             transforms.CenterCrop((940, 940)),
             transforms.Resize((self.img_size, self.img_size)),
+            transforms.ToTensor(),
+            # make_normalize_transform()
+        ])
+        self.mask_transform = transforms.Compose([
+            transforms.CenterCrop((940, 940)),
+            transforms.Resize((self.img_size, self.img_size), interpolation=Image.NEAREST),
             transforms.ToTensor(),
             # make_normalize_transform()
         ])
@@ -290,7 +296,7 @@ class D4DressDataset(Dataset):
             
             # Apply transforms
             img_transformed = self.normalise(self.transform(img_pil))
-            mask_transformed = self.transform(mask_pil).squeeze()
+            mask_transformed = self.mask_transform(mask_pil).squeeze()
 
             sapiens_image = sapiens_transform(img_pil)
 

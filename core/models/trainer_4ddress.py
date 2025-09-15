@@ -98,35 +98,8 @@ class CCHTrainer(pl.LightningModule):
             batch = self.first_batch
 
         batch = self._process_inputs(batch, batch_idx, normalise=self.normalise)
-
-
-        # import matplotlib.pyplot as plt
-        
-        # B, N = batch['imgs'].shape[:2]
-        # fig, axes = plt.subplots(B, N, figsize=(4*N, 4*B))
-        
-        # # Handle single batch/frame case
-        # if B == 1 and N == 1:
-        #     axes = np.array([[axes]])
-        # elif B == 1:
-        #     axes = axes[None, :]
-        # elif N == 1: 
-        #     axes = axes[:, None]
-            
-        # for b in range(B):
-        #     for n in range(N):
-        #         img = batch['imgs'][b,n].detach().cpu().permute(1,2,0).numpy()
-        #         axes[b,n].imshow(img)
-        #         # axes[b,n].axis('off')
-                
-        # plt.tight_layout()
-        # plt.show()
-        # plt.savefig('test_input_images.png')
-        # import ipdb; ipdb.set_trace()
     
-        preds = self(
-            batch
-        )
+        preds = self(batch)
 
         loss, loss_dict = self.criterion(preds, batch)
 

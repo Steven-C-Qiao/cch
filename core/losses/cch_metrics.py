@@ -36,6 +36,8 @@ class CCHMetrics(pl.LightningModule):
             pred_vc = rearrange(pred_vc, 'b n h w c -> b (n h w) c')
             mask = rearrange(mask, 'b n h w -> b (n h w)')
 
+            
+
             vc_cfd, _, _ = self.masked_metric_cfd(gt_vc, pred_vc, mask)
             ret['vc_cfd'] = vc_cfd
         
