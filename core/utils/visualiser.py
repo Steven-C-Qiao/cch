@@ -150,10 +150,10 @@ class Visualiser(pl.LightningModule):
             vc_init = (vc_init - norm_min) / (norm_max - norm_min) 
             vc_init[~mask.astype(bool)] = 1
         
-        if 'vc_conf' in predictions:
+        if 'vc_init_conf' in predictions:
             num_rows += 1
-            vc_conf = predictions['vc_conf']
-            vc_conf = vc_conf * mask 
+            vc_init_conf = predictions['vc_init_conf']
+            vc_init_conf = vc_init_conf * mask 
 
         if 'vc_maps' in batch:
             num_rows += 1
@@ -196,9 +196,9 @@ class Visualiser(pl.LightningModule):
                 plt.title(f'$V_c$ init {n}')
                 row += 1
 
-            if 'vc_conf' in predictions:
+            if 'vc_init_conf' in predictions:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-                plt.imshow(vc_conf[0, n])
+                plt.imshow(vc_init_conf[0, n])
                 plt.title(f'$V_c$ conf {n}')
                 if n == 3:
                     plt.colorbar()
@@ -352,8 +352,8 @@ class Visualiser(pl.LightningModule):
 
 
         mask = batch['masks'][0].astype(np.bool) # nhw
-        if "vc_conf" in predictions:
-            confidence = predictions['vc_conf']
+        if "vc_init_conf" in predictions:
+            confidence = predictions['vc_init_conf']
             confidence = confidence > self.threshold
         else:
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(np.bool)
@@ -541,8 +541,8 @@ class Visualiser(pl.LightningModule):
 
 
         scatter_mask = batch['masks'][0].astype(bool) # nhw
-        if "vc_conf" in predictions:
-            confidence = predictions['vc_conf']
+        if "vc_init_conf" in predictions:
+            confidence = predictions['vc_init_conf']
             confidence = confidence > self.threshold
         else:
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
@@ -594,9 +594,9 @@ class Visualiser(pl.LightningModule):
         if 'vc_init' in predictions:
             vc_init = _normalise_to_rgb_range(predictions['vc_init'], mask)
         
-        if 'vc_conf' in predictions:
-            vc_conf = predictions['vc_conf']
-            vc_conf = vc_conf * mask 
+        if 'vc_init_conf' in predictions:
+            vc_init_conf = predictions['vc_init_conf']
+            vc_init_conf = vc_init_conf * mask 
 
         if 'vc_maps' in batch:
             vc_maps = _normalise_to_rgb_range(batch['vc_maps'], batch['smpl_mask'])

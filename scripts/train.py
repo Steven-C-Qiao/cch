@@ -113,7 +113,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         # strategy=DDPStrategy() if not dev else 'auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
-        log_every_n_steps=100,
+        log_every_n_steps=50,
         gradient_clip_val=1.0,
         # enable_progress_bar=False,
     )

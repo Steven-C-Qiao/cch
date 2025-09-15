@@ -9,6 +9,8 @@
 
 source ~/miniforge3/bin/activate dev
 
+nvidia-smi
+
 # export NCCL_DEBUG=INFO
 
-srun python3 scripts/train.py -E exp/exp_002_bb
+srun python3 scripts/train.py -E exp/exp_002_bb -R exp/exp_002_bb/saved_models/vc_cfd_epoch=000.ckpt
