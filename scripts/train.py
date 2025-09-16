@@ -106,16 +106,15 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
 
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
-        # num_nodes=4,
+        num_nodes=1,
         accelerator='auto',
         devices='auto', 
         strategy='auto',
         # strategy=DDPStrategy() if not dev else 'auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
-        log_every_n_steps=50,
+        log_every_n_steps=10,
         gradient_clip_val=1.0,
-        # enable_progress_bar=False,
     )
 
 
@@ -179,7 +178,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f'Device: {device}')
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+    # os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
 
     # device_ids = list(map(int, args.gpus.split(",")))
     # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")

@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH --job-name=exp_003
-#SBATCH --output=exp/exp_003_bb_224/exp_003_%j.out
-#SBATCH --nodes=4
+#SBATCH --job-name=exp_005
+#SBATCH --output=exp/exp_005_bb_sapiens/exp_005_%j.out
+#SBATCH --nodes=1
 #SBATCH --gpus-per-node=4
 #SBATCH --ntasks-per-node=4
 #SBATCH --time=1-00:00:00 
@@ -13,4 +13,4 @@ nvidia-smi
 
 # export NCCL_DEBUG=INFO
 
-srun python3 scripts/train.py -E exp/exp_003_bb_224
+srun python3 scripts/train.py -E exp/exp_005_bb_sapiens 

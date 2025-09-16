@@ -121,16 +121,19 @@ class CCH(nn.Module):
             images = images.unsqueeze(0)
         B, N, C_in, H, W = images.shape
 
+
+        canonical_tokens_list, patch_start_idx = self.aggregator(images) 
+
+
         if self.use_sapiens:
             sapiens_images = batch['sapiens_images']
             sapiens_images = rearrange(sapiens_images, 'b n c h w -> (b n) c h w')
             sapiens_tokens = self.sapiens(sapiens_images)
             sapiens_tokens = rearrange(sapiens_tokens, '(b n) p c -> b n p c', b=B, n=N)
-
-        canonical_aggregated_tokens_list, patch_start_idx = self.aggregator(images) 
+            sapiens_tokens_list = [sapiens_tokens] * len(canonical_tokens_list)
 
         if self.use_sapiens:
-            canonical_aggregated_tokens_list = [
+            canonical_sapiens_tokens_list = [
                 torch.concat(
                     [
                         canonical_tokens, 
@@ -138,10 +141,12 @@ class CCH(nn.Module):
                     ], 
                     dim=-1
                 ) 
-                for canonical_tokens, sapiens_tokens in zip(canonical_aggregated_tokens_list, sapiens_tokens)
+                for canonical_tokens, sapiens_tokens in zip(canonical_tokens_list, sapiens_tokens_list)
             ]
+        else:
+            canonical_sapiens_tokens_list = canonical_tokens_list
 
-        vc_init, vc_init_conf = self.canonical_head(canonical_aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
+        vc_init, vc_init_conf = self.canonical_head(canonical_sapiens_tokens_list, images, patch_start_idx=patch_start_idx)
         vc_init = torch.clamp(vc_init, -2, 2)
 
         vc_init = vc_init * mask.unsqueeze(-1) # Mask background pixels to origin, important for backward chamfer metrics
@@ -151,7 +156,7 @@ class CCH(nn.Module):
 
 
         if self.model_skinning_weights:
-            w, w_conf = self.skinning_head(canonical_aggregated_tokens_list, images, patch_start_idx=patch_start_idx, additional_conditioning=vc_init)
+            w, w_conf = self.skinning_head(canonical_sapiens_tokens_list, images, patch_start_idx=patch_start_idx, additional_conditioning=vc_init)
             w = F.softmax(w, dim=-1)
         else:
             w, w_conf = w_smpl, None
@@ -183,26 +188,32 @@ class CCH(nn.Module):
             pbs_aggregator_input = torch.cat([rearrange(vc_init_expanded, 'b k n h w c -> (b k) n c h w'),
                                               rearrange(vp_init, 'b k n h w c -> (b k) n c h w')], dim=-3).contiguous()
             
-            pbs_aggregated_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
+            pbs_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
 
             if self.use_sapiens:
                 full_tokens_list = [
                     torch.concat(
                         [
                             pbs_tokens, 
-                            agg_tokens.expand(pbs_tokens.shape[0], *agg_tokens.shape[1:]),
-                            sapiens_tokens.expand(pbs_tokens.shape[0], *sapiens_tokens.shape[1:])
+                            agg_tokens.repeat_interleave(4, dim=0),
+                            sapiens_tokens.repeat_interleave(4, dim=0)
                         ],
                         dim=-1
                     ) 
-                    for pbs_tokens, agg_tokens, sapiens_tokens in zip(pbs_aggregated_tokens_list, canonical_aggregated_tokens_list, sapiens_tokens)
-                ] # Note the sapiens_tokens is passed as is each time, not expanded 
+                    for pbs_tokens, agg_tokens, sapiens_tokens in zip(pbs_tokens_list, canonical_tokens_list, sapiens_tokens_list)
+                ]
             else:
-                # expand aggregated_tokens_list and concat with pbs_aggregated_tokens_list
-                full_tokens_list = [torch.concat([pbs_tokens, 
-                                                agg_tokens.expand(pbs_tokens.shape[0], *agg_tokens.shape[1:])], dim=-1) 
-                                    for pbs_tokens, agg_tokens in zip(pbs_aggregated_tokens_list, canonical_aggregated_tokens_list)]
-            
+                full_tokens_list = [
+                    torch.concat(
+                        [
+                            pbs_tokens, 
+                            agg_tokens.repeat_interleave(4, dim=0)
+                        ], 
+                        dim=-1
+                    ) 
+                    for pbs_tokens, agg_tokens in zip(pbs_tokens_list, canonical_tokens_list)
+                ]
+
             dvc, dvc_conf = self.pbs_head(full_tokens_list, images.repeat_interleave(N, dim=0), patch_start_idx=patch_start_idx)
             dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
             dvc = rearrange(dvc, '(b k) n h w c -> b k n h w c', b=B, k=N)
