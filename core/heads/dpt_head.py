@@ -138,7 +138,6 @@ class DPTHead(nn.Module):
         patch_start_idx: int,
         frames_chunk_size: int = 8,
         additional_conditioning: torch.Tensor = None,
-        sapiens_features: torch.Tensor = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Forward pass through the DPT head, supports processing by chunking frames.
@@ -150,7 +149,6 @@ class DPTHead(nn.Module):
             frames_chunk_size (int, optional): Number of frames to process in each chunk.
                 If None or larger than S, all frames are processed at once. Default: 8.
             additional_conditioning (Tensor, optional): Additional conditioning tensor with shape [B, S, C, H, W].
-            sapiens_features: If given, concatenate with the highest resolution features for the final fusion layer.
 
         Returns:
             Tensor or Tuple[Tensor, Tensor]:

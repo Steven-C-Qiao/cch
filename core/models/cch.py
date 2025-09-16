@@ -13,7 +13,7 @@ from core.configs.model_size_cfg import MODEL_CONFIGS
 
 
 class CCH(nn.Module):
-    def __init__(self, cfg, smpl_male, smpl_female, sapiens=None):
+    def __init__(self, cfg, smpl_male, smpl_female):
         """
         Given a batch of normal images, predict pixel-aligned canonical space position and uv coordinates
         """
@@ -32,10 +32,12 @@ class CCH(nn.Module):
         self.model_skinning_weights = cfg.MODEL.SKINNING_WEIGHTS
         self.model_pbs = cfg.MODEL.POSE_BLENDSHAPES
 
-        self.sapiens = sapiens
-        if self.sapiens is not None:
-            self.sapiens_project = nn.Conv2d(1024, s1_cfg['out_channels'][0], kernel_size=1, stride=1, padding=0)
-
+        if self.use_sapiens:
+            sapiens_embed_dim = 512
+            interpolation_size = self.cfg.DATA.IMAGE_SIZE // s1_cfg['patch_size']
+            self.sapiens = SapiensWrapper(project_dim=sapiens_embed_dim, interpolate_size=(interpolation_size, interpolation_size))
+        else:
+            sapiens_embed_dim = 0
 
         self.aggregator = Aggregator(
             patch_embed=s1_cfg['patch_embed'],
@@ -45,7 +47,7 @@ class CCH(nn.Module):
             depth=s1_cfg['depth']
         )
         self.canonical_head = DPTHead(
-            dim_in=2*s1_cfg['embed_dim'], 
+            dim_in=2*s1_cfg['embed_dim'] + sapiens_embed_dim, 
             output_dim=4, 
             activation="inv_log", 
             conf_activation="expp1",
@@ -56,7 +58,7 @@ class CCH(nn.Module):
 
         if self.model_skinning_weights:
             self.skinning_head = DPTHead(
-                dim_in=2*s1_cfg['embed_dim'], 
+                dim_in=2*s1_cfg['embed_dim'] + sapiens_embed_dim, 
                 output_dim=25, 
                 activation="inv_log", 
                 conf_activation="expp1", 
@@ -76,7 +78,7 @@ class CCH(nn.Module):
                 depth=s2_cfg['depth']
             )
             self.pbs_head = DPTHead(
-                dim_in=2*s2_cfg['embed_dim'] + 2*s1_cfg['embed_dim'], 
+                dim_in=2*s2_cfg['embed_dim'] + 2*s1_cfg['embed_dim'] + sapiens_embed_dim, 
                 output_dim=4, 
                 activation="inv_log", 
                 conf_activation="expp1",
@@ -122,16 +124,24 @@ class CCH(nn.Module):
         if self.use_sapiens:
             sapiens_images = batch['sapiens_images']
             sapiens_images = rearrange(sapiens_images, 'b n c h w -> (b n) c h w')
-            sapiens_features = self.sapiens(sapiens_images)
-            # sapiens_features = torch.nn.functional.adaptive_avg_pool2d(sapiens_features, (16, 16))
-            sapiens_features = self.sapiens_project(sapiens_features)
-        else:
-            sapiens_features = None
-
+            sapiens_tokens = self.sapiens(sapiens_images)
+            sapiens_tokens = rearrange(sapiens_tokens, '(b n) p c -> b n p c', b=B, n=N)
 
         canonical_aggregated_tokens_list, patch_start_idx = self.aggregator(images) 
 
-        vc_init, vc_init_conf = self.canonical_head(canonical_aggregated_tokens_list, images, patch_start_idx=patch_start_idx, sapiens_features=sapiens_features)
+        if self.use_sapiens:
+            canonical_aggregated_tokens_list = [
+                torch.concat(
+                    [
+                        canonical_tokens, 
+                        sapiens_tokens
+                    ], 
+                    dim=-1
+                ) 
+                for canonical_tokens, sapiens_tokens in zip(canonical_aggregated_tokens_list, sapiens_tokens)
+            ]
+
+        vc_init, vc_init_conf = self.canonical_head(canonical_aggregated_tokens_list, images, patch_start_idx=patch_start_idx)
         vc_init = torch.clamp(vc_init, -2, 2)
 
         vc_init = vc_init * mask.unsqueeze(-1) # Mask background pixels to origin, important for backward chamfer metrics
@@ -141,7 +151,7 @@ class CCH(nn.Module):
 
 
         if self.model_skinning_weights:
-            w, w_conf = self.skinning_head(canonical_aggregated_tokens_list, images, patch_start_idx=patch_start_idx, additional_conditioning=vc_init, sapiens_features=sapiens_features)
+            w, w_conf = self.skinning_head(canonical_aggregated_tokens_list, images, patch_start_idx=patch_start_idx, additional_conditioning=vc_init)
             w = F.softmax(w, dim=-1)
         else:
             w, w_conf = w_smpl, None
@@ -175,12 +185,25 @@ class CCH(nn.Module):
             
             pbs_aggregated_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
 
-
-            # expand aggregated_tokens_list and concat with pbs_aggregated_tokens_list
-            full_tokens_list = [torch.concat([pbs_tokens, agg_tokens.expand(pbs_tokens.shape[0], *agg_tokens.shape[1:])], dim=-1) 
-                                for pbs_tokens, agg_tokens in zip(pbs_aggregated_tokens_list, canonical_aggregated_tokens_list)]
+            if self.use_sapiens:
+                full_tokens_list = [
+                    torch.concat(
+                        [
+                            pbs_tokens, 
+                            agg_tokens.expand(pbs_tokens.shape[0], *agg_tokens.shape[1:]),
+                            sapiens_tokens.expand(pbs_tokens.shape[0], *sapiens_tokens.shape[1:])
+                        ],
+                        dim=-1
+                    ) 
+                    for pbs_tokens, agg_tokens, sapiens_tokens in zip(pbs_aggregated_tokens_list, canonical_aggregated_tokens_list, sapiens_tokens)
+                ] # Note the sapiens_tokens is passed as is each time, not expanded 
+            else:
+                # expand aggregated_tokens_list and concat with pbs_aggregated_tokens_list
+                full_tokens_list = [torch.concat([pbs_tokens, 
+                                                agg_tokens.expand(pbs_tokens.shape[0], *agg_tokens.shape[1:])], dim=-1) 
+                                    for pbs_tokens, agg_tokens in zip(pbs_aggregated_tokens_list, canonical_aggregated_tokens_list)]
             
-            dvc, dvc_conf = self.pbs_head(full_tokens_list, images.repeat_interleave(N, dim=0), patch_start_idx=patch_start_idx, sapiens_features=sapiens_features)
+            dvc, dvc_conf = self.pbs_head(full_tokens_list, images.repeat_interleave(N, dim=0), patch_start_idx=patch_start_idx)
             dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
             dvc = rearrange(dvc, '(b k) n h w c -> b k n h w c', b=B, k=N)
             dvc_conf = rearrange(dvc_conf, '(b k) n h w -> b k n h w', b=B, k=N)

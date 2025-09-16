@@ -61,19 +61,11 @@ class CCHTrainer(pl.LightningModule):
             param.requires_grad = False
 
         self.parents = self.smpl_male.parents
-
-        if self.use_sapiens:
-            self.sapiens = SapiensWrapper()
-            for param in self.sapiens.parameters():
-                param.requires_grad = False
-        else:
-            self.sapiens = None
-
+        
         self.model = CCH(
             cfg=cfg,
             smpl_male=self.smpl_male,
             smpl_female=self.smpl_female,
-            sapiens=self.sapiens
         )
 
         self.criterion = CCHLoss(cfg)

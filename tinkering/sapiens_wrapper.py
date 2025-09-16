@@ -281,7 +281,7 @@ def main():
         dtype = torch.float32  # TorchScript models use float32
         model = model.cuda()
 
-    imgs = torch.randn(2, 3, 224, 224).float().cuda()
+    imgs = torch.randn(2, 3, 1024, 1024).float().cuda()
 
     with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
         (results,) = model(imgs.cuda())
