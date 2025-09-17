@@ -15,7 +15,7 @@ class CCHMetrics(pl.LightningModule):
         ret = {}
 
         B, N, H, W, _ = predictions['vc_init'].shape
-        K = N 
+        K = 5
 
         if "vc_conf" in predictions:
             confidence = predictions['vc_conf']
@@ -23,7 +23,7 @@ class CCHMetrics(pl.LightningModule):
         else:
             confidence = torch.ones_like(predictions['vc_init'])[..., 0].bool()
 
-        assert confidence.shape == batch['masks'].shape
+        assert confidence.shape == batch['masks'][:, :N].shape
 
 
         if "vc_init" in predictions:
@@ -31,20 +31,19 @@ class CCHMetrics(pl.LightningModule):
                 points=batch['template_mesh_verts']
             )
             pred_vc = predictions['vc_init']
-            mask = batch['masks'] * confidence 
+            mask = batch['masks'][:, :N] * confidence 
 
             pred_vc = rearrange(pred_vc, 'b n h w c -> b (n h w) c')
             mask = rearrange(mask, 'b n h w -> b (n h w)')
 
-            
-
             vc_cfd, _, _ = self.masked_metric_cfd(gt_vc, pred_vc, mask)
             ret['vc_cfd'] = vc_cfd
+
         
         if "vp_init" in predictions:
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp_init']
-            mask = batch['masks'] * confidence 
+            mask = batch['masks'][:, :N] * confidence 
 
             pred_vp = rearrange(pred_vp, 'b k n h w c -> (b k) (n h w) c')
             mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
@@ -55,7 +54,7 @@ class CCHMetrics(pl.LightningModule):
         if "vp" in predictions:
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp']
-            mask = batch['masks'] * confidence 
+            mask = batch['masks'][:, :N] * confidence 
 
             pred_vp = rearrange(pred_vp, 'b k n h w c -> (b k) (n h w) c')
             mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')

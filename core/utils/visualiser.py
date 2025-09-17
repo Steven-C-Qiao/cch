@@ -128,6 +128,8 @@ class Visualiser(pl.LightningModule):
         B, N, H, W, C = predictions['vc_init'].shape
         mask = batch['masks']
 
+        mask_N = mask[:, :N]
+
         B = 1
         N = min(N, 4)
         sub_fig_size = 4
@@ -144,16 +146,16 @@ class Visualiser(pl.LightningModule):
         if 'vc_init' in predictions:
             num_rows += 1
             vc_init = predictions['vc_init']
-            vc_init[~mask.astype(bool)] = 0
+            vc_init[~mask_N.astype(bool)] = 0
 
             norm_min, norm_max = vc_init.min(), vc_init.max()
             vc_init = (vc_init - norm_min) / (norm_max - norm_min) 
-            vc_init[~mask.astype(bool)] = 1
+            vc_init[~mask_N.astype(bool)] = 1
         
         if 'vc_init_conf' in predictions:
             num_rows += 1
             vc_init_conf = predictions['vc_init_conf']
-            vc_init_conf = vc_init_conf * mask 
+            vc_init_conf = vc_init_conf * mask_N 
 
         if 'vc_maps' in batch:
             num_rows += 1
@@ -171,7 +173,7 @@ class Visualiser(pl.LightningModule):
             num_rows += 1
             w = predictions['w']
             w = np.argmax(w, axis=-1)
-            w = w * mask 
+            w = w * mask_N 
 
     
         fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
@@ -234,8 +236,8 @@ class Visualiser(pl.LightningModule):
     ):
         
         B, N, H, W, C = predictions['vc_init'].shape
-        K = N 
-        mask = np.repeat(batch['masks'][:, None], K, axis=1) # B, K, N, H, W
+        K = 5 
+        mask = np.repeat(batch['masks'][:, :N][:, None], K, axis=1) # B, K, N, H, W
 
         B = 1
         N = min(N, 4)
@@ -531,16 +533,15 @@ class Visualiser(pl.LightningModule):
         gt_alpha, pred_alpha = 0.5, 0.5
 
         B, N, H, W, C = predictions['vc_init'].shape
-        K = N
+        K = 5
 
         mask = batch['masks']
+        mask_N = mask[:, :N]
 
         num_rows = 0
 
 
-
-
-        scatter_mask = batch['masks'][0].astype(bool) # nhw
+        scatter_mask = mask_N[0].astype(bool) # nhw
         if "vc_init_conf" in predictions:
             confidence = predictions['vc_init_conf']
             confidence = confidence > self.threshold
@@ -548,7 +549,7 @@ class Visualiser(pl.LightningModule):
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
         scatter_mask = scatter_mask * confidence[0].astype(bool)
         # Color for predicted scatters 
-        color = rearrange(batch['imgs'][0], 'n c h w -> n h w c')
+        color = rearrange(batch['imgs'][0, :N], 'n c h w -> n h w c')
         color = color[scatter_mask]
         color = (color * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
         color = color.astype(np.float32)
@@ -592,11 +593,11 @@ class Visualiser(pl.LightningModule):
             images = images.astype(np.float32)
 
         if 'vc_init' in predictions:
-            vc_init = _normalise_to_rgb_range(predictions['vc_init'], mask)
+            vc_init = _normalise_to_rgb_range(predictions['vc_init'], mask_N)
         
         if 'vc_init_conf' in predictions:
             vc_init_conf = predictions['vc_init_conf']
-            vc_init_conf = vc_init_conf * mask 
+            vc_init_conf = vc_init_conf * mask_N
 
         if 'vc_maps' in batch:
             vc_maps = _normalise_to_rgb_range(batch['vc_maps'], batch['smpl_mask'])
@@ -607,10 +608,10 @@ class Visualiser(pl.LightningModule):
         if "w" in predictions:
             w = predictions['w']
             w = np.argmax(w, axis=-1)
-            w = w * mask 
+            w = w * mask_N
 
         # ---------------------- Blendshape stage ----------------------
-        mask = np.repeat(mask[:, None, :, :], K, axis=1) # B, K, N, H, W 
+        mask = np.repeat(mask_N[:, None, :, :], K, axis=1) # B, K, N, H, W 
     
         if 'vp_init' in predictions:
             vp_init = _normalise_to_rgb_range(predictions['vp_init'], mask)

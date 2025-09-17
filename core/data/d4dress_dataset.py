@@ -166,12 +166,11 @@ class D4DressDataset(Dataset):
         gender = basic_info['gender'] # is str
         ret['gender'] = gender
         scan_frames, scan_rotation = basic_info['scan_frames'], basic_info['rotation']
-        sampled_frames = np.random.choice(scan_frames, size=self.num_frames_pp, replace=False)
+        sampled_frames = np.random.choice(scan_frames, size=self.num_frames_pp + 1, replace=False)
         
-        
-        sampled_cameras = self.camera_ids # np.random.permutation(self.cameras)
+        sampled_cameras = self.camera_ids + [np.random.choice(self.camera_ids, size=1, replace=False).item()]
         camera_params = load_pickle(os.path.join(take_dir, 'Capture', 'cameras.pkl'))
-        R, T, K = d4dress_cameras_to_pytorch3d_cameras(camera_params)
+        R, T, K = d4dress_cameras_to_pytorch3d_cameras(camera_params, sampled_cameras)
         ret['R'] = R
         ret['T'] = T
         ret['K'] = K
@@ -252,35 +251,13 @@ class D4DressDataset(Dataset):
             scan_mesh_fname = os.path.join(take_dir, 'Meshes_pkl', 'mesh-f{}.pkl'.format(sampled_frame))
             scan_mesh = load_pickle(scan_mesh_fname)
             scan_mesh['uv_path'] = scan_mesh_fname.replace('mesh-f', 'atlas-f')
-            if 'colors' not in scan_mesh:
-                print(f"No colors in scan_mesh: {scan_mesh_fname}")
-                assert False
 
-                # load atlas data
-                atlas_data = load_pickle(scan_mesh['uv_path'])
-                # load scan uv_coordinate and uv_image as TextureVisuals
-                uv_image = Image.fromarray(atlas_data).transpose(method=Image.Transpose.FLIP_TOP_BOTTOM).convert("RGB")
-                texture_visual = trimesh.visual.texture.TextureVisuals(uv=scan_mesh['uvs'], image=uv_image)
-                # pack scan data as trimesh
-                scan_trimesh = trimesh.Trimesh(
-                    vertices=scan_mesh['vertices'],
-                    faces=scan_mesh['faces'],
-                    vertex_normals=scan_mesh['normals'],
-                    visual=texture_visual,
-                    process=False,
-                )
-                scan_mesh['colors'] = scan_trimesh.visual.to_color().vertex_colors
-            # rotate scan_mesh to view front
-            # if scan_rotation is not None: scan_mesh['vertices'] = np.matmul(scan_rotation, scan_mesh['vertices'].T).T
-            
             ret['scan_mesh'].append(scan_mesh)
             ret['scan_rotation'].append(torch.tensor(scan_rotation).float())
             ret['scan_mesh_verts'].append(torch.tensor(scan_mesh['vertices']).float()) # - transl[None, :]).float())
             ret['scan_mesh_verts_centered'].append(torch.tensor(scan_mesh['vertices'] - transl[None, :]).float())
             ret['scan_mesh_faces'].append(torch.tensor(scan_mesh['faces']).long())
             ret['scan_mesh_colors'].append(torch.tensor(scan_mesh['colors']).float())
-
-
 
             # ---- images ----
             img_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'images', 'capture-f{}.png'.format(sampled_frame))

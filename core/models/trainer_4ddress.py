@@ -122,7 +122,9 @@ class CCHTrainer(pl.LightningModule):
     @torch.no_grad()
     def _process_inputs(self, batch, batch_idx, normalise=False):
 
-        B, N = batch['imgs'].shape[:2]
+        B, K = batch['imgs'].shape[:2]
+        assert K == 5
+        N = 4 
 
         # ----------------------- get T joints -----------------------
         smpl_T_joints_list = []
@@ -135,10 +137,10 @@ class CCHTrainer(pl.LightningModule):
                 smpl_model = self.smpl_female
 
             smpl_T_output = smpl_model(
-                betas=batch['betas'][i].view(N, 10),
-                body_pose = torch.zeros((N, 69)).to(self.device),
-                global_orient = torch.zeros((N, 3)).to(self.device),
-                transl = torch.zeros((N, 3)).to(self.device)
+                betas=batch['betas'][i].view(K, 10),
+                body_pose = torch.zeros((K, 69)).to(self.device),
+                global_orient = torch.zeros((K, 3)).to(self.device),
+                transl = torch.zeros((K, 3)).to(self.device)
             )
             smpl_T_joints = smpl_T_output.joints[:, :24]
             smpl_T_vertices = smpl_T_output.vertices
@@ -146,10 +148,10 @@ class CCHTrainer(pl.LightningModule):
             smpl_T_vertices_list.append(smpl_T_vertices)
 
             smpl_output = smpl_model(
-                betas=batch['betas'][i].view(N, 10),
-                body_pose = batch['body_pose'][i].view(N, 69),
-                global_orient = batch['global_orient'][i].view(N, 3),
-                transl = batch['transl'][i].view(N, 3)
+                betas=batch['betas'][i].view(K, 10),
+                body_pose = batch['body_pose'][i].view(K, 69),
+                global_orient = batch['global_orient'][i].view(K, 3),
+                transl = batch['transl'][i].view(K, 3)
             )
             smpl_vertices = smpl_output.vertices
             smpl_vertices_list.append(smpl_vertices)
@@ -158,7 +160,7 @@ class CCHTrainer(pl.LightningModule):
         smpl_T_vertices = torch.stack(smpl_T_vertices_list, dim=0)
         smpl_vertices = torch.stack(smpl_vertices_list, dim=0)
 
-        smpl_skinning_weights = (self.smpl_male.lbs_weights)[None, None].repeat(B, N, 1, 1)
+        smpl_skinning_weights = (self.smpl_male.lbs_weights)[None, None].repeat(B, K, 1, 1)
 
         smpl_faces = torch.tensor(self.smpl_male.faces, dtype=torch.int32)
 
@@ -185,13 +187,13 @@ class CCHTrainer(pl.LightningModule):
 
 
         # build pytorch3d cameras
-        R, T, K = batch['R'], batch['T'], batch['K']
+        R, T, cam_K = batch['R'], batch['T'], batch['K']
         R = R.view(-1, 3, 3).float()
         T = T.view(-1, 3).float()
-        K = K.view(-1, 4, 4).float()
+        cam_K = cam_K.view(-1, 4, 4).float()
 
         cameras = PerspectiveCameras(
-            R=R, T=T, K=K,
+            R=R, T=T, K=cam_K,
             image_size=[(1280, 940)],
             device=self.device,
             in_ndc=False
@@ -214,7 +216,7 @@ class CCHTrainer(pl.LightningModule):
         crop_amount = (H - target_size) // 2  
         w_maps = w_maps[:, crop_amount:H-crop_amount, :, :]
         w_maps = torch.nn.functional.interpolate(w_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
-        w_maps = rearrange(w_maps, '(b n) j h w -> b n h w j', b=B, n=N)
+        w_maps = rearrange(w_maps, '(b k) j h w -> b k h w j', b=B, k=K)
         
         batch['smpl_w_maps'] = w_maps
 
@@ -223,7 +225,7 @@ class CCHTrainer(pl.LightningModule):
         # Render SMPL pointmaps
         smpl_pytorch3d_mesh = Meshes(
             verts=smpl_vertices.view(-1, 6890, 3),
-            faces=smpl_faces[None].repeat(B*N, 1, 1).to(self.device),
+            faces=smpl_faces[None].repeat(B*K, 1, 1).to(self.device),
             textures=TexturesVertex(verts_features=smpl_T_vertices.view(-1, 6890, 3))
         ).to(self.device)
         ret = self.feature_renderer(smpl_pytorch3d_mesh)
@@ -234,12 +236,12 @@ class CCHTrainer(pl.LightningModule):
         crop_amount = (H - target_size) // 2  
         vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
         vc_maps = torch.nn.functional.interpolate(vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
-        vc_maps = rearrange(vc_maps, '(b n) c h w -> b n h w c', b=B, n=N)
+        vc_maps = rearrange(vc_maps, '(b k) c h w -> b k h w c', b=B, k=K)
         batch['vc_maps'] = vc_maps
 
         mask = mask[:, crop_amount:H-crop_amount, :, :]
         mask = torch.nn.functional.interpolate(mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest')
-        mask = rearrange(mask, '(b n) c h w -> b n h w c', b=B, n=N)
+        mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
         batch['smpl_mask'] = mask.squeeze(-1)
 
 

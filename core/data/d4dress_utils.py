@@ -57,9 +57,10 @@ def get_R_T_from_extrinsics(extrinsics):
     T = extrinsics[:3, 3]
     return R, T
 
-def d4dress_cameras_to_pytorch3d_cameras(cameras):
+def d4dress_cameras_to_pytorch3d_cameras(cameras, ids):
     Rs, Ts, Ks = [], [], []
-    for camera_id, camera in cameras.items():
+    for camera_id in ids:
+        camera = cameras[camera_id]
         R, T = get_R_T_from_extrinsics(camera['extrinsics'])
         K = convert_intrinsics_to_pytorch3d_convention(camera['intrinsics'])
         Rs.append(R.T)

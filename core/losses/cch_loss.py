@@ -29,7 +29,7 @@ class CCHLoss(pl.LightningModule):
         total_loss = 0
 
         B, N, H, W, _ = predictions['vc_init'].shape
-        K = N 
+        K = 5 
 
 
 
@@ -38,7 +38,7 @@ class CCHLoss(pl.LightningModule):
                 points=batch['template_mesh_verts']
             )
             pred_vc = predictions['vc_init']
-            mask = batch['masks']
+            mask = batch['masks'][:, :N]
             confidence = predictions['vc_conf'] if "vc_conf" in predictions else None
 
             pred_vc = rearrange(pred_vc, 'b n h w c -> b (n h w) c')
@@ -60,11 +60,10 @@ class CCHLoss(pl.LightningModule):
 
         if "vc_init" in predictions:
             pred_vc = predictions['vc_init']
-            gt_vc_smpl_pm = batch['vc_maps']
-            mask = batch['smpl_mask']
+            gt_vc_smpl_pm = batch['vc_maps'][:, :N]
+            mask = batch['smpl_mask'][:, :N]
             confidence = predictions['vc_conf'] if "vc_conf" in predictions else None
             
-
             vc_pm_loss = self.vc_pm_loss(
                 pred_vc,
                 gt_vc_smpl_pm,
@@ -79,8 +78,8 @@ class CCHLoss(pl.LightningModule):
 
         if "w" in predictions:
             pred_w = predictions['w']
-            gt_w = batch['smpl_w_maps']
-            mask = batch['masks']
+            gt_w = batch['smpl_w_maps'][:, :N]
+            mask = batch['masks'][:, :N]
             confidence = predictions['w_conf'] if "w_conf" in predictions else None
 
             w_loss = self.skinning_weight_loss(
@@ -100,7 +99,8 @@ class CCHLoss(pl.LightningModule):
             mask = batch['masks']
             confidence = predictions['vc_conf'] if "vc_conf" in predictions else None
 
-            mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+            # mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+            mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             if confidence is not None:
                 confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
 
@@ -122,7 +122,8 @@ class CCHLoss(pl.LightningModule):
             mask = batch['masks']
             confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
 
-            mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+            # mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+            mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             if confidence is not None:
                 # confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
                 confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
