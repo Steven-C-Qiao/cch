@@ -106,15 +106,14 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
 
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
-        num_nodes=4,
         accelerator='auto',
         devices='auto', 
         strategy='auto',
-        # strategy=DDPStrategy() if not dev else 'auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
         log_every_n_steps=10,
         gradient_clip_val=1.0,
+        
     )
 
 
@@ -124,8 +123,8 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         model.load_state_dict(ckpt['state_dict'], strict=False)
         # logger.log_hyperparams(ckpt['hyper_parameters'])
 
-    trainer.fit(model, datamodule, ckpt_path=resume_path)
-    # trainer.test(model, datamodule)
+    # trainer.fit(model, datamodule, ckpt_path=resume_path)
+    trainer.validate(model, datamodule)
 
 
 if __name__ == '__main__':

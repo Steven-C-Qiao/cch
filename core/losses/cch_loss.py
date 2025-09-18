@@ -39,7 +39,7 @@ class CCHLoss(pl.LightningModule):
             )
             pred_vc = predictions['vc_init']
             mask = batch['masks'][:, :N]
-            confidence = predictions['vc_conf'] if "vc_conf" in predictions else None
+            confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
 
             pred_vc = rearrange(pred_vc, 'b n h w c -> b (n h w) c')
             mask = rearrange(mask, 'b n h w -> b (n h w)')
@@ -62,7 +62,7 @@ class CCHLoss(pl.LightningModule):
             pred_vc = predictions['vc_init']
             gt_vc_smpl_pm = batch['vc_maps'][:, :N]
             mask = batch['smpl_mask'][:, :N]
-            confidence = predictions['vc_conf'] if "vc_conf" in predictions else None
+            confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
             
             vc_pm_loss = self.vc_pm_loss(
                 pred_vc,
@@ -97,7 +97,7 @@ class CCHLoss(pl.LightningModule):
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp_init']
             mask = batch['masks']
-            confidence = predictions['vc_conf'] if "vc_conf" in predictions else None
+            confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
 
             # mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')

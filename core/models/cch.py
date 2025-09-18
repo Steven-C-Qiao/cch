@@ -96,7 +96,7 @@ class CCH(nn.Module):
             
         Returns:
             vc_init_pred: (B, N, H, W, 3)
-            vc_conf: vc confidence maps: (B, N, H, W, 1)
+            vc_init_conf: vc confidence maps: (B, N, H, W, 1)
             vc: canonical pointmaps: (B, K, N, H, W, 3): after correcting for the k-th pose
 
             w: skinning weights: (B, N, H, W, 25)

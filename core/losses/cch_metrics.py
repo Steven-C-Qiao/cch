@@ -17,8 +17,8 @@ class CCHMetrics(pl.LightningModule):
         B, N, H, W, _ = predictions['vc_init'].shape
         K = 5
 
-        if "vc_conf" in predictions:
-            confidence = predictions['vc_conf']
+        if "vc_init_conf" in predictions:
+            confidence = predictions['vc_init_conf']
             confidence = confidence > self.threshold
         else:
             confidence = torch.ones_like(predictions['vc_init'])[..., 0].bool()
@@ -51,6 +51,16 @@ class CCHMetrics(pl.LightningModule):
             vp_cfd, _, _ = self.masked_metric_cfd(gt_vp, pred_vp, mask)
             ret['vp_init_cfd'] = vp_cfd
 
+
+            # An extra frame in the end 
+            extra_gt_vp = Pointclouds(batch['vp_ptcld'].points_list()[4::K])
+            extra_pred_vp = rearrange(predictions['vp_init'][:, -1], 'b n h w c -> b (n h w) c')
+            mask = rearrange((batch['masks'][:, :N] * confidence), 'b n h w -> b (n h w)')
+
+            extra_vp_cfd, _, _ = self.masked_metric_cfd(extra_gt_vp, extra_pred_vp, mask)
+            ret['extra_vp_init_cfd'] = extra_vp_cfd
+
+
         if "vp" in predictions:
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp']
@@ -61,6 +71,15 @@ class CCHMetrics(pl.LightningModule):
 
             vp_cfd, _, _ = self.masked_metric_cfd(gt_vp, pred_vp, mask)
             ret['vp_cfd'] = vp_cfd 
+
+            # An extra frame in the end 
+            extra_gt_vp = Pointclouds(batch['vp_ptcld'].points_list()[4::K])
+            extra_pred_vp = rearrange(predictions['vp'][:, -1], 'b n h w c -> b (n h w) c')
+            mask = rearrange((batch['masks'][:, :N] * confidence), 'b n h w -> b (n h w)')
+
+            extra_vp_cfd, _, _ = self.masked_metric_cfd(extra_gt_vp, extra_pred_vp, mask)
+            ret['extra_vp_cfd'] = extra_vp_cfd
+
             
             
         return ret
