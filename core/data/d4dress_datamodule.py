@@ -10,10 +10,18 @@ class CCHDataModule(pl.LightningDataModule):
         self.cfg = cfg
         self.fraction = 1.0
 
-    def setup(self, stage=None):
-        dataset = D4DressDataset(cfg=self.cfg)
-        
-        self.train_dataset, self.val_dataset = torch.utils.data.random_split(dataset, [0.9, 0.1])
+        self.train_ids = [
+            '00122', '00123', '00127', '00129', '00134', '00135', '00136', '00137', 
+            '00140', '00147', '00148', '00149', '00151', '00152', '00154', '00156', 
+            '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175', 
+            '00176', '00179', '00180', '00185', '00187', '00190'
+        ]  
+        self.val_ids = ['00188', '00191']
+
+    def setup(self, stage):
+
+        self.train_dataset = D4DressDataset(cfg=self.cfg, ids=self.train_ids)
+        self.val_dataset = D4DressDataset(cfg=self.cfg, ids=self.val_ids)
 
     def train_dataloader(self):
         return DataLoader(

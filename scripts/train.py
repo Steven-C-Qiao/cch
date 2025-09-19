@@ -70,6 +70,16 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         os.makedirs(vis_save_dir)
 
 
+    # Copy config file to experiment directory
+    import shutil
+    from pathlib import Path
+    
+    config_source = Path('core/configs/cch_cfg.py')
+    config_dest = Path(exp_dir) / 'cch_cfg.py'
+    
+    shutil.copy2(config_source, config_dest)
+
+
 
     model = CCHTrainer(
         cfg=cfg,
@@ -111,14 +121,13 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
 
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
-        # num_nodes=2,
         accelerator=cfg.SPEEDUP.ACCELERATOR,
+        num_nodes=2,
         devices="auto", 
         strategy="auto",
-        # strategy=DDPStrategy() if not dev else 'auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
-        log_every_n_steps=10,
+        # log_every_n_steps=10,
         gradient_clip_val=1.0,
         precision=cfg.SPEEDUP.MIXED_PRECISION,
     )
@@ -190,6 +199,8 @@ if __name__ == '__main__':
     # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")
 
     assert ((args.resume_training_states is not None) * (args.load_from_ckpt is not None) == 0), 'Specify either resume_training_states or load_from_ckpt, not both'
+
+
 
     
     run_train(

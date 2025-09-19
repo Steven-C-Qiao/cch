@@ -107,19 +107,14 @@ def d4dress_collate_fn(batch):
 
 
 class D4DressDataset(Dataset):
-    def __init__(self, cfg, debug=False):
-        self.debug = debug
+    def __init__(self, cfg, ids):
         self.cfg = cfg
         self.num_frames_pp = 4
-        self.lengthen_by = 500
+        self.lengthen_by = 1000
 
         self.img_size = cfg.DATA.IMAGE_SIZE
 
-        self.ids = ['00122', '00123', '00127', '00129', '00134', '00135', '00136', '00137', 
-                    '00140', '00147', '00148', '00149', '00151', '00152', '00154', '00156', 
-                    '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175', 
-                    '00176', '00179', '00180', '00185', '00187', '00190']    
-        # self.exclude_ids = ['00188', '00191']    
+        self.ids = ids 
         self.layer = 'Inner'
         self.camera_ids = ['0004', '0028', '0052', '0076']
 

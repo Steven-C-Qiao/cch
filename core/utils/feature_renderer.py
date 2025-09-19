@@ -75,16 +75,13 @@ class FeatureRenderer(pl.LightningModule):
     
 
     def forward(self, mesh, **kwargs):
-        ret = {}
-
-        # for key, value in kwargs.items():
-        #     mesh.textures = TexturesVertex(verts_features=value)
-        #     images = self.renderer(mesh)
-        #     ret[f'{key}_maps'] = images[..., :3]
 
         images = self.renderer(mesh)
-        ret[f'maps'] = images[..., :-1]  # All channels except the last (alpha)
-        ret[f'mask'] = images[..., -1]   # Last channel is the alpha/mask
+
+        ret = {
+            'maps': images[..., :-1],  # All channels except the last (alpha)
+            'mask': images[..., -1]    # Last channel is the alpha/mask
+        }
 
         return ret
     

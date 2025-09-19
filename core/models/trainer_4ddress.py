@@ -113,6 +113,7 @@ class CCHTrainer(pl.LightningModule):
                 loss_dict[f'val_{key}'] = loss_dict.pop(key)
             for key in list(metrics.keys()):
                 metrics[f'val_{key}'] = metrics.pop(key)
+        
                 
         self.log(f'{split}_loss', loss, prog_bar=True, sync_dist=True, rank_zero_only=True)
         self.log_dict(loss_dict, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
