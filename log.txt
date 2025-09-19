@@ -1,0 +1,1 @@
+exp_009_s1 running stage 1 without sapiens, tune 10 10 10 10. Seems to need to build in canonical stage a bit better before the posed stage 

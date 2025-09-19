@@ -99,6 +99,9 @@ class CCHTrainer(pl.LightningModule):
 
         self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, self.global_step)
 
+        # for k, v in loss_dict.items():
+        #     print(f"{k}: {v.item():.4f}", end='; ')
+        # import ipdb; ipdb.set_trace()
         
         return loss 
     
@@ -115,7 +118,7 @@ class CCHTrainer(pl.LightningModule):
         self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
 
         # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
-        # self.visualiser.visualise(preds, batch) 
+        #     self.visualiser.visualise(preds, batch) 
 
         if self.dev or self.plot:
             self.visualiser.visualise(preds, batch)

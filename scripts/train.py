@@ -106,7 +106,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
 
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
-        num_nodes=4,
+        num_nodes=2,
         accelerator='auto',
         devices='auto', 
         strategy='auto',
@@ -115,6 +115,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         logger=tensorboard_logger,
         log_every_n_steps=10,
         gradient_clip_val=1.0,
+
     )
 
 

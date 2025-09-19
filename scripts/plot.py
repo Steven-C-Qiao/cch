@@ -43,20 +43,9 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     if cfg_opts is not None:
         cfg.merge_from_list(cfg_opts)
 
-    # path = resume_path if resume_path is not None else load_path
-    # if path is not None:
-    #     path = str(Path(path).parent.parent / 'lightning_logs')
-    #     if os.path.exists(path):
-    #         version_dirs = sorted(glob.glob(os.path.join(path, 'version_*')))
-    #         if version_dirs:
-    #             latest_version = version_dirs[-1]
-    #             hparams_file = os.path.join(latest_version, 'hparams.yaml')
-    #             if os.path.exists(hparams_file):
-    #                 cfg.merge_from_file(hparams_file)
-    #                 logger.info(f"Loaded hyperparameters from: {hparams_file}")
 
-    if dev:
-        cfg.TRAIN.BATCH_SIZE = 1
+    cfg.TRAIN.BATCH_SIZE = 2
+    cfg.TRAIN.LR = 0.
 
     # Create directories
     model_save_dir = os.path.join(exp_dir, 'saved_models')
@@ -73,7 +62,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         cfg=cfg,
         dev=dev,
         vis_save_dir=vis_save_dir,
-        plot=plot
+        plot=True
     )
 
     datamodule = CCHDataModule(cfg)
@@ -107,13 +96,13 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator='auto',
-        devices='auto', 
+        devices=1, 
         strategy='auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
         log_every_n_steps=10,
         gradient_clip_val=1.0,
-        
+        num_sanity_val_steps=0,
     )
 
 
@@ -123,8 +112,8 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         model.load_state_dict(ckpt['state_dict'], strict=False)
         # logger.log_hyperparams(ckpt['hyper_parameters'])
 
-    # trainer.fit(model, datamodule, ckpt_path=resume_path)
-    trainer.validate(model, datamodule)
+    trainer.fit(model, datamodule, ckpt_path=resume_path)
+    # trainer.fit(model, datamodule)
 
 
 if __name__ == '__main__':
