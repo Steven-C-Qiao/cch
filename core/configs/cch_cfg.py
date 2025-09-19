@@ -1,3 +1,4 @@
+from tkinter import TRUE
 from yacs.config import CfgNode
 
 
@@ -46,6 +47,13 @@ _C.DATA.AT_STD = 0.05
 _C.DATA.DIST_OFFSET = 2.25
 _C.DATA.ELEV_OFFSET = 10
 _C.DATA.AT_OFFSET = -0.2
+
+
+_C.SPEEDUP = CfgNode()
+_C.SPEEDUP.MIXED_PRECISION = 32
+_C.SPEEDUP.ACCELERATOR = "gpu"
+_C.SPEEDUP.MATMUL_PRECISION = "high"
+_C.SPEEDUP.COMPILE = False
 
 def get_cch_cfg_defaults():
     return _C.clone()

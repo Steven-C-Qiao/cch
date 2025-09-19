@@ -55,6 +55,8 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     #                 cfg.merge_from_file(hparams_file)
     #                 logger.info(f"Loaded hyperparameters from: {hparams_file}")
 
+    torch.set_float32_matmul_precision(cfg.SPEEDUP.MATMUL_PRECISION)
+
     if dev:
         cfg.TRAIN.BATCH_SIZE = 1
 
@@ -75,6 +77,9 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         vis_save_dir=vis_save_dir,
         plot=plot
     )
+
+    if cfg.SPEEDUP.COMPILE:
+        model = torch.compile(model)
 
     datamodule = CCHDataModule(cfg)
 
@@ -106,16 +111,16 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
 
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
-        num_nodes=2,
-        accelerator='auto',
-        devices='auto', 
-        strategy='auto',
+        # num_nodes=2,
+        accelerator=cfg.SPEEDUP.ACCELERATOR,
+        devices="auto", 
+        strategy="auto",
         # strategy=DDPStrategy() if not dev else 'auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
         log_every_n_steps=10,
         gradient_clip_val=1.0,
-
+        precision=cfg.SPEEDUP.MIXED_PRECISION,
     )
 
 
@@ -186,7 +191,7 @@ if __name__ == '__main__':
 
     assert ((args.resume_training_states is not None) * (args.load_from_ckpt is not None) == 0), 'Specify either resume_training_states or load_from_ckpt, not both'
 
-    torch.set_float32_matmul_precision('high')
+    
     run_train(
         exp_dir=args.experiment_dir,
         cfg_opts=args.cfg_opts,

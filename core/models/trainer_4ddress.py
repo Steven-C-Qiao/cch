@@ -43,7 +43,7 @@ class CCHTrainer(pl.LightningModule):
         self.plot = plot
 
         # self.feature_renderer = FeatureRenderer(image_size=(224, 224))
-        self.feature_renderer = FeatureRenderer(image_size=(512, 376)) # fixed according to 4DDress size 1280 * 940, interpolated later to img_size * img_size for CCH input 
+        self.feature_renderer = FeatureRenderer(image_size=(256, 192)) # image_size=(512, 376)) # fixed according to 4DDress size 1280 * 940, interpolated later to img_size * img_size for CCH input 
 
         self.smpl_male = SMPL(
             model_path=paths.SMPL,
@@ -89,8 +89,9 @@ class CCHTrainer(pl.LightningModule):
         if self.dev:
             batch = self.first_batch
 
+
         batch = self._process_inputs(batch, batch_idx, normalise=self.normalise)
-    
+
         preds = self(batch)
 
         loss, loss_dict = self.criterion(preds, batch)
@@ -145,9 +146,9 @@ class CCHTrainer(pl.LightningModule):
 
             smpl_T_output = smpl_model(
                 betas=batch['betas'][i].view(K, 10),
-                body_pose = torch.zeros((K, 69)).to(self.device),
-                global_orient = torch.zeros((K, 3)).to(self.device),
-                transl = torch.zeros((K, 3)).to(self.device)
+                body_pose = torch.zeros((K, 69), device=self.device),
+                global_orient = torch.zeros((K, 3), device=self.device),
+                transl = torch.zeros((K, 3), device=self.device)
             )
             smpl_T_joints = smpl_T_output.joints[:, :24]
             smpl_T_vertices = smpl_T_output.vertices
@@ -169,7 +170,7 @@ class CCHTrainer(pl.LightningModule):
 
         smpl_skinning_weights = (self.smpl_male.lbs_weights)[None, None].repeat(B, K, 1, 1)
 
-        smpl_faces = torch.tensor(self.smpl_male.faces, dtype=torch.int32)
+        smpl_faces = torch.tensor(self.smpl_male.faces, dtype=torch.int32, device=self.device)
 
         batch['smpl_T_joints'] = smpl_T_joints
 
@@ -193,6 +194,7 @@ class CCHTrainer(pl.LightningModule):
         batch['scan_skinning_weights'] = scan_w
 
 
+
         # build pytorch3d cameras
         R, T, cam_K = batch['R'], batch['T'], batch['K']
         R = R.view(-1, 3, 3).float()
@@ -209,15 +211,15 @@ class CCHTrainer(pl.LightningModule):
 
 
 
-
         # Render skinning weight pointmaps
         pytorch3d_mesh = Meshes(
             verts=scan_mesh_verts,
             faces=scan_mesh_faces,
             textures=TexturesVertex(verts_features=scan_w)
-        ).to(self.device)
+        )
 
         w_maps = self.feature_renderer(pytorch3d_mesh)['maps']
+
         _, H, W, _ = w_maps.shape
         target_size = W 
         crop_amount = (H - target_size) // 2  
@@ -228,13 +230,12 @@ class CCHTrainer(pl.LightningModule):
         batch['smpl_w_maps'] = w_maps
 
 
-
         # Render SMPL pointmaps
         smpl_pytorch3d_mesh = Meshes(
             verts=smpl_vertices.view(-1, 6890, 3),
-            faces=smpl_faces[None].repeat(B*K, 1, 1).to(self.device),
+            faces=smpl_faces[None].repeat(B*K, 1, 1),
             textures=TexturesVertex(verts_features=smpl_T_vertices.view(-1, 6890, 3))
-        ).to(self.device)
+        )
         ret = self.feature_renderer(smpl_pytorch3d_mesh)
         vc_maps = ret['maps']
         mask = ret['mask'].unsqueeze(-1)
@@ -251,11 +252,6 @@ class CCHTrainer(pl.LightningModule):
         mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
         batch['smpl_mask'] = mask.squeeze(-1)
 
-
-
-        # vp = [v for sublist in batch['scan_mesh_verts_centered'] for v in sublist]
-        # vp_ptcld = Pointclouds(points=vp)
-        # batch['vp_ptcld'] = vp_ptcld
 
 
         # Sample from Vp

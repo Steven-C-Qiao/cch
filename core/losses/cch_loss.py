@@ -57,7 +57,6 @@ class CCHLoss(pl.LightningModule):
             total_loss = total_loss + vc_loss
 
 
-
         if "vc_init" in predictions:
             pred_vc = predictions['vc_init']
             gt_vc_smpl_pm = batch['vc_maps'][:, :N]
@@ -75,7 +74,6 @@ class CCHLoss(pl.LightningModule):
             total_loss = total_loss + vc_pm_loss
 
 
-
         if "w" in predictions:
             pred_w = predictions['w']
             gt_w = batch['smpl_w_maps'][:, :N]
@@ -91,7 +89,6 @@ class CCHLoss(pl.LightningModule):
             w_loss *= self.cfg.LOSS.W_REGULARISER_WEIGHT
             loss_dict['w_loss'] = w_loss
             total_loss = total_loss + w_loss
-
 
         if "vp_init" in predictions:
             gt_vp = batch['vp_ptcld']
@@ -167,25 +164,45 @@ class MaskedUncertaintyChamferLoss(nn.Module):
 
     def forward(self, x_gt, x_pred, mask, confidence=None):
         assert x_pred.shape[:2] == mask.shape[:2]
-    
+
+        mask_flat = mask.squeeze(-1).bool()  # (B, V2)
+        
+        x_pred_list = [x_pred[b][mask_flat[b]] for b in range(x_pred.shape[0])]
+        conf_list = [confidence[b][mask_flat[b]] for b in range(x_pred.shape[0])] if confidence is not None else None
+
+        x_pred_ptclds = Pointclouds(points=x_pred_list)
+
+
         loss, _ = chamfer_distance(
-            x_pred, x_gt, 
+            x_pred_ptclds, x_gt, 
             batch_reduction=None, 
             point_reduction=None
         )
 
+
         loss_pred2gt = loss[0]
         loss_gt2pred = loss[1]
 
-
+        
         if confidence is not None:
-            conf, log_conf = self.get_conf_log(confidence)
-            loss_pred2gt = loss_pred2gt * conf - self.alpha * log_conf
+            conf_padded = torch.zeros_like(loss_pred2gt)
+            log_conf_padded = torch.zeros_like(loss_pred2gt)
+            
+            for b in range(len(conf_list)):
+                num_valid_points = len(conf_list[b])
+                if num_valid_points > 0:
+                    conf, log_conf = self.get_conf_log(conf_list[b])
+                    conf_padded[b, :num_valid_points] = conf
+                    log_conf_padded[b, :num_valid_points] = log_conf
 
-        masked_loss_pred2gt = loss_pred2gt * mask
 
-        return masked_loss_pred2gt.mean() + loss_gt2pred.mean()
+            loss_pred2gt = loss_pred2gt * conf_padded - self.alpha * log_conf_padded
+
+        # masked_loss_pred2gt = loss_pred2gt * mask
+        # return masked_loss_pred2gt.mean() + loss_gt2pred.mean()
+        return loss_pred2gt.mean() + loss_gt2pred.mean()
     
+
 
 class MaskedUncertaintyL2Loss(nn.Module):
     """

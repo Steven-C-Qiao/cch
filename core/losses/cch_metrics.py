@@ -87,20 +87,37 @@ class CCHMetrics(pl.LightningModule):
 
 
     def masked_metric_cfd(self, x_gt, x_pred, mask):
+        # Filter x_pred using mask to reduce computation
+        mask_flat = mask.bool()  # (B, V2)
+        
+        x_pred_list = [x_pred[b][mask_flat[b]] for b in range(x_pred.shape[0])]
+        
+        # Convert list to Pointclouds object for chamfer_distance compatibility
+        x_pred_ptclds = Pointclouds(points=x_pred_list)
+        
         cfd_ret, _ = chamfer_distance(
-            x_pred, x_gt, 
+            x_pred_ptclds, x_gt, 
             batch_reduction=None, 
             point_reduction=None
         )
 
-        loss_pred2gt = cfd_ret[0]
+        loss_pred2gt = cfd_ret[0]  # Shape: (B, P) where P is max points across batch
         loss_gt2pred = cfd_ret[1]
 
-        masked_loss_pred2gt = loss_pred2gt * mask
+        # Handle padding: only sum over valid (non-padded) points
+        valid_points_per_batch = [len(x_pred_list[b]) for b in range(len(x_pred_list))]
+        total_valid_points = sum(valid_points_per_batch)
+        
+        # Create mask for valid points in the padded tensor
+        valid_mask = torch.zeros_like(loss_pred2gt)
+        for b, num_valid in enumerate(valid_points_per_batch):
+            if num_valid > 0:
+                valid_mask[b, :num_valid] = 1.0
+        
+        masked_loss_pred2gt = loss_pred2gt * valid_mask
 
-        dist_pred2gt = torch.sum(torch.sqrt(masked_loss_pred2gt)) / (mask.sum() + 1e-6) * 100.0
+        dist_pred2gt = torch.sum(torch.sqrt(masked_loss_pred2gt)) / (total_valid_points + 1e-6) * 100.0
         dist_gt2pred = torch.sqrt(loss_gt2pred).mean() * 100.0
-
 
         return (dist_pred2gt+dist_gt2pred) / 2, dist_pred2gt, dist_gt2pred
     
