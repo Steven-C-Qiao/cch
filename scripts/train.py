@@ -106,13 +106,22 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
             monitor='val_loss',
             mode='min'
         ),
-        ModelCheckpoint( # this is the vc_init cfd 
+        # ModelCheckpoint( # this is the vc_init cfd 
+        #     dirpath=model_save_dir,
+        #     filename='vc_cfd_{epoch:03d}',
+        #     save_top_k=1,
+        #     save_last=False,
+        #     verbose=True,
+        #     monitor='vc_cfd',
+        #     mode='min'
+        # ),
+        ModelCheckpoint( # this is the vp_cfd
             dirpath=model_save_dir,
-            filename='vc_cfd_{epoch:03d}',
+            filename='vp_cfd_{epoch:03d}',
             save_top_k=1,
             save_last=False,
             verbose=True,
-            monitor='vc_cfd',
+            monitor='vp_cfd',
             mode='min'
         ),
     ]
@@ -122,7 +131,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator=cfg.SPEEDUP.ACCELERATOR,
-        num_nodes=2,
+        # num_nodes=2,
         devices="auto", 
         strategy="auto",
         callbacks=checkpoint_callbacks,
@@ -130,6 +139,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         # log_every_n_steps=10,
         gradient_clip_val=1.0,
         precision=cfg.SPEEDUP.MIXED_PRECISION,
+        # enable_progress_bar=False,
     )
 
 

@@ -89,7 +89,6 @@ class CCHTrainer(pl.LightningModule):
         if self.dev:
             batch = self.first_batch
 
-
         batch = self._process_inputs(batch, batch_idx, normalise=self.normalise)
 
         preds = self(batch)
@@ -119,6 +118,13 @@ class CCHTrainer(pl.LightningModule):
         self.log_dict(loss_dict, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
         self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
 
+        if global_step % 1000 == 1:
+            print(f"Step {global_step} {split} loss: {loss.item():.2f}; ", end=' ')
+            for k, v in loss_dict.items():
+                print(f"{k}: {v.item():.2f}", end='; ')
+            print()
+
+
         # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
         #     self.visualiser.visualise(preds, batch) 
 
@@ -139,6 +145,7 @@ class CCHTrainer(pl.LightningModule):
         smpl_T_joints_list = []
         smpl_T_vertices_list = []
         smpl_vertices_list = []
+        smpl_skinning_weights_list = []
         for i in range(B):
             if batch['gender'][i] == 'male':
                 smpl_model = self.smpl_male
@@ -165,11 +172,13 @@ class CCHTrainer(pl.LightningModule):
             smpl_vertices = smpl_output.vertices
             smpl_vertices_list.append(smpl_vertices)
 
+            smpl_skinning_weights_list.append(smpl_model.lbs_weights)
+            
         smpl_T_joints = torch.stack(smpl_T_joints_list, dim=0)
         smpl_T_vertices = torch.stack(smpl_T_vertices_list, dim=0)
         smpl_vertices = torch.stack(smpl_vertices_list, dim=0)
+        smpl_skinning_weights = torch.stack(smpl_skinning_weights_list, dim=0)[:, None].repeat(1, K, 1, 1)
 
-        smpl_skinning_weights = (self.smpl_male.lbs_weights)[None, None].repeat(B, K, 1, 1)
 
         smpl_faces = torch.tensor(self.smpl_male.faces, dtype=torch.int32, device=self.device)
 
@@ -181,8 +190,6 @@ class CCHTrainer(pl.LightningModule):
         scan_mesh_faces = [f for sublist in batch['scan_mesh_faces'] for f in sublist]
         scan_mesh_verts_centered = [v for sublist in batch['scan_mesh_verts_centered'] for v in sublist]
 
-
-
         dists, idx = self.knn_ptcld(
             Pointclouds(points=scan_mesh_verts), 
             smpl_vertices.view(-1, 6890, 3), 
@@ -193,6 +200,52 @@ class CCHTrainer(pl.LightningModule):
         scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
         scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_mesh_verts)]
         batch['scan_skinning_weights'] = scan_w
+
+        # # Create scatter plot comparing scan and SMPL vertices
+        # import matplotlib.pyplot as plt
+
+        # # Create 3D figure
+        # fig = plt.figure(figsize=(12, 6))
+        
+        # # SMPL vertices plot
+        # ax1 = fig.add_subplot(121, projection='3d')
+        # smpl_verts = smpl_vertices[0,0].detach().cpu().numpy()
+        # ax1.scatter(smpl_verts[:,0], smpl_verts[:,1], smpl_verts[:,2], s=0.1, c='blue', marker='.', alpha=0.6)
+        # ax1.set_title('SMPL Vertices')
+        # ax1.set_xlabel('X')
+        # ax1.set_ylabel('Y')
+        # ax1.set_zlabel('Z')
+
+        # # Scan vertices plot 
+        # ax2 = fig.add_subplot(122, projection='3d')
+        # scan_verts = scan_mesh_verts[0].detach().cpu().numpy()
+        # ax2.scatter(scan_verts[:,0], scan_verts[:,1], scan_verts[:,2], s=0.1, c='red', marker='.', alpha=0.6)
+        # ax2.scatter(smpl_verts[:,0], smpl_verts[:,1], smpl_verts[:,2], s=0.1, c='blue', marker='.', alpha=0.6)
+        # ax2.set_title('Scan Vertices')
+        # ax2.set_xlabel('X')
+        # ax2.set_ylabel('Y')
+        # ax2.set_zlabel('Z')
+
+        # # Set equal aspect ratio for both plots
+        # ax1.set_box_aspect([1,1,1])
+        # ax2.set_box_aspect([1,1,1])
+
+        # # Make ticks equal scale
+        # ax1.set_aspect('equal', adjustable='box')
+        # ax2.set_aspect('equal', adjustable='box')
+
+        # # Set view to look into z-axis
+        # ax1.view_init(elev=10, azim=10, vertical_axis='y')
+        # ax2.view_init(elev=10, azim=10, vertical_axis='y')
+
+        # plt.tight_layout()
+        # plt.savefig('vertices_comparison.png')
+        # plt.close()
+
+        # import ipdb; ipdb.set_trace()
+
+
+        
 
 
 
@@ -260,7 +313,7 @@ class CCHTrainer(pl.LightningModule):
             verts=scan_mesh_verts_centered,
             faces=scan_mesh_faces,
         )
-        vp = sample_points_from_meshes(scan_mesh_centered, 48000)
+        vp = sample_points_from_meshes(scan_mesh_centered, 24000)
         vp_ptcld = Pointclouds(points=vp)
         batch['vp_ptcld'] = vp_ptcld
 
@@ -285,41 +338,52 @@ class CCHTrainer(pl.LightningModule):
             faces=[torch.tensor(f, device=self.device, dtype=torch.int32) for f in template_mesh_faces]
         )
 
-        batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, 48000)
+        batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, 6890)
 
 
 
 
         # # Create 2D plot comparing SMPL and template vertices
         # import matplotlib.pyplot as plt
-        # plt.figure(figsize=(12, 6))
+        # plt.figure(figsize=(18, 6))
+
+        # a, b = 0, 1
 
         # # Plot SMPL vertices
-        # plt.subplot(121)
-        # plt.scatter(smpl_T_vertices[0, 0, :, 0].cpu().numpy(), 
-        #            smpl_T_vertices[0, 0, :, 1].cpu().numpy(),
+        # plt.subplot(131)
+        # plt.scatter(smpl_T_vertices[0, 0, :, a].cpu().numpy(), 
+        #            smpl_T_vertices[0, 0, :, b].cpu().numpy(),
         #            c='blue', alpha=0.5, s=1)
         # plt.title('SMPL T-Pose Vertices')
         # plt.axis('equal')
 
         # # Plot template vertices 
-        # plt.subplot(122)
-        # plt.scatter(batch['template_mesh_verts'][0][:, 0].cpu().numpy(),
-        #            batch['template_mesh_verts'][0][:, 1].cpu().numpy(), 
+        # plt.subplot(132)
+        # plt.scatter(batch['template_mesh_verts'][0][:, a].cpu().numpy(),
+        #            batch['template_mesh_verts'][0][:, b].cpu().numpy(), 
         #            c='red', alpha=0.5, s=1)
         # plt.title('Template Mesh Vertices')
         # plt.axis('equal')
 
-        # # Get min/max ranges for both plots
-        # smpl_x_min = smpl_T_vertices[0, 0, :, 0].cpu().numpy().min()
-        # smpl_x_max = smpl_T_vertices[0, 0, :, 0].cpu().numpy().max()
-        # smpl_y_min = smpl_T_vertices[0, 0, :, 1].cpu().numpy().min() 
-        # smpl_y_max = smpl_T_vertices[0, 0, :, 1].cpu().numpy().max()
+        # plt.subplot(133)
+        # plt.scatter(smpl_T_vertices[0, 0, :, a].cpu().numpy(), 
+        #            smpl_T_vertices[0, 0, :, b].cpu().numpy(),
+        #            c='blue', alpha=0.5, s=0.5)
+        # plt.scatter(batch['template_mesh_verts'][0][:, a].cpu().numpy(),
+        #            batch['template_mesh_verts'][0][:, b].cpu().numpy(), 
+        #            c='red', alpha=0.5, s=0.5)
+        # plt.axis('equal')
 
-        # template_x_min = batch['template_mesh_verts'][0][:, 0].cpu().numpy().min()
-        # template_x_max = batch['template_mesh_verts'][0][:, 0].cpu().numpy().max()
-        # template_y_min = batch['template_mesh_verts'][0][:, 1].cpu().numpy().min()
-        # template_y_max = batch['template_mesh_verts'][0][:, 1].cpu().numpy().max()
+        # # Get min/max ranges for both plots
+        # smpl_x_min = smpl_T_vertices[0, 0, :, a].cpu().numpy().min()
+        # smpl_x_max = smpl_T_vertices[0, 0, :, a].cpu().numpy().max()
+        # smpl_y_min = smpl_T_vertices[0, 0, :, b].cpu().numpy().min() 
+        # smpl_y_max = smpl_T_vertices[0, 0, :, b].cpu().numpy().max()
+
+        # template_x_min = batch['template_mesh_verts'][0][:, a].cpu().numpy().min()
+        # template_x_max = batch['template_mesh_verts'][0][:, a].cpu().numpy().max()
+        # template_y_min = batch['template_mesh_verts'][0][:, b].cpu().numpy().min()
+        # template_y_max = batch['template_mesh_verts'][0][:, b].cpu().numpy().max()
 
         # # Set same range for both plots
         # x_min = min(smpl_x_min, template_x_min)
@@ -327,10 +391,12 @@ class CCHTrainer(pl.LightningModule):
         # y_min = min(smpl_y_min, template_y_min)
         # y_max = max(smpl_y_max, template_y_max)
 
-        # plt.subplot(121).set_xlim(x_min, x_max)
-        # plt.subplot(121).set_ylim(y_min, y_max)
-        # plt.subplot(122).set_xlim(x_min, x_max)
-        # plt.subplot(122).set_ylim(y_min, y_max)
+        # plt.subplot(131).set_xlim(x_min, x_max)
+        # plt.subplot(131).set_ylim(y_min, y_max)
+        # plt.subplot(132).set_xlim(x_min, x_max)
+        # plt.subplot(132).set_ylim(y_min, y_max)
+        # plt.subplot(133).set_xlim(x_min, x_max)
+        # plt.subplot(133).set_ylim(y_min, y_max)
 
         # plt.tight_layout()
         # plt.savefig(f'vertex_comparison.png')
@@ -456,9 +522,21 @@ class CCHTrainer(pl.LightningModule):
         ax2.set_ylabel('Y')
         ax2.set_zlabel('Z')
 
+        # Set equal aspect ratio for both plots
+        ax1.set_box_aspect([1,1,1])
+        ax2.set_box_aspect([1,1,1])
+
+        # Make ticks equal scale
+        ax1.set_aspect('equal', adjustable='box')
+        ax2.set_aspect('equal', adjustable='box')
+        
+        
+
         plt.tight_layout()
-        plt.show()
+        # plt.show()
+        plt.savefig('smpl_scan_alignment.png')
         plt.close()
+        import ipdb; ipdb.set_trace()
 
     def _test_render(self, maps, masks=None, name=None):
         if maps.shape[-1] >= 4:

@@ -59,7 +59,7 @@ def load_and_freeze_pretrained_dinov2(model, ckpt_path=None):
     # print("Unexpected keys:", msg.unexpected_keys)
 
     # Freeze all parameters in patch_embed
-    for param in model.patch_embed.parameters():
-        param.requires_grad = False
+    # for param in model.patch_embed.parameters():
+    #     param.requires_grad = False
 
-    model.eval()
+    # model.eval()

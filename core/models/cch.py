@@ -67,6 +67,12 @@ class CCH(nn.Module):
                 features=s1_cfg['features'],
                 intermediate_layer_idx=s1_cfg['intermediate_layer_idx']
             )
+        # for params in self.aggregator.parameters():
+        #     params.requires_grad = False
+        # for params in self.canonical_head.parameters():
+        #     params.requires_grad = False 
+        # for params in self.skinning_head.parameters():
+        #     params.requires_grad = False
 
         if self.model_pbs:
             self.pbs_aggregator = Aggregator(

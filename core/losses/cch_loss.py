@@ -33,28 +33,28 @@ class CCHLoss(pl.LightningModule):
 
 
 
-        if "vc_init" in predictions:
-            gt_vc = Pointclouds(
-                points=batch['template_mesh_verts']
-            )
-            pred_vc = predictions['vc_init']
-            mask = batch['masks'][:, :N]
-            confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
+        # if "vc_init" in predictions:
+        #     gt_vc = Pointclouds(
+        #         points=batch['template_mesh_verts']
+        #     )
+        #     pred_vc = predictions['vc_init']
+        #     mask = batch['masks'][:, :N]
+        #     confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
 
-            pred_vc = rearrange(pred_vc, 'b n h w c -> b (n h w) c')
-            mask = rearrange(mask, 'b n h w -> b (n h w)')
-            if confidence is not None:
-                confidence = rearrange(confidence, 'b n h w -> b (n h w)')
+        #     pred_vc = rearrange(pred_vc, 'b n h w c -> b (n h w) c')
+        #     mask = rearrange(mask, 'b n h w -> b (n h w)')
+        #     if confidence is not None:
+        #         confidence = rearrange(confidence, 'b n h w -> b (n h w)')
 
-            vc_loss = self.canonical_chamfer_loss(
-                gt_vc, 
-                pred_vc, 
-                mask,
-                confidence
-            )
-            vc_loss *= self.cfg.LOSS.VC_CHAMFER_LOSS_WEIGHT
-            loss_dict['vc_chamfer_loss'] = vc_loss
-            total_loss = total_loss + vc_loss
+        #     vc_loss = self.canonical_chamfer_loss(
+        #         gt_vc, 
+        #         pred_vc, 
+        #         mask,
+        #         confidence
+        #     )
+        #     vc_loss *= self.cfg.LOSS.VC_CHAMFER_LOSS_WEIGHT
+        #     loss_dict['vc_chamfer_loss'] = vc_loss
+        #     total_loss = total_loss + vc_loss
 
 
         if "vc_init" in predictions:
@@ -117,13 +117,13 @@ class CCHLoss(pl.LightningModule):
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp']
             mask = batch['masks']
-            confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
+            confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
 
             # mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             if confidence is not None:
-                # confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
-                confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
+                confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+                # confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
 
             pred_vp = rearrange(pred_vp, 'b k n h w c -> (b k) (n h w) c')
 

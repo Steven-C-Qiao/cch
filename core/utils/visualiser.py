@@ -492,7 +492,7 @@ class Visualiser(pl.LightningModule):
 
 
         # Additional row for gt canonical scatter and initial predictions
-        ax = fig.add_subplot(num_rows, N, r*N+1, projection='3d')
+        ax = fig.add_subplot(num_rows, K, r*K+1, projection='3d')
         vc_gt = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
         ax.scatter(vc_gt[:, 0], 
                    vc_gt[:, 1], 
@@ -502,7 +502,7 @@ class Visualiser(pl.LightningModule):
 
 
         if "vc_init" in predictions:
-            ax = fig.add_subplot(num_rows, N, r*N+2, projection='3d')
+            ax = fig.add_subplot(num_rows, K, r*K+2, projection='3d')
             vc_init = predictions['vc_init'][0] # n h w 3 
             
             v = vc_init[scatter_mask]
