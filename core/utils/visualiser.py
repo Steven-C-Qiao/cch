@@ -142,7 +142,7 @@ class Visualiser(pl.LightningModule):
         if 'imgs' in batch:
             num_rows += 1
             images = rearrange(batch['imgs'][0], 'n c h w -> n h w c')
-            images = (images * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
+            # images = (images * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
             images = images.astype(np.float32)
 
         if 'vc_init' in predictions:
@@ -368,7 +368,7 @@ class Visualiser(pl.LightningModule):
         # Color for predicted scatters 
         color = rearrange(batch['imgs'][0, :N], 'n c h w -> n h w c')
         color = color[scatter_mask]
-        color = (color * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
+        # color = (color * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
         color = color.astype(np.float32)
         
 
@@ -383,13 +383,14 @@ class Visualiser(pl.LightningModule):
             return x
         
 
-        x = batch['template_mesh_verts'][0]
+        # x = batch['template_mesh_verts'][0]
+        x = batch['smpl_T_joints'].reshape(-1, 3)
         def _set_scatter_limits(ax, x):
             max_range = np.array([
                 x[:, 0].max() - x[:, 0].min(),
                 x[:, 1].max() - x[:, 1].min(),
                 x[:, 2].max() - x[:, 2].min()
-            ]).max() / 2.0
+            ]).max() / 2.0 + 0.1
             mid_x = (x[:, 0].max() + x[:, 0].min()) * 0.5
             mid_y = (x[:, 1].max() + x[:, 1].min()) * 0.5
             mid_z = (x[:, 2].max() + x[:, 2].min()) * 0.5
@@ -406,7 +407,7 @@ class Visualiser(pl.LightningModule):
         # ---------------------- Canonical stage ----------------------
         if 'imgs' in batch:
             images = rearrange(batch['imgs'][0], 'n c h w -> n h w c')
-            images = (images * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
+            # images = (images * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
             images = images.astype(np.float32)
 
         if 'vc_init' in predictions:
@@ -492,13 +493,13 @@ class Visualiser(pl.LightningModule):
 
 
         # Additional row for gt canonical scatter and initial predictions
-        ax = fig.add_subplot(num_rows, K, r*K+1, projection='3d')
-        vc_gt = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
-        ax.scatter(vc_gt[:, 0], 
-                   vc_gt[:, 1], 
-                   vc_gt[:, 2], c='blue', s=s, alpha=gt_alpha, label=f'$V^c$')
-        _set_scatter_limits(ax, x)
-        ax.set_title(f'gt $V^c$')
+        # ax = fig.add_subplot(num_rows, K, r*K+1, projection='3d')
+        # vc_gt = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
+        # ax.scatter(vc_gt[:, 0], 
+        #            vc_gt[:, 1], 
+        #            vc_gt[:, 2], c='blue', s=s, alpha=gt_alpha, label=f'$V^c$')
+        # _set_scatter_limits(ax, x)
+        # ax.set_title(f'gt $V^c$')
 
 
         if "vc_init" in predictions:

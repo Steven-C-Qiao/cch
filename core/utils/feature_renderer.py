@@ -78,9 +78,16 @@ class FeatureRenderer(pl.LightningModule):
 
         images = self.renderer(mesh)
 
+        # Get fragments to determine visible parts of the mesh
+        # fragments = self.renderer.rasterizer(mesh)
+        
+        # Extract visible mesh parts
+        # visible_faces = self._extract_visible_faces(mesh, fragments)
+
         ret = {
             'maps': images[..., :-1],  # All channels except the last (alpha)
-            'mask': images[..., -1]    # Last channel is the alpha/mask
+            'mask': images[..., -1],   # Last channel is the alpha/mask
+            # 'visible_faces': visible_faces  # Indices of visible faces in original mesh
         }
 
         return ret
@@ -89,6 +96,29 @@ class FeatureRenderer(pl.LightningModule):
     def _set_cameras(self, cameras):
         self.renderer.rasterizer.cameras = cameras
         self.renderer.shader.cameras = cameras
+
+    def _extract_visible_faces(self, mesh, fragments):
+        """
+        Extract visible face indices from the original mesh based on rasterization fragments.
+        
+        Args:
+            mesh: Input mesh
+            fragments: Rasterization fragments containing visibility information
+            
+        Returns:
+            Tensor containing indices of visible faces in the original mesh
+        """
+        # Get the face indices that are visible (have valid depth values)
+        visible_faces = fragments.pix_to_face[..., 0]  # (N, H, W)
+        valid_mask = visible_faces >= 0  # Faces with valid depth
+        
+        # Get unique face indices that are visible
+        unique_visible_faces = torch.unique(visible_faces[valid_mask])
+        
+        # Remove the -1 (invalid face) index if present
+        unique_visible_faces = unique_visible_faces[unique_visible_faces >= 0]
+        
+        return unique_visible_faces
 
 
 

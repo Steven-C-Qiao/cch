@@ -82,7 +82,7 @@ def d4dress_collate_fn(batch):
     
     nonstackable_keys = [
         'scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 'scan_mesh_verts_centered', 'scan_mesh_colors',
-        'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'gender']
+        'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'gender', 'take_dir']
 
 
     for key in collated.keys():
@@ -157,6 +157,8 @@ class D4DressDataset(Dataset):
         sampled_take = self.takes[id][torch.randint(0, num_of_takes, (1,)).item()]
         take_dir = os.path.join(PATH_TO_DATASET, id, layer, sampled_take)
 
+        ret['take_dir'] = take_dir
+
         basic_info = load_pickle(os.path.join(take_dir, 'basic_info.pkl'))
         gender = basic_info['gender'] # is str
         ret['gender'] = gender
@@ -172,58 +174,58 @@ class D4DressDataset(Dataset):
 
 
         # ---- template mesh ----
-        template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', id)
+        # template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', id)
             
-        upper_mesh = trimesh.load(os.path.join(template_dir, 'upper.ply'))
-        body_mesh = trimesh.load(os.path.join(template_dir, 'body.ply'))
-        if os.path.exists(os.path.join(template_dir, 'lower.ply')):
-            lower_mesh = trimesh.load(os.path.join(template_dir, 'lower.ply'))
-            clothing_mesh = trimesh.util.concatenate([lower_mesh, upper_mesh])
-        else:
-            clothing_mesh = upper_mesh
-        full_mesh = trimesh.util.concatenate([body_mesh, clothing_mesh])
+        # upper_mesh = trimesh.load(os.path.join(template_dir, 'upper.ply'))
+        # body_mesh = trimesh.load(os.path.join(template_dir, 'body.ply'))
+        # if os.path.exists(os.path.join(template_dir, 'lower.ply')):
+        #     lower_mesh = trimesh.load(os.path.join(template_dir, 'lower.ply'))
+        #     clothing_mesh = trimesh.util.concatenate([lower_mesh, upper_mesh])
+        # else:
+        #     clothing_mesh = upper_mesh
+        # full_mesh = trimesh.util.concatenate([body_mesh, clothing_mesh])
 
-        visibility_path = os.path.join(BASE_PATH, 'model_files/4DDress_visible_vertices', f'{id}.npy')
-        visible_vertices = np.load(visibility_path)
-        naked_vertices = body_mesh.vertices 
-        clothing_vertices = clothing_mesh.vertices
+        # visibility_path = os.path.join(BASE_PATH, 'model_files/4DDress_visible_vertices', f'{id}.npy')
+        # visible_vertices = np.load(visibility_path)
+        # naked_vertices = body_mesh.vertices 
+        # clothing_vertices = clothing_mesh.vertices
         
-        # Create a set of visible vertex indices for efficient lookup
-        visible_vertex_set = set(visible_vertices)
+        # # Create a set of visible vertex indices for efficient lookup
+        # visible_vertex_set = set(visible_vertices)
         
-        # Filter body mesh faces to only include faces where all vertices are visible
-        body_faces = body_mesh.faces
-        # Use numpy operations to check if all vertices in each face are visible
-        face_visibility_mask = np.all(np.isin(body_faces, visible_vertices), axis=1)
-        visible_body_faces = body_faces[face_visibility_mask]
+        # # Filter body mesh faces to only include faces where all vertices are visible
+        # body_faces = body_mesh.faces
+        # # Use numpy operations to check if all vertices in each face are visible
+        # face_visibility_mask = np.all(np.isin(body_faces, visible_vertices), axis=1)
+        # visible_body_faces = body_faces[face_visibility_mask]
         
-        # Create mapping from original body vertex indices to new filtered indices
-        body_vertex_mapping = np.zeros(len(naked_vertices), dtype=int)
-        body_vertex_mapping[visible_vertices] = np.arange(len(visible_vertices))
+        # # Create mapping from original body vertex indices to new filtered indices
+        # body_vertex_mapping = np.zeros(len(naked_vertices), dtype=int)
+        # body_vertex_mapping[visible_vertices] = np.arange(len(visible_vertices))
         
-        # Remap face indices for body faces to new vertex indices
-        remapped_body_faces = body_vertex_mapping[visible_body_faces]
+        # # Remap face indices for body faces to new vertex indices
+        # remapped_body_faces = body_vertex_mapping[visible_body_faces]
         
-        # Get clothing faces and remap their indices to account for the new vertex ordering
-        clothing_faces = clothing_mesh.faces
-        num_filtered_body_vertices = len(visible_vertices)
-        remapped_clothing_faces = clothing_faces + num_filtered_body_vertices
+        # # Get clothing faces and remap their indices to account for the new vertex ordering
+        # clothing_faces = clothing_mesh.faces
+        # num_filtered_body_vertices = len(visible_vertices)
+        # remapped_clothing_faces = clothing_faces + num_filtered_body_vertices
         
-        # Combine filtered body vertices and clothing vertices
-        filtered_naked_vertices = naked_vertices[visible_vertices]
-        full_filtered_vertices = np.concatenate([filtered_naked_vertices, clothing_vertices])
+        # # Combine filtered body vertices and clothing vertices
+        # filtered_naked_vertices = naked_vertices[visible_vertices]
+        # full_filtered_vertices = np.concatenate([filtered_naked_vertices, clothing_vertices])
         
-        # Combine remapped faces
-        full_filtered_faces = np.concatenate([remapped_body_faces, remapped_clothing_faces])
+        # # Combine remapped faces
+        # full_filtered_faces = np.concatenate([remapped_body_faces, remapped_clothing_faces])
 
-        full_filtered_mesh = trimesh.Trimesh(
-            vertices=full_filtered_vertices,
-            faces=full_filtered_faces,
-        )
+        # full_filtered_mesh = trimesh.Trimesh(
+        #     vertices=full_filtered_vertices,
+        #     faces=full_filtered_faces,
+        # )
         
-        ret['template_mesh'] = full_filtered_mesh
-        ret['template_mesh_verts'] = torch.tensor(full_filtered_vertices).float()
-        ret['template_mesh_faces'] = torch.tensor(full_filtered_faces).long()
+        # ret['template_mesh'] = full_filtered_mesh
+        # ret['template_mesh_verts'] = torch.tensor(full_filtered_vertices).float()
+        # ret['template_mesh_faces'] = torch.tensor(full_filtered_faces).long()
         
 
         for i, sampled_frame in enumerate(sampled_frames):
@@ -267,7 +269,8 @@ class D4DressDataset(Dataset):
             mask_pil = Image.fromarray(mask)
             
             # Apply transforms
-            img_transformed = self.normalise(self.transform(img_pil))
+            # img_transformed = self.normalise(self.transform(img_pil))
+            img_transformed = self.transform(img_pil)
             mask_transformed = self.mask_transform(mask_pil).squeeze()
 
             sapiens_image = sapiens_transform(img_pil)

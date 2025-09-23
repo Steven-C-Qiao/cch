@@ -84,7 +84,7 @@ class CCHLoss(pl.LightningModule):
                 gt_w, 
                 pred_w, 
                 mask,
-                confidence
+                # confidence
             )
             w_loss *= self.cfg.LOSS.W_REGULARISER_WEIGHT
             loss_dict['w_loss'] = w_loss
@@ -107,9 +107,9 @@ class CCHLoss(pl.LightningModule):
                 gt_vp,
                 pred_vp, 
                 mask,
-                confidence
+                # confidence
             ) 
-            vp_loss *= self.cfg.LOSS.VP_CHAMFER_LOSS_WEIGHT
+            vp_loss *= self.cfg.LOSS.VP_INIT_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_init_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
 
@@ -117,13 +117,13 @@ class CCHLoss(pl.LightningModule):
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp']
             mask = batch['masks']
-            confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
+            confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
 
             # mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             if confidence is not None:
-                confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
-                # confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
+                # confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+                confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
 
             pred_vp = rearrange(pred_vp, 'b k n h w c -> (b k) (n h w) c')
 
@@ -131,7 +131,7 @@ class CCHLoss(pl.LightningModule):
                 gt_vp,
                 pred_vp, 
                 mask,
-                confidence
+                # confidence
             ) 
             vp_loss *= self.cfg.LOSS.VP_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_chamfer_loss'] = vp_loss

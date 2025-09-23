@@ -113,6 +113,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         # logger.log_hyperparams(ckpt['hyper_parameters'])
 
     trainer.fit(model, datamodule, ckpt_path=resume_path)
+    # trainer.validate(model, datamodule=datamodule, ckpt_path=resume_path)
     # trainer.fit(model, datamodule)
 
 

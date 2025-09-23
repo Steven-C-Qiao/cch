@@ -100,7 +100,8 @@ class CCHTrainer(pl.LightningModule):
         self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, self.global_step)
 
         # for k, v in loss_dict.items():
-        #     print(f"{k}: {v.item():.4f}", end='; ')
+        #     print(f"{k}: {v.item():.2f}", end='; ')
+        # print('')
         # import ipdb; ipdb.set_trace()
         
         return loss 
@@ -118,11 +119,11 @@ class CCHTrainer(pl.LightningModule):
         self.log_dict(loss_dict, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
         self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
 
-        if global_step % 1000 == 1:
-            print(f"Step {global_step} {split} loss: {loss.item():.2f}; ", end=' ')
-            for k, v in loss_dict.items():
-                print(f"{k}: {v.item():.2f}", end='; ')
-            print()
+        # if global_step % 1000 == 1:
+        #     print(f"Step {global_step} {split} loss: {loss.item():.2f}; ", end=' ')
+        #     for k, v in loss_dict.items():
+        #         print(f"{k}: {v.item():.2f}", end='; ')
+        #     print()
 
 
         # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
@@ -140,6 +141,8 @@ class CCHTrainer(pl.LightningModule):
         B, K = batch['imgs'].shape[:2]
         assert K == 5
         N = 4 
+
+        batch['imgs'] = batch['imgs'] * batch['masks'].unsqueeze(2)
 
         # ----------------------- get T joints -----------------------
         smpl_T_joints_list = []
@@ -272,7 +275,9 @@ class CCHTrainer(pl.LightningModule):
             textures=TexturesVertex(verts_features=scan_w)
         )
 
-        w_maps = self.feature_renderer(pytorch3d_mesh)['maps']
+        renderer_output = self.feature_renderer(pytorch3d_mesh)
+        w_maps = renderer_output['maps']
+        # visible_faces = renderer_output['visible_faces']
 
         _, H, W, _ = w_maps.shape
         target_size = W 
@@ -282,6 +287,8 @@ class CCHTrainer(pl.LightningModule):
         w_maps = rearrange(w_maps, '(b k) j h w -> b k h w j', b=B, k=K)
         
         batch['smpl_w_maps'] = w_maps
+
+
 
 
         # Render SMPL pointmaps
@@ -318,27 +325,27 @@ class CCHTrainer(pl.LightningModule):
         batch['vp_ptcld'] = vp_ptcld
 
 
-        # Sample from Template Mesh
-        template_mesh = batch['template_mesh']
-        template_mesh_verts = [mesh.vertices for mesh in template_mesh]
-        template_mesh_faces = [mesh.faces for mesh in template_mesh]
+        # # Sample from Template Mesh
+        # template_mesh = batch['template_mesh']
+        # template_mesh_verts = [mesh.vertices for mesh in template_mesh]
+        # template_mesh_faces = [mesh.faces for mesh in template_mesh]
 
 
-        # Align Template Mesh with SMPL
-        smpl_T_vertices_midpoint = (torch.max(smpl_T_vertices[..., 1], dim=-1)[0] + torch.min(smpl_T_vertices[..., 1], dim=-1)[0]) / 2
-        template_mesh_verts_midpoint = torch.stack([(torch.max(torch.tensor(verts[:, 1], device=self.device)) + torch.min(torch.tensor(verts[:, 1], device=self.device))) / 2 for verts in template_mesh_verts])
-        offset = (smpl_T_vertices_midpoint[:, 0] - template_mesh_verts_midpoint)
+        # # Align Template Mesh with SMPL
+        # smpl_T_vertices_midpoint = (torch.max(smpl_T_vertices[..., 1], dim=-1)[0] + torch.min(smpl_T_vertices[..., 1], dim=-1)[0]) / 2
+        # template_mesh_verts_midpoint = torch.stack([(torch.max(torch.tensor(verts[:, 1], device=self.device)) + torch.min(torch.tensor(verts[:, 1], device=self.device))) / 2 for verts in template_mesh_verts])
+        # offset = (smpl_T_vertices_midpoint[:, 0] - template_mesh_verts_midpoint)
 
-        template_mesh_verts = [torch.tensor(verts, device=self.device, dtype=torch.float32) for i, verts in enumerate(template_mesh_verts)]
-        template_mesh_verts[0][:, 1] += offset[0]
+        # template_mesh_verts = [torch.tensor(verts, device=self.device, dtype=torch.float32) for i, verts in enumerate(template_mesh_verts)]
+        # template_mesh_verts[0][:, 1] += offset[0]
 
 
-        template_mesh_pytorch3d = Meshes(
-            verts=template_mesh_verts,
-            faces=[torch.tensor(f, device=self.device, dtype=torch.int32) for f in template_mesh_faces]
-        )
+        # template_mesh_pytorch3d = Meshes(
+        #     verts=template_mesh_verts,
+        #     faces=[torch.tensor(f, device=self.device, dtype=torch.int32) for f in template_mesh_faces]
+        # )
 
-        batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, 6890)
+        # batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, 6890)
 
 
 
@@ -430,19 +437,46 @@ class CCHTrainer(pl.LightningModule):
         trainable_params = [p for p in self.model.parameters() if p.requires_grad]
         params = trainable_params + list(self.criterion.parameters())
         optimizer = optim.Adam(params, lr=self.cfg.TRAIN.LR)
-        
-        # Add cosine learning rate scheduler
-        if self.cfg.TRAIN.LR_SCHEDULER == 'cosine': 
-            scheduler = optim.lr_scheduler.CosineAnnealingLR(
-                optimizer,
-                T_max=self.cfg.TRAIN.NUM_EPOCHS,  # Total number of epochs
-                eta_min=self.cfg.TRAIN.LR * 0.1  # Minimum learning rate (1% of initial LR)
-            )
+
+        # Optional warmup (linear) followed by cosine annealing
+        if self.cfg.TRAIN.LR_SCHEDULER == 'cosine':
+            warmup_epochs = int(getattr(self.cfg.TRAIN, 'WARMUP_EPOCHS', 0))
+            
+            if warmup_epochs > 0:
+                # Create warmup scheduler
+                warmup = optim.lr_scheduler.LinearLR(
+                    optimizer,
+                    start_factor=1e-4,
+                    end_factor=1.0,
+                    total_iters=warmup_epochs
+                )
+                
+                # Create cosine scheduler
+                cosine = optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer,
+                    T_max=max(1, self.cfg.TRAIN.NUM_EPOCHS - warmup_epochs),
+                    eta_min=self.cfg.TRAIN.LR * 0.1
+                )
+                
+                # Combine using SequentialLR
+                scheduler = optim.lr_scheduler.SequentialLR(
+                    optimizer,
+                    schedulers=[warmup, cosine],
+                    milestones=[warmup_epochs]
+                )
+            else:
+                # No warmup, just cosine
+                scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer,
+                    T_max=self.cfg.TRAIN.NUM_EPOCHS,
+                    eta_min=self.cfg.TRAIN.LR * 0.1
+                )
+            
             return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "epoch",
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "epoch",
                     "frequency": 1
                 }
             }

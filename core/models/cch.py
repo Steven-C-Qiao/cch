@@ -33,7 +33,7 @@ class CCH(nn.Module):
         self.model_pbs = cfg.MODEL.POSE_BLENDSHAPES
 
         if self.use_sapiens:
-            sapiens_embed_dim = 512
+            sapiens_embed_dim = 384
             interpolation_size = self.cfg.DATA.IMAGE_SIZE // s1_cfg['patch_size']
             self.sapiens = SapiensWrapper(project_dim=sapiens_embed_dim, interpolate_size=(interpolation_size, interpolation_size))
         else:

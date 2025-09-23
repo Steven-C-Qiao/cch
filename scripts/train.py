@@ -78,6 +78,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     config_dest = Path(exp_dir) / 'cch_cfg.py'
     
     shutil.copy2(config_source, config_dest)
+    shutil.copy2(Path('submit.sh'), Path(exp_dir) / 'submit.sh')
 
 
 
@@ -115,15 +116,15 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         #     monitor='vc_cfd',
         #     mode='min'
         # ),
-        ModelCheckpoint( # this is the vp_cfd
-            dirpath=model_save_dir,
-            filename='vp_cfd_{epoch:03d}',
-            save_top_k=1,
-            save_last=False,
-            verbose=True,
-            monitor='vp_cfd',
-            mode='min'
-        ),
+        # ModelCheckpoint( # this is the vp_cfd
+        #     dirpath=model_save_dir,
+        #     filename='vp_cfd_{epoch:03d}',
+        #     save_top_k=1,
+        #     save_last=False,
+        #     verbose=True,
+        #     monitor='vp_cfd',
+        #     mode='min'
+        # ),
     ]
 
     tensorboard_logger = TensorBoardLogger(exp_dir, name='lightning_logs')
@@ -131,7 +132,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator=cfg.SPEEDUP.ACCELERATOR,
-        # num_nodes=2,
+        num_nodes=4,
         devices="auto", 
         strategy="auto",
         callbacks=checkpoint_callbacks,
@@ -146,7 +147,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     if load_path is not None:
         logger.info(f"Loading checkpoint: {load_path}")
         ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
-        model.load_state_dict(ckpt['state_dict'], strict=False)
+        model.load_state_dict(ckpt['state_dict'], strict=True)
         # logger.log_hyperparams(ckpt['hyper_parameters'])
 
     trainer.fit(model, datamodule, ckpt_path=resume_path)
