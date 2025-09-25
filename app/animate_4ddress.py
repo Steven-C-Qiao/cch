@@ -17,11 +17,12 @@ import sys
 sys.path.append('.')
 
 from core.configs.cch_cfg import get_cch_cfg_defaults
-# from core.models.trainer import CCHTrainer
-# from core.data.cch_datamodule import CCHDataModule
 from core.models.trainer_4ddress import CCHTrainer
 from core.data.d4dress_datamodule import CCHDataModule
-from core.utils.general import load_pickle
+from core.data.d4dress_utils import load_pickle
+
+
+CKPT_PATH = "/scratch/u5au/chexuan.u5au/cch/exp/exp_016_s3_det_loss/saved_models/vp_cfd_epoch=015.ckpt"
 
 def set_seed(seed=42):
     """Set random seed for reproducibility."""
@@ -38,26 +39,31 @@ def set_seed(seed=42):
 
 if __name__ == "__main__":
     set_seed(42)
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Get config
     cfg = get_cch_cfg_defaults()
-    cfg.TRAIN.BATCH_SIZE = 1
+    cfg.TRAIN.BATCH_SIZE = 2
 
     model = CCHTrainer(
         cfg=cfg,
-        dev=dev,
-        vis_save_dir=vis_save_dir,
-        plot=plot
-    )
-    load_path = "/scratch/u5au/chexuan.u5au/cch/exp/exp_011_s3/saved_models/last.ckpt"
-    if load_path is not None:
-        logger.info(f"Loading checkpoint: {load_path}")
-        ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
-        model.load_state_dict(ckpt['state_dict'], strict=True)
+        vis_save_dir=None,
+        plot=True 
+    ).to(device)
+    if CKPT_PATH is not None:
+        logger.info(f"Loading checkpoint: {CKPT_PATH}")
+        ckpt = torch.load(CKPT_PATH, weights_only=False, map_location='cpu')
+        model.load_state_dict(ckpt['state_dict'], strict=False)
 
     datamodule = CCHDataModule(cfg)
+    datamodule.setup(stage='fit')
+    batch = next(iter(datamodule.train_dataloader()))
 
-    batch = datamodule.train_dataloader().dataset[0]
+    batch = model._process_inputs(batch, batch_idx=0)
+
+    print(batch['sapiens_images'].device)
+
 
     preds = model(batch)
 
@@ -83,3 +89,4 @@ if __name__ == "__main__":
     
 
     import ipdb; ipdb.set_trace()
+    print('')

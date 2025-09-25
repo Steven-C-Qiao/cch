@@ -110,7 +110,7 @@ class D4DressDataset(Dataset):
     def __init__(self, cfg, ids):
         self.cfg = cfg
         self.num_frames_pp = 4
-        self.lengthen_by = 1000
+        self.lengthen_by = 500
 
         self.img_size = cfg.DATA.IMAGE_SIZE
 

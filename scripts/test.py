@@ -16,8 +16,10 @@ import sys
 sys.path.append('.')
 
 from core.configs.cch_cfg import get_cch_cfg_defaults
-from core.models.trainer import CCHTrainer
-from core.data.cch_datamodule import CCHDataModule
+# from core.models.trainer import CCHTrainer
+# from core.data.cch_datamodule import CCHDataModule
+from core.models.trainer_4ddress import CCHTrainer
+from core.data.d4dress_datamodule import CCHDataModule
 
 
 def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None):
@@ -82,7 +84,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=No
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator='gpu',
-        devices=device_ids, 
+        # devices=device_ids, 
         # strategy=DDPStrategy(find_unused_parameters=True) if not dev else 'auto',
         strategy=DDPStrategy() if not dev else 'auto',
         callbacks=checkpoint_callbacks,
@@ -134,7 +136,7 @@ if __name__ == '__main__':
     parser.add_argument(
         "--gpus", 
         type=str, 
-        default='0,1', 
+        default=None, 
         help="Comma-separated list of GPU indices to use. E.g., '0,1,2'"
     )    
     parser.add_argument(
@@ -147,8 +149,8 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f'Device: {device}')
 
-    device_ids = list(map(int, args.gpus.split(",")))
-    logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")
+    # device_ids = list(map(int, args.gpus.split(",")))
+    # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")
 
     assert ((args.resume_training_states is not None) * (args.load_from_ckpt is not None) == 0), 'Specify either resume_training_states or load_from_ckpt, not both'
 
@@ -156,7 +158,7 @@ if __name__ == '__main__':
         exp_dir=args.experiment_dir,
         cfg_opts=args.cfg_opts,
         dev=args.dev,
-        device_ids=device_ids,
+        # device_ids=device_ids,
         resume_path=args.resume_training_states,
         load_path=args.load_from_ckpt
     )

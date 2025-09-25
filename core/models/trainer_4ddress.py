@@ -446,7 +446,7 @@ class CCHTrainer(pl.LightningModule):
                 # Create warmup scheduler
                 warmup = optim.lr_scheduler.LinearLR(
                     optimizer,
-                    start_factor=1e-4,
+                    start_factor=1 / 3,
                     end_factor=1.0,
                     total_iters=warmup_epochs
                 )

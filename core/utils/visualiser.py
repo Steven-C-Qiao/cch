@@ -148,6 +148,12 @@ class Visualiser(pl.LightningModule):
         if 'vc_init' in predictions:
             num_rows += 1
             vc_init = predictions['vc_init']
+
+            num_rows += 1
+            vc_init_err = np.linalg.norm(predictions['vc_init'] - batch['vc_maps'][:, :N], axis=-1) * batch['smpl_mask'][:, :N]
+            vc_init_err[vc_init_err >= 0.2] = 0.0
+
+
             vc_init[~mask_N.astype(bool)] = 0
 
             norm_min, norm_max = vc_init.min(), vc_init.max()
@@ -166,6 +172,7 @@ class Visualiser(pl.LightningModule):
             vc_maps[~smpl_mask.astype(bool)] = 0
             vc_maps = (vc_maps - vc_maps.min()) / (vc_maps.max() - vc_maps.min())
             vc_maps[~smpl_mask.astype(bool)] = 1
+
 
         if 'smpl_w_maps' in batch:
             num_rows += 1
@@ -198,6 +205,11 @@ class Visualiser(pl.LightningModule):
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 plt.imshow(vc_init[0, n])
                 plt.title(f'$V_c$ init {n}')
+                row += 1
+
+                ax = plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                im = plt.imshow(vc_init_err[0, n], cmap='viridis')
+                plt.colorbar(im, ax=ax)
                 row += 1
 
             if 'vc_init_conf' in predictions:

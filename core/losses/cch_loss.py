@@ -8,6 +8,8 @@ from einops import rearrange
 from pytorch3d.loss import chamfer_distance
 from pytorch3d.structures import Pointclouds
 
+from core.utils.general import check_and_fix_inf_nan
+
 
 class CCHLoss(pl.LightningModule):
     def __init__(self, cfg):
@@ -69,6 +71,8 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
+            vc_pm_loss = check_and_fix_inf_nan(vc_pm_loss, 'vc_pm_loss')
+
             vc_pm_loss *= self.cfg.LOSS.VC_PM_LOSS_WEIGHT
             loss_dict['vc_pm_loss'] = vc_pm_loss
             total_loss = total_loss + vc_pm_loss
@@ -78,14 +82,16 @@ class CCHLoss(pl.LightningModule):
             pred_w = predictions['w']
             gt_w = batch['smpl_w_maps'][:, :N]
             mask = batch['masks'][:, :N]
-            confidence = predictions['w_conf'] if "w_conf" in predictions else None
+            confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
 
             w_loss = self.skinning_weight_loss(
                 gt_w, 
                 pred_w, 
                 mask,
-                # confidence
+                confidence
             )
+            w_loss = check_and_fix_inf_nan(w_loss, 'w_loss')
+
             w_loss *= self.cfg.LOSS.W_REGULARISER_WEIGHT
             loss_dict['w_loss'] = w_loss
             total_loss = total_loss + w_loss
@@ -107,8 +113,9 @@ class CCHLoss(pl.LightningModule):
                 gt_vp,
                 pred_vp, 
                 mask,
-                # confidence
+                confidence
             ) 
+            vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_init_chamfer_loss')
             vp_loss *= self.cfg.LOSS.VP_INIT_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_init_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
@@ -117,13 +124,14 @@ class CCHLoss(pl.LightningModule):
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp']
             mask = batch['masks']
-            confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
+            # confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
+            confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
 
             # mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             if confidence is not None:
-                # confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
-                confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
+                confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+                # confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
 
             pred_vp = rearrange(pred_vp, 'b k n h w c -> (b k) (n h w) c')
 
@@ -131,8 +139,9 @@ class CCHLoss(pl.LightningModule):
                 gt_vp,
                 pred_vp, 
                 mask,
-                # confidence
+                confidence
             ) 
+            vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_chamfer_loss')
             vp_loss *= self.cfg.LOSS.VP_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
@@ -142,6 +151,7 @@ class CCHLoss(pl.LightningModule):
 
         # for k, v in loss_dict.items():
         #     print(k, v.item())
+        # import ipdb; ipdb.set_trace()
         
         return total_loss, loss_dict
     
