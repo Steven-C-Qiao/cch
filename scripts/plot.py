@@ -44,7 +44,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         cfg.merge_from_list(cfg_opts)
 
 
-    cfg.TRAIN.BATCH_SIZE = 2
+    cfg.TRAIN.BATCH_SIZE = 1
     cfg.TRAIN.LR = 0.
 
     # Create directories
@@ -100,6 +100,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         strategy='auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
+        precision=cfg.SPEEDUP.MIXED_PRECISION,
         log_every_n_steps=10,
         gradient_clip_val=1.0,
         num_sanity_val_steps=0,

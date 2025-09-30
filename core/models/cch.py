@@ -22,10 +22,10 @@ class CCH(nn.Module):
         self.smpl_female = smpl_female
         self.parents = smpl_male.parents
         self.cfg = cfg
+        self.body_model = cfg.MODEL.BODY_MODEL
         self.image_size = cfg.DATA.IMAGE_SIZE
         self.use_sapiens = cfg.MODEL.USE_SAPIENS
 
-        # model_cfg = MODEL_CONFIGS[cfg.MODEL.SIZE]
         s1_cfg = MODEL_CONFIGS[cfg.MODEL.CANONICAL_STAGE_SIZE]
         s2_cfg = MODEL_CONFIGS[cfg.MODEL.PBS_STAGE_SIZE]
 
@@ -34,7 +34,7 @@ class CCH(nn.Module):
 
         if self.use_sapiens:
             sapiens_embed_dim = 384
-            interpolation_size = self.cfg.DATA.IMAGE_SIZE // s1_cfg['patch_size']
+            interpolation_size = self.image_size // s1_cfg['patch_size']
             self.sapiens = SapiensWrapper(project_dim=sapiens_embed_dim, interpolate_size=(interpolation_size, interpolation_size))
         else:
             sapiens_embed_dim = 0
@@ -57,9 +57,10 @@ class CCH(nn.Module):
         )
 
         if self.model_skinning_weights:
+            num_skinning_weights = 24+1 if self.body_model == 'smpl' else 55+1
             self.skinning_head = DPTHead(
                 dim_in=2*s1_cfg['embed_dim'] + sapiens_embed_dim, 
-                output_dim=25, 
+                output_dim=num_skinning_weights, 
                 activation="inv_log", 
                 conf_activation="expp1", 
                 additional_conditioning_dim=3,
@@ -67,12 +68,6 @@ class CCH(nn.Module):
                 features=s1_cfg['features'],
                 intermediate_layer_idx=s1_cfg['intermediate_layer_idx']
             )
-        # for params in self.aggregator.parameters():
-        #     params.requires_grad = False
-        # for params in self.canonical_head.parameters():
-        #     params.requires_grad = False 
-        # for params in self.skinning_head.parameters():
-        #     params.requires_grad = False
 
         if self.model_pbs:
             self.pbs_aggregator = Aggregator(
@@ -174,6 +169,13 @@ class CCH(nn.Module):
         # ---------- PBS stage ----------
         vc_init_expanded = vc_init.unsqueeze(1).repeat(1, K, 1, 1, 1, 1) # (B, K, N, H, W, 3)
         w_expanded = w.unsqueeze(1).repeat(1, K, 1, 1, 1, 1) # (B, K, N, H, W, 25)
+
+        # print(joints.shape)
+        # print(self.parents.shape)
+        # print(w_expanded.shape)
+        # print(vc_init_expanded.shape)
+        # print(pose.shape)
+        # import ipdb; ipdb.set_trace()
 
         vp_init, J_init = general_lbs(
             vc=rearrange(vc_init_expanded, 'b k n h w c -> (b k) (n h w) c'),

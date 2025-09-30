@@ -224,12 +224,14 @@ class Visualiser(pl.LightningModule):
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 plt.imshow(smpl_w_maps[0, n])
                 plt.title(f'Smpl $w$ maps {n}')
+                plt.colorbar()
                 row += 1
             
             if "w" in predictions:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 plt.imshow(w[0, n])
                 plt.title(f'Pred $w$ maps {n}')
+                plt.colorbar()
                 row += 1
 
         # for ax in fig.axes:
@@ -505,13 +507,13 @@ class Visualiser(pl.LightningModule):
 
 
         # Additional row for gt canonical scatter and initial predictions
-        # ax = fig.add_subplot(num_rows, K, r*K+1, projection='3d')
-        # vc_gt = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
-        # ax.scatter(vc_gt[:, 0], 
-        #            vc_gt[:, 1], 
-        #            vc_gt[:, 2], c='blue', s=s, alpha=gt_alpha, label=f'$V^c$')
-        # _set_scatter_limits(ax, x)
-        # ax.set_title(f'gt $V^c$')
+        ax = fig.add_subplot(num_rows, K, r*K+1, projection='3d')
+        vc_gt = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
+        ax.scatter(vc_gt[:, 0], 
+                   vc_gt[:, 1], 
+                   vc_gt[:, 2], c='blue', s=s, alpha=gt_alpha, label=f'$V^c$')
+        _set_scatter_limits(ax, x)
+        ax.set_title(f'gt $V^c$')
 
 
         if "vc_init" in predictions:

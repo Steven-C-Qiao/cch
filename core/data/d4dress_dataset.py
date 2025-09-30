@@ -113,6 +113,8 @@ class D4DressDataset(Dataset):
         self.lengthen_by = 500
 
         self.img_size = cfg.DATA.IMAGE_SIZE
+        self.body_model = cfg.MODEL.BODY_MODEL
+        self.num_joints = 24 if self.body_model == 'smpl' else 55
 
         self.ids = ids 
         self.layer = 'Inner'
@@ -174,75 +176,73 @@ class D4DressDataset(Dataset):
 
 
         # ---- template mesh ----
-        # template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', id)
+        template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', id)
             
-        # upper_mesh = trimesh.load(os.path.join(template_dir, 'upper.ply'))
-        # body_mesh = trimesh.load(os.path.join(template_dir, 'body.ply'))
-        # if os.path.exists(os.path.join(template_dir, 'lower.ply')):
-        #     lower_mesh = trimesh.load(os.path.join(template_dir, 'lower.ply'))
-        #     clothing_mesh = trimesh.util.concatenate([lower_mesh, upper_mesh])
-        # else:
-        #     clothing_mesh = upper_mesh
+        upper_mesh = trimesh.load(os.path.join(template_dir, 'upper.ply'))
+        body_mesh = trimesh.load(os.path.join(template_dir, 'body.ply'))
+        if os.path.exists(os.path.join(template_dir, 'lower.ply')):
+            lower_mesh = trimesh.load(os.path.join(template_dir, 'lower.ply'))
+            clothing_mesh = trimesh.util.concatenate([lower_mesh, upper_mesh])
+        else:
+            clothing_mesh = upper_mesh
         # full_mesh = trimesh.util.concatenate([body_mesh, clothing_mesh])
 
-        # visibility_path = os.path.join(BASE_PATH, 'model_files/4DDress_visible_vertices', f'{id}.npy')
-        # visible_vertices = np.load(visibility_path)
-        # naked_vertices = body_mesh.vertices 
-        # clothing_vertices = clothing_mesh.vertices
-        
-        # # Create a set of visible vertex indices for efficient lookup
-        # visible_vertex_set = set(visible_vertices)
-        
-        # # Filter body mesh faces to only include faces where all vertices are visible
-        # body_faces = body_mesh.faces
-        # # Use numpy operations to check if all vertices in each face are visible
-        # face_visibility_mask = np.all(np.isin(body_faces, visible_vertices), axis=1)
-        # visible_body_faces = body_faces[face_visibility_mask]
-        
-        # # Create mapping from original body vertex indices to new filtered indices
-        # body_vertex_mapping = np.zeros(len(naked_vertices), dtype=int)
-        # body_vertex_mapping[visible_vertices] = np.arange(len(visible_vertices))
-        
-        # # Remap face indices for body faces to new vertex indices
-        # remapped_body_faces = body_vertex_mapping[visible_body_faces]
-        
-        # # Get clothing faces and remap their indices to account for the new vertex ordering
-        # clothing_faces = clothing_mesh.faces
-        # num_filtered_body_vertices = len(visible_vertices)
-        # remapped_clothing_faces = clothing_faces + num_filtered_body_vertices
-        
-        # # Combine filtered body vertices and clothing vertices
-        # filtered_naked_vertices = naked_vertices[visible_vertices]
-        # full_filtered_vertices = np.concatenate([filtered_naked_vertices, clothing_vertices])
-        
-        # # Combine remapped faces
-        # full_filtered_faces = np.concatenate([remapped_body_faces, remapped_clothing_faces])
 
-        # full_filtered_mesh = trimesh.Trimesh(
-        #     vertices=full_filtered_vertices,
-        #     faces=full_filtered_faces,
-        # )
+        full_filtered_mesh = trimesh.load(os.path.join(template_dir, 'filtered.ply'))
+        full_filtered_vertices = full_filtered_mesh.vertices
+        full_filtered_faces = full_filtered_mesh.faces
+
+        # template_mesh_lbs_weights = np.load(os.path.join(template_dir, 'filtered_lbs_weights.npy'))
         
-        # ret['template_mesh'] = full_filtered_mesh
-        # ret['template_mesh_verts'] = torch.tensor(full_filtered_vertices).float()
-        # ret['template_mesh_faces'] = torch.tensor(full_filtered_faces).long()
-        
+        ret['template_mesh'] = full_filtered_mesh
+        # ret['template_body_mesh'] = torch.tensor(body_mesh, dtype=torch.float32)
+        ret['template_mesh_verts'] = torch.tensor(full_filtered_vertices, dtype=torch.float32)
+        ret['template_mesh_faces'] = torch.tensor(full_filtered_faces, dtype=torch.long)
+        # ret['template_mesh_lbs_weights'] = torch.tensor(template_mesh_lbs_weights, dtype=torch.float32)
+
+
+        # -------------- SMPL T joints and vertices --------------
+        smpl_T_joints = np.load(os.path.join(template_dir, 'smpl_T_joints.npy'))
+        smpl_T_vertices = np.load(os.path.join(template_dir, 'smpl_T_vertices.npy'))
+        ret['smpl_T_joints'] = torch.tensor(smpl_T_joints, dtype=torch.float32)[:, :self.num_joints]
+        ret['smpl_T_vertices'] = torch.tensor(smpl_T_vertices, dtype=torch.float32)
+
 
         for i, sampled_frame in enumerate(sampled_frames):
             
-            # ---- smpl data ----
-            smpl_data_fname = os.path.join(take_dir, 'SMPL', 'mesh-f{}_smpl.pkl'.format(sampled_frame))
-            # smpl_mesh_fname = os.path.join(take_dir, 'SMPL', 'mesh-f{}_smpl.ply'.format(sampled_frame))
+            # ---- smpl / smplx data ----
+            smpl_data_fname = os.path.join(take_dir, self.body_model.upper(), 'mesh-f{}_{}.pkl'.format(sampled_frame, self.body_model))
+            # smpl_ply_fname = os.path.join(take_dir, self.body_model.upper(), 'mesh-f{}_{}.ply'.format(sampled_frame, self.body_model))
 
             smpl_data = load_pickle(smpl_data_fname)
             global_orient, body_pose, transl, betas = smpl_data['global_orient'], smpl_data['body_pose'], smpl_data['transl'], smpl_data['betas']
-            pose = np.concatenate([global_orient, body_pose], axis=0)
             ret['global_orient'].append(global_orient)
             ret['body_pose'].append(body_pose)
-            ret['pose'].append(pose)
             ret['transl'].append(transl)
             ret['betas'].append(betas)
-            
+
+            if self.body_model == 'smplx': # additionally load smplx attributes
+                ret['left_hand_pose'].append(smpl_data['left_hand_pose'])
+                ret['right_hand_pose'].append(smpl_data['right_hand_pose'])
+                ret['jaw_pose'].append(smpl_data['jaw_pose'])
+                ret['leye_pose'].append(smpl_data['leye_pose'])
+                ret['reye_pose'].append(smpl_data['reye_pose'])
+                ret['expression'].append(smpl_data['expression'])
+                pose = np.concatenate(
+                    [global_orient, body_pose, 
+                     smpl_data['jaw_pose'], smpl_data['leye_pose'], smpl_data['reye_pose'], 
+                     smpl_data['left_hand_pose'], smpl_data['right_hand_pose']], axis=0
+                )
+
+               
+
+            elif self.body_model == 'smpl':
+                pose = np.concatenate([global_orient, body_pose], axis=0)
+            else:
+                raise ValueError(f"Body model {self.body_model} not supported")
+
+            ret['pose'].append(pose)
+
             
             # ---- scan mesh ----
             scan_mesh_fname = os.path.join(take_dir, 'Meshes_pkl', 'mesh-f{}.pkl'.format(sampled_frame))
@@ -291,6 +291,13 @@ class D4DressDataset(Dataset):
         ret['betas'] = torch.tensor(np.stack(ret['betas']))
         ret['scan_rotation'] = torch.tensor(np.stack(ret['scan_rotation']))
         ret['sapiens_images'] = torch.tensor(np.stack(ret['sapiens_images']))
+        if self.body_model == 'smplx':
+            ret['left_hand_pose'] = torch.tensor(np.stack(ret['left_hand_pose']))
+            ret['right_hand_pose'] = torch.tensor(np.stack(ret['right_hand_pose']))
+            ret['jaw_pose'] = torch.tensor(np.stack(ret['jaw_pose']))
+            ret['leye_pose'] = torch.tensor(np.stack(ret['leye_pose']))
+            ret['reye_pose'] = torch.tensor(np.stack(ret['reye_pose']))
+            ret['expression'] = torch.tensor(np.stack(ret['expression']))
 
         return ret
 

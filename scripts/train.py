@@ -86,7 +86,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         cfg=cfg,
         dev=dev,
         vis_save_dir=vis_save_dir,
-        plot=plot
+        plot=False
     )
 
     if cfg.SPEEDUP.COMPILE:
@@ -116,15 +116,15 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
             monitor='vc_pm_loss',
             mode='min'
         ),
-        ModelCheckpoint( # this is the vp_cfd
-            dirpath=model_save_dir,
-            filename='vp_cfd_{epoch:03d}',
-            save_top_k=1,
-            save_last=False,
-            verbose=True,
-            monitor='vp_cfd',
-            mode='min'
-        ),
+        # ModelCheckpoint( # this is the vp_cfd
+        #     dirpath=model_save_dir,
+        #     filename='vp_cfd_{epoch:03d}',
+        #     save_top_k=1,
+        #     save_last=False,
+        #     verbose=True,
+        #     monitor='vp_cfd',
+        #     mode='min'
+        # ),
     ]
 
     tensorboard_logger = TensorBoardLogger(exp_dir, name='lightning_logs')
@@ -137,9 +137,8 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         strategy="auto",
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
-        # log_every_n_steps=10,
-        gradient_clip_val=1.0,
         precision=cfg.SPEEDUP.MIXED_PRECISION,
+        # log_every_n_steps=10,
         # enable_progress_bar=False,
     )
 
@@ -204,7 +203,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f'Device: {device}')
 
-    # os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
 
     # device_ids = list(map(int, args.gpus.split(",")))
     # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")

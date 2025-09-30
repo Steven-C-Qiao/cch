@@ -74,7 +74,7 @@ def general_lbs(
     # W is N x V x (J + 1)
     W = lbs_weights
     # (N x V x (J + 1)) x (N x (J + 1) x 16)
-    num_joints = 24
+    num_joints = J_transformed.shape[1]
     T = torch.matmul(W, A.view(batch_size, num_joints, 16)) \
         .view(batch_size, -1, 4, 4)
 

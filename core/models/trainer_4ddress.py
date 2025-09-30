@@ -1,4 +1,5 @@
 import torch
+import smplx
 import torch.optim as optim
 import pytorch_lightning as pl
 from einops import rearrange
@@ -14,7 +15,7 @@ from pytorch3d.loss.chamfer import _handle_pointcloud_input
 from pytorch3d.ops.knn import knn_points
 
 from core.configs import paths 
-from core.models.smpl import SMPL
+# from core.models.smpl import SMPL
 from core.models.cch import CCH 
 from core.losses.cch_loss import CCHLoss
 from core.losses.cch_metrics import CCHMetrics
@@ -22,6 +23,8 @@ from core.utils.visualiser import Visualiser
 from core.utils.feature_renderer import FeatureRenderer
 from core.models.sapiens_wrapper import SapiensWrapper
 from core.configs.model_size_cfg import MODEL_CONFIGS
+from core.utils.general_lbs import general_lbs
+from core.utils.smpl_utils import get_smplx_full_pose
 
 
 
@@ -41,19 +44,25 @@ class CCHTrainer(pl.LightningModule):
         self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 5
         self.image_size = cfg.DATA.IMAGE_SIZE
         self.plot = plot
+        self.body_model = cfg.MODEL.BODY_MODEL
+        self.num_joints = 24 if self.body_model=='smpl' else 55
+        self.num_smpl_vertices = 6890 if self.body_model=='smpl' else 10475
 
-        # self.feature_renderer = FeatureRenderer(image_size=(224, 224))
-        self.feature_renderer = FeatureRenderer(image_size=(256, 192)) # image_size=(512, 376)) # fixed according to 4DDress size 1280 * 940, interpolated later to img_size * img_size for CCH input 
+        self.feature_renderer = FeatureRenderer(image_size=(256, 192)) 
 
-        self.smpl_male = SMPL(
-            model_path=paths.SMPL,
+        self.smpl_male = smplx.create(
+            model_type=self.body_model,
+            model_path="model_files/",
             num_betas=10,
-            gender='male'
+            gender='male',
+            num_pca_comps=12,
         )
-        self.smpl_female = SMPL(
-            model_path=paths.SMPL,  
+        self.smpl_female = smplx.create(
+            model_type=self.body_model,
+            model_path="model_files/",
             num_betas=10,
-            gender='female'
+            gender='female',
+            num_pca_comps=12,
         )
         for param in self.smpl_male.parameters():
             param.requires_grad = False
@@ -72,7 +81,7 @@ class CCHTrainer(pl.LightningModule):
         self.metrics = CCHMetrics(cfg)
         self.visualiser = Visualiser(save_dir=vis_save_dir, cfg=cfg)
 
-        self.save_hyperparameters(ignore=['smpl_model'])
+        self.save_hyperparameters(ignore=['smpl_male', 'smpl_female'])
 
         self.first_batch = None
 
@@ -119,13 +128,6 @@ class CCHTrainer(pl.LightningModule):
         self.log_dict(loss_dict, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
         self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
 
-        # if global_step % 1000 == 1:
-        #     print(f"Step {global_step} {split} loss: {loss.item():.2f}; ", end=' ')
-        #     for k, v in loss_dict.items():
-        #         print(f"{k}: {v.item():.2f}", end='; ')
-        #     print()
-
-
         # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
         #     self.visualiser.visualise(preds, batch) 
 
@@ -137,289 +139,258 @@ class CCHTrainer(pl.LightningModule):
 
     @torch.no_grad()
     def _process_inputs(self, batch, batch_idx, normalise=False):
+        with torch.autocast(enabled=False, device_type='cuda'):
 
-        B, K = batch['imgs'].shape[:2]
-        assert K == 5
-        N = 4 
+            B, K = batch['imgs'].shape[:2]
+            assert K == 5
+            N = 4 
 
-        batch['imgs'] = batch['imgs'] * batch['masks'].unsqueeze(2)
+            batch['imgs'] = batch['imgs'] * batch['masks'].unsqueeze(2)
 
-        # ----------------------- get T joints -----------------------
-        smpl_T_joints_list = []
-        smpl_T_vertices_list = []
-        smpl_vertices_list = []
-        smpl_skinning_weights_list = []
-        for i in range(B):
-            if batch['gender'][i] == 'male':
-                smpl_model = self.smpl_male
-            else:
-                smpl_model = self.smpl_female
+            # ----------------------- SMPL / SMPLx -----------------------
+            smpl_T_joints_list = []
+            smpl_T_vertices_list = []
+            smpl_vertices_list = []
+            smpl_skinning_weights_list = []
+            smpl_full_pose_list = []
+            for i in range(B):
+                if batch['gender'][i] == 'male':
+                    smpl_model = self.smpl_male
+                else:
+                    smpl_model = self.smpl_female
 
-            smpl_T_output = smpl_model(
-                betas=batch['betas'][i].view(K, 10),
-                body_pose = torch.zeros((K, 69), device=self.device),
-                global_orient = torch.zeros((K, 3), device=self.device),
-                transl = torch.zeros((K, 3), device=self.device)
+
+                if self.body_model == 'smplx':
+                    # smpl_T_output = smpl_model(
+                    #     betas=batch['betas'][i].view(K, -1),
+                    #     body_pose = torch.zeros_like(batch['body_pose'][i].view(K, -1)),
+                    #     global_orient = torch.zeros_like(batch['global_orient'][i].view(K, -1)),
+                    #     transl = torch.zeros_like(batch['transl'][i].view(K, -1)),
+                    #     left_hand_pose = torch.zeros_like(batch['left_hand_pose'][i].view(K, -1)),
+                    #     right_hand_pose = torch.zeros_like(batch['right_hand_pose'][i].view(K, -1)),
+                    #     expression = torch.zeros_like(batch['expression'][i].view(K, -1)),
+                    #     jaw_pose = torch.zeros_like(batch['jaw_pose'][i].view(K, -1)),
+                    #     leye_pose = torch.zeros_like(batch['leye_pose'][i].view(K, -1)),
+                    #     reye_pose = torch.zeros_like(batch['reye_pose'][i].view(K, -1)),
+                    # )   
+                    smpl_output = smpl_model(
+                        betas=batch['betas'][i].view(K, -1),
+                        global_orient = batch['global_orient'][i].view(K, -1),
+                        body_pose = batch['body_pose'][i].view(K, -1),
+                        left_hand_pose = batch['left_hand_pose'][i].view(K, -1),
+                        right_hand_pose = batch['right_hand_pose'][i].view(K, -1),
+                        transl = batch['transl'][i].view(K, -1),
+                        expression = batch['expression'][i].view(K, -1),
+                        jaw_pose = batch['jaw_pose'][i].view(K, -1),
+                        leye_pose = batch['leye_pose'][i].view(K, -1),
+                        reye_pose = batch['reye_pose'][i].view(K, -1),
+                        return_full_pose=True,
+                    )
+                elif self.body_model == 'smpl':
+                    smpl_T_output = smpl_model(
+                        betas=batch['betas'][i].view(K, -1),
+                        body_pose = torch.zeros_like(batch['body_pose'][i].view(K, -1)),
+                        global_orient = torch.zeros_like(batch['global_orient'][i].view(K, -1)),
+                        transl = torch.zeros_like(batch['transl'][i].view(K, -1)),
+                    )
+                    smpl_output = smpl_model(
+                        betas=batch['betas'][i].view(K, -1),
+                        body_pose = batch['body_pose'][i].view(K, -1),
+                        global_orient = batch['global_orient'][i].view(K, -1),
+                        transl = batch['transl'][i].view(K, -1),
+                        return_full_pose=True,
+                    )
+                else:
+                    raise ValueError(f"Body model {self.body_model} not supported")
+                
+                # smpl_T_joints = smpl_T_output.joints[:, :self.num_joints]
+                # smpl_T_vertices = smpl_T_output.vertices
+
+                # smpl_T_joints_list.append(smpl_T_joints)
+                # smpl_T_vertices_list.append(smpl_T_vertices)
+                smpl_vertices_list.append(smpl_output.vertices)
+                smpl_skinning_weights_list.append(smpl_model.lbs_weights)
+                smpl_full_pose_list.append(smpl_output.full_pose)
+                
+            # smpl_T_joints = torch.stack(smpl_T_joints_list, dim=0)
+            # smpl_T_vertices = torch.stack(smpl_T_vertices_list, dim=0)
+            smpl_vertices = torch.stack(smpl_vertices_list, dim=0)
+            smpl_skinning_weights = torch.stack(smpl_skinning_weights_list, dim=0)[:, None].repeat(1, K, 1, 1)
+            smpl_full_pose = torch.stack(smpl_full_pose_list, dim=0)
+
+            smpl_faces = torch.tensor(self.smpl_male.faces, dtype=torch.int32, device=self.device)
+
+            # batch['smpl_T_joints'] = smpl_T_joints
+            batch['pose'] = smpl_full_pose
+
+
+
+
+            # ----------------------- Scan Mesh -----------------------
+            scan_meshes = batch['scan_mesh']
+            scan_mesh_verts = [v for sublist in batch['scan_mesh_verts'] for v in sublist]
+            scan_mesh_faces = [f for sublist in batch['scan_mesh_faces'] for f in sublist]
+            scan_mesh_verts_centered = [v for sublist in batch['scan_mesh_verts_centered'] for v in sublist]
+
+            dists, idx = self.knn_ptcld(
+                Pointclouds(points=scan_mesh_verts), 
+                smpl_vertices.view(-1, smpl_vertices.shape[-2], 3), 
+                K=1
             )
-            smpl_T_joints = smpl_T_output.joints[:, :24]
-            smpl_T_vertices = smpl_T_output.vertices
-            smpl_T_joints_list.append(smpl_T_joints)
-            smpl_T_vertices_list.append(smpl_T_vertices)
+            smpl_weights_flat = smpl_skinning_weights.view(-1, self.num_smpl_vertices, self.num_joints)
+            idx_expanded = idx.repeat(1, 1, self.num_joints)
+            scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
+            scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_mesh_verts)]
+            batch['scan_skinning_weights'] = scan_w
 
-            smpl_output = smpl_model(
-                betas=batch['betas'][i].view(K, 10),
-                body_pose = batch['body_pose'][i].view(K, 69),
-                global_orient = batch['global_orient'][i].view(K, 3),
-                transl = batch['transl'][i].view(K, 3)
+
+
+
+            # ----------------------- Render -----------------------
+            # build pytorch3d cameras
+            R, T, cam_K = batch['R'], batch['T'], batch['K']
+            R = R.view(-1, 3, 3).float()
+            T = T.view(-1, 3).float()
+            cam_K = cam_K.view(-1, 4, 4).float()
+
+            cameras = PerspectiveCameras(
+                R=R, T=T, K=cam_K,
+                image_size=[(1280, 940)],
+                device=self.device,
+                in_ndc=False
             )
-            smpl_vertices = smpl_output.vertices
-            smpl_vertices_list.append(smpl_vertices)
+            self.feature_renderer._set_cameras(cameras)
 
-            smpl_skinning_weights_list.append(smpl_model.lbs_weights)
+
+
+            # Render skinning weight pointmaps
+            pytorch3d_mesh = Meshes(
+                verts=scan_mesh_verts,
+                faces=scan_mesh_faces,
+                textures=TexturesVertex(verts_features=scan_w)
+            )
+
+            renderer_output = self.feature_renderer(pytorch3d_mesh)
+            w_maps = renderer_output['maps']
+            # visible_faces = renderer_output['visible_faces']
+
+            _, H, W, _ = w_maps.shape
+            target_size = W 
+            crop_amount = (H - target_size) // 2  
+            w_maps = w_maps[:, crop_amount:H-crop_amount, :, :]
+            w_maps = torch.nn.functional.interpolate(
+                w_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            )
+            w_maps = rearrange(w_maps, '(b k) j h w -> b k h w j', b=B, k=K)
             
-        smpl_T_joints = torch.stack(smpl_T_joints_list, dim=0)
-        smpl_T_vertices = torch.stack(smpl_T_vertices_list, dim=0)
-        smpl_vertices = torch.stack(smpl_vertices_list, dim=0)
-        smpl_skinning_weights = torch.stack(smpl_skinning_weights_list, dim=0)[:, None].repeat(1, K, 1, 1)
-
-
-        smpl_faces = torch.tensor(self.smpl_male.faces, dtype=torch.int32, device=self.device)
-
-        batch['smpl_T_joints'] = smpl_T_joints
-
-
-        scan_meshes = batch['scan_mesh']
-        scan_mesh_verts = [v for sublist in batch['scan_mesh_verts'] for v in sublist]
-        scan_mesh_faces = [f for sublist in batch['scan_mesh_faces'] for f in sublist]
-        scan_mesh_verts_centered = [v for sublist in batch['scan_mesh_verts_centered'] for v in sublist]
-
-        dists, idx = self.knn_ptcld(
-            Pointclouds(points=scan_mesh_verts), 
-            smpl_vertices.view(-1, 6890, 3), 
-            K=1
-        )
-        smpl_weights_flat = smpl_skinning_weights.view(-1, 6890, 24)
-        idx_expanded = idx.repeat(1, 1, 24)
-        scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
-        scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_mesh_verts)]
-        batch['scan_skinning_weights'] = scan_w
-
-        # # Create scatter plot comparing scan and SMPL vertices
-        # import matplotlib.pyplot as plt
-
-        # # Create 3D figure
-        # fig = plt.figure(figsize=(12, 6))
-        
-        # # SMPL vertices plot
-        # ax1 = fig.add_subplot(121, projection='3d')
-        # smpl_verts = smpl_vertices[0,0].detach().cpu().numpy()
-        # ax1.scatter(smpl_verts[:,0], smpl_verts[:,1], smpl_verts[:,2], s=0.1, c='blue', marker='.', alpha=0.6)
-        # ax1.set_title('SMPL Vertices')
-        # ax1.set_xlabel('X')
-        # ax1.set_ylabel('Y')
-        # ax1.set_zlabel('Z')
-
-        # # Scan vertices plot 
-        # ax2 = fig.add_subplot(122, projection='3d')
-        # scan_verts = scan_mesh_verts[0].detach().cpu().numpy()
-        # ax2.scatter(scan_verts[:,0], scan_verts[:,1], scan_verts[:,2], s=0.1, c='red', marker='.', alpha=0.6)
-        # ax2.scatter(smpl_verts[:,0], smpl_verts[:,1], smpl_verts[:,2], s=0.1, c='blue', marker='.', alpha=0.6)
-        # ax2.set_title('Scan Vertices')
-        # ax2.set_xlabel('X')
-        # ax2.set_ylabel('Y')
-        # ax2.set_zlabel('Z')
-
-        # # Set equal aspect ratio for both plots
-        # ax1.set_box_aspect([1,1,1])
-        # ax2.set_box_aspect([1,1,1])
-
-        # # Make ticks equal scale
-        # ax1.set_aspect('equal', adjustable='box')
-        # ax2.set_aspect('equal', adjustable='box')
-
-        # # Set view to look into z-axis
-        # ax1.view_init(elev=10, azim=10, vertical_axis='y')
-        # ax2.view_init(elev=10, azim=10, vertical_axis='y')
-
-        # plt.tight_layout()
-        # plt.savefig('vertices_comparison.png')
-        # plt.close()
-
-        # import ipdb; ipdb.set_trace()
-
-
-        
-
-
-
-        # build pytorch3d cameras
-        R, T, cam_K = batch['R'], batch['T'], batch['K']
-        R = R.view(-1, 3, 3).float()
-        T = T.view(-1, 3).float()
-        cam_K = cam_K.view(-1, 4, 4).float()
-
-        cameras = PerspectiveCameras(
-            R=R, T=T, K=cam_K,
-            image_size=[(1280, 940)],
-            device=self.device,
-            in_ndc=False
-        )
-        self.feature_renderer._set_cameras(cameras)
-
-
-
-        # Render skinning weight pointmaps
-        pytorch3d_mesh = Meshes(
-            verts=scan_mesh_verts,
-            faces=scan_mesh_faces,
-            textures=TexturesVertex(verts_features=scan_w)
-        )
-
-        renderer_output = self.feature_renderer(pytorch3d_mesh)
-        w_maps = renderer_output['maps']
-        # visible_faces = renderer_output['visible_faces']
-
-        _, H, W, _ = w_maps.shape
-        target_size = W 
-        crop_amount = (H - target_size) // 2  
-        w_maps = w_maps[:, crop_amount:H-crop_amount, :, :]
-        w_maps = torch.nn.functional.interpolate(w_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
-        w_maps = rearrange(w_maps, '(b k) j h w -> b k h w j', b=B, k=K)
-        
-        batch['smpl_w_maps'] = w_maps
+            batch['smpl_w_maps'] = w_maps
 
 
 
 
-        # Render SMPL pointmaps
-        smpl_pytorch3d_mesh = Meshes(
-            verts=smpl_vertices.view(-1, 6890, 3),
-            faces=smpl_faces[None].repeat(B*K, 1, 1),
-            textures=TexturesVertex(verts_features=smpl_T_vertices.view(-1, 6890, 3))
-        )
-        ret = self.feature_renderer(smpl_pytorch3d_mesh)
-        vc_maps = ret['maps']
-        mask = ret['mask'].unsqueeze(-1)
-        _, H, W, _ = vc_maps.shape
-        target_size = W 
-        crop_amount = (H - target_size) // 2  
-        vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
-        vc_maps = torch.nn.functional.interpolate(vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
-        vc_maps = rearrange(vc_maps, '(b k) c h w -> b k h w c', b=B, k=K)
-        batch['vc_maps'] = vc_maps
+            # Render SMPL pointmaps
+            smpl_pytorch3d_mesh = Meshes(
+                verts=smpl_vertices.view(-1, self.num_smpl_vertices, 3),
+                faces=smpl_faces[None].repeat(B*K, 1, 1),
+                textures=TexturesVertex(verts_features=smpl_T_vertices.view(-1, self.num_smpl_vertices, 3))
+            )
+            ret = self.feature_renderer(smpl_pytorch3d_mesh)
+            vc_maps = ret['maps']
+            mask = ret['mask'].unsqueeze(-1)
+            _, H, W, _ = vc_maps.shape
+            target_size = W 
+            crop_amount = (H - target_size) // 2  
+            vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
+            vc_maps = torch.nn.functional.interpolate(
+                vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            )
+            vc_maps = rearrange(vc_maps, '(b k) c h w -> b k h w c', b=B, k=K)
+            batch['vc_maps'] = vc_maps
 
-        mask = mask[:, crop_amount:H-crop_amount, :, :]
-        mask = torch.nn.functional.interpolate(mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest')
-        mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
-        batch['smpl_mask'] = mask.squeeze(-1)
+            mask = mask[:, crop_amount:H-crop_amount, :, :]
+            mask = torch.nn.functional.interpolate(
+                mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
+            )
+            mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
+            batch['smpl_mask'] = mask.squeeze(-1)
 
+            
+            template_mesh = batch['template_mesh']
+            template_mesh_verts = [torch.tensor(mesh.vertices, device=self.device, dtype=torch.float32) for mesh in template_mesh]
+            template_mesh_faces = [torch.tensor(mesh.faces, device=self.device, dtype=torch.long) for mesh in template_mesh]
 
+            # template_vertices_posed = general_lbs(
+            #     pose=batch['pose'],
+            #     J=batch['smpl_T_joints'],
+            #     vc=template_mesh_verts,
+            #     lbs_weights=batch['template_mesh_lbs_weights'],
+            #     parents=self.smpl_male.parents,
+            # )
+            # template_posed_pytorch3d_mesh = Meshes(
+            #     verts=template_vertices_posed,
+            #     faces=template_mesh_faces[None].repeat(B*K, 1, 1),
+            #     textures=TexturesVertex(verts_features=template_mesh_verts)
+            # )
+            # ret = self.feature_renderer(template_posed_pytorch3d_mesh)
+            # vc_maps = ret['maps']
+            # mask = ret['mask'].unsqueeze(-1)
 
-        # Sample from Vp
-        scan_mesh_centered = Meshes(
-            verts=scan_mesh_verts_centered,
-            faces=scan_mesh_faces,
-        )
-        vp = sample_points_from_meshes(scan_mesh_centered, 24000)
-        vp_ptcld = Pointclouds(points=vp)
-        batch['vp_ptcld'] = vp_ptcld
+            # _, H, W, _ = vc_maps.shape
+            # target_size = W 
+            # crop_amount = (H - target_size) // 2  
+            
+            # vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
+            # vc_maps = torch.nn.functional.interpolate(
+            #     vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            # )
+            # vc_maps = rearrange(vc_maps, '(b k) c h w -> b k h w c', b=B, k=K)
+            # batch['vc_maps'] = vc_maps
 
-
-        # # Sample from Template Mesh
-        # template_mesh = batch['template_mesh']
-        # template_mesh_verts = [mesh.vertices for mesh in template_mesh]
-        # template_mesh_faces = [mesh.faces for mesh in template_mesh]
-
-
-        # # Align Template Mesh with SMPL
-        # smpl_T_vertices_midpoint = (torch.max(smpl_T_vertices[..., 1], dim=-1)[0] + torch.min(smpl_T_vertices[..., 1], dim=-1)[0]) / 2
-        # template_mesh_verts_midpoint = torch.stack([(torch.max(torch.tensor(verts[:, 1], device=self.device)) + torch.min(torch.tensor(verts[:, 1], device=self.device))) / 2 for verts in template_mesh_verts])
-        # offset = (smpl_T_vertices_midpoint[:, 0] - template_mesh_verts_midpoint)
-
-        # template_mesh_verts = [torch.tensor(verts, device=self.device, dtype=torch.float32) for i, verts in enumerate(template_mesh_verts)]
-        # template_mesh_verts[0][:, 1] += offset[0]
-
-
-        # template_mesh_pytorch3d = Meshes(
-        #     verts=template_mesh_verts,
-        #     faces=[torch.tensor(f, device=self.device, dtype=torch.int32) for f in template_mesh_faces]
-        # )
-
-        # batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, 6890)
-
-
-
-
-        # # Create 2D plot comparing SMPL and template vertices
-        # import matplotlib.pyplot as plt
-        # plt.figure(figsize=(18, 6))
-
-        # a, b = 0, 1
-
-        # # Plot SMPL vertices
-        # plt.subplot(131)
-        # plt.scatter(smpl_T_vertices[0, 0, :, a].cpu().numpy(), 
-        #            smpl_T_vertices[0, 0, :, b].cpu().numpy(),
-        #            c='blue', alpha=0.5, s=1)
-        # plt.title('SMPL T-Pose Vertices')
-        # plt.axis('equal')
-
-        # # Plot template vertices 
-        # plt.subplot(132)
-        # plt.scatter(batch['template_mesh_verts'][0][:, a].cpu().numpy(),
-        #            batch['template_mesh_verts'][0][:, b].cpu().numpy(), 
-        #            c='red', alpha=0.5, s=1)
-        # plt.title('Template Mesh Vertices')
-        # plt.axis('equal')
-
-        # plt.subplot(133)
-        # plt.scatter(smpl_T_vertices[0, 0, :, a].cpu().numpy(), 
-        #            smpl_T_vertices[0, 0, :, b].cpu().numpy(),
-        #            c='blue', alpha=0.5, s=0.5)
-        # plt.scatter(batch['template_mesh_verts'][0][:, a].cpu().numpy(),
-        #            batch['template_mesh_verts'][0][:, b].cpu().numpy(), 
-        #            c='red', alpha=0.5, s=0.5)
-        # plt.axis('equal')
-
-        # # Get min/max ranges for both plots
-        # smpl_x_min = smpl_T_vertices[0, 0, :, a].cpu().numpy().min()
-        # smpl_x_max = smpl_T_vertices[0, 0, :, a].cpu().numpy().max()
-        # smpl_y_min = smpl_T_vertices[0, 0, :, b].cpu().numpy().min() 
-        # smpl_y_max = smpl_T_vertices[0, 0, :, b].cpu().numpy().max()
-
-        # template_x_min = batch['template_mesh_verts'][0][:, a].cpu().numpy().min()
-        # template_x_max = batch['template_mesh_verts'][0][:, a].cpu().numpy().max()
-        # template_y_min = batch['template_mesh_verts'][0][:, b].cpu().numpy().min()
-        # template_y_max = batch['template_mesh_verts'][0][:, b].cpu().numpy().max()
-
-        # # Set same range for both plots
-        # x_min = min(smpl_x_min, template_x_min)
-        # x_max = max(smpl_x_max, template_x_max)
-        # y_min = min(smpl_y_min, template_y_min)
-        # y_max = max(smpl_y_max, template_y_max)
-
-        # plt.subplot(131).set_xlim(x_min, x_max)
-        # plt.subplot(131).set_ylim(y_min, y_max)
-        # plt.subplot(132).set_xlim(x_min, x_max)
-        # plt.subplot(132).set_ylim(y_min, y_max)
-        # plt.subplot(133).set_xlim(x_min, x_max)
-        # plt.subplot(133).set_ylim(y_min, y_max)
-
-        # plt.tight_layout()
-        # plt.savefig(f'vertex_comparison.png')
-        # plt.close()
-
-        # import ipdb; ipdb.set_trace()
+            # mask = mask[:, crop_amount:H-crop_amount, :, :]
+            # mask = torch.nn.functional.interpolate(
+            #     mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
+            # )
+            # mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
+            # batch['smpl_mask'] = mask.squeeze(-1)
 
 
 
+            # ----------------------- Sampling -----------------------
+            # Sample from Vp
+            scan_mesh_centered = Meshes(
+                verts=scan_mesh_verts_centered,
+                faces=scan_mesh_faces,
+            )
+            vp = sample_points_from_meshes(scan_mesh_centered, 24000)
+            vp_ptcld = Pointclouds(points=vp)
+            batch['vp_ptcld'] = vp_ptcld
 
-        # self._test_smpl_scan_alignment(smpl_vertices, scan_mesh_verts)
-        # self._test_render(vc_maps, masks=mask, name='vc_maps')
-        # self._test_render(w_maps, name='w_maps')
-        # self._test_sampling(scan_mesh_centered, vp_ptcld)
+
+
+            template_mesh_pytorch3d = Meshes(
+                verts=template_mesh_verts,
+                faces=template_mesh_faces
+            )
+
+            batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, 24000)
+
+            # LEGACY: for SMPL alignment, not very good since arms always misaligned 
+            # Align Template Mesh with SMPL
+            # smpl_T_vertices_midpoint = (torch.max(smpl_T_vertices[..., 1], dim=-1)[0] + torch.min(smpl_T_vertices[..., 1], dim=-1)[0]) / 2
+            # template_mesh_verts_midpoint = torch.stack([(torch.max(torch.tensor(verts[:, 1], device=self.device)) + torch.min(torch.tensor(verts[:, 1], device=self.device))) / 2 for verts in template_mesh_verts])
+            # offset = (smpl_T_vertices_midpoint[:, 0] - template_mesh_verts_midpoint)
+
+            # template_mesh_verts = [torch.tensor(verts, device=self.device, dtype=torch.float32) for i, verts in enumerate(template_mesh_verts)]
+            # template_mesh_verts[0][:, 1] += offset[0]
+
+
+            # self._test_smpl_scan_alignment(smpl_vertices, scan_mesh_verts)
+            # self._test_render(vc_maps, masks=mask, name='vc_maps')
+            # self._test_render(w_maps, name='w_maps')
+            # self._test_sampling(scan_mesh_centered, vp_ptcld)
 
         return batch 
+
 
 
     def validation_step(self, batch, batch_idx):
@@ -484,48 +455,19 @@ class CCHTrainer(pl.LightningModule):
             return optimizer
 
 
-    # dvc_maps = []
-            # for k in range(N): # For each pose, render dvc maps for all views
-            #     vertices = batch['v_posed'][:, [k]]
-            #     dvc_maps.append(self.feature_renderer(
-            #         vertices=vertices,
-            #         dvc=dvc[:, [k]]
-            #     )['dvc_maps'])
-            # dvc_maps = torch.stack(dvc_maps, dim=1)
-
-
-            # """ b k n h w c """
-            # b, k, n = 0, 2, 0
-            # import matplotlib.pyplot as plt
-            # dvc_maps[~masks[:, None].repeat(1, N, 1,1,1,1).bool().squeeze()] = 0
-            # plt.figure(figsize=(10, 10))
-
-            # for k in range(N):
-            #     for n in range(N):
-            #         plt.subplot(N, N, k*N + n + 1)
-            #         plt.imshow(torch.norm(dvc_maps[b, k, n], dim=-1).cpu().detach().numpy())
-            #         plt.title(f'{k}th pose, on the {n}th pm')
-            #         plt.axis('off')
-            # # plt.colorbar()
-            # plt.savefig(f'dvc_maps.png')
-            # plt.show()
-
-            # import ipdb 
-            # ipdb.set_trace()
 
 
     def knn_ptcld(self, x, y, K=1):
-        
+        with torch.autocast(enabled=False, device_type='cuda'):
+            x_lengths, x_normals = None, None
+            y_lengths, y_normals = None, None
 
-        x_lengths, x_normals = None, None
-        y_lengths, y_normals = None, None
-
-        x, x_lengths, x_normals = _handle_pointcloud_input(x, x_lengths, x_normals)
-        y, y_lengths, y_normals = _handle_pointcloud_input(y, y_lengths, y_normals)
-
-        x_nn = knn_points(x, y, lengths1=x_lengths, lengths2=y_lengths, norm=2, K=K)
-        dist, idx, _ = x_nn
-        return dist, idx
+            x, x_lengths, x_normals = _handle_pointcloud_input(x, x_lengths, x_normals)
+            y, y_lengths, y_normals = _handle_pointcloud_input(y, y_lengths, y_normals)
+            
+            x_nn = knn_points(x, y, lengths1=x_lengths, lengths2=y_lengths, norm=2, K=K)
+            dist, idx, _ = x_nn
+            return dist, idx
    
 
     def _test_smpl_scan_alignment(self, smpl_vertices, scan_mesh_verts):
@@ -642,3 +584,146 @@ class CCHTrainer(pl.LightningModule):
         )
         fig.write_image("pointclouds.png")
         import ipdb; ipdb.set_trace()
+
+
+    # # Create scatter plot comparing scan and SMPL vertices
+    # import matplotlib.pyplot as plt
+
+    # # Create 3D figure
+    # fig = plt.figure(figsize=(12, 6))
+    
+    # # SMPL vertices plot
+    # ax1 = fig.add_subplot(121, projection='3d')
+    # smpl_verts = smpl_vertices[0,0].detach().cpu().numpy()
+    # ax1.scatter(smpl_verts[:,0], smpl_verts[:,1], smpl_verts[:,2], s=0.1, c='blue', marker='.', alpha=0.6)
+    # ax1.set_title('SMPL Vertices')
+    # ax1.set_xlabel('X')
+    # ax1.set_ylabel('Y')
+    # ax1.set_zlabel('Z')
+
+    # # Scan vertices plot 
+    # ax2 = fig.add_subplot(122, projection='3d')
+    # scan_verts = scan_mesh_verts[0].detach().cpu().numpy()
+    # ax2.scatter(scan_verts[:,0], scan_verts[:,1], scan_verts[:,2], s=0.1, c='red', marker='.', alpha=0.6)
+    # ax2.scatter(smpl_verts[:,0], smpl_verts[:,1], smpl_verts[:,2], s=0.1, c='blue', marker='.', alpha=0.6)
+    # ax2.set_title('Scan Vertices')
+    # ax2.set_xlabel('X')
+    # ax2.set_ylabel('Y')
+    # ax2.set_zlabel('Z')
+
+    # # Set equal aspect ratio for both plots
+    # ax1.set_box_aspect([1,1,1])
+    # ax2.set_box_aspect([1,1,1])
+
+    # # Make ticks equal scale
+    # ax1.set_aspect('equal', adjustable='box')
+    # ax2.set_aspect('equal', adjustable='box')
+
+    # # Set view to look into z-axis
+    # ax1.view_init(elev=10, azim=10, vertical_axis='y')
+    # ax2.view_init(elev=10, azim=10, vertical_axis='y')
+
+    # plt.tight_layout()
+    # plt.savefig('vertices_comparison.png')
+    # plt.close()
+
+    # import ipdb; ipdb.set_trace()
+
+
+
+
+
+
+
+
+
+    # # Create 2D plot comparing SMPL and template vertices
+    # import matplotlib.pyplot as plt
+    # plt.figure(figsize=(18, 6))
+
+    # a, b = 0, 1
+
+    # # Plot SMPL vertices
+    # plt.subplot(131)
+    # plt.scatter(smpl_T_vertices[0, 0, :, a].cpu().numpy(), 
+    #            smpl_T_vertices[0, 0, :, b].cpu().numpy(),
+    #            c='blue', alpha=0.5, s=1)
+    # plt.title('SMPL T-Pose Vertices')
+    # plt.axis('equal')
+
+    # # Plot template vertices 
+    # plt.subplot(132)
+    # plt.scatter(batch['template_mesh_verts'][0][:, a].cpu().numpy(),
+    #            batch['template_mesh_verts'][0][:, b].cpu().numpy(), 
+    #            c='red', alpha=0.5, s=1)
+    # plt.title('Template Mesh Vertices')
+    # plt.axis('equal')
+
+    # plt.subplot(133)
+    # plt.scatter(smpl_T_vertices[0, 0, :, a].cpu().numpy(), 
+    #            smpl_T_vertices[0, 0, :, b].cpu().numpy(),
+    #            c='blue', alpha=0.5, s=0.5)
+    # plt.scatter(batch['template_mesh_verts'][0][:, a].cpu().numpy(),
+    #            batch['template_mesh_verts'][0][:, b].cpu().numpy(), 
+    #            c='red', alpha=0.5, s=0.5)
+    # plt.axis('equal')
+
+    # # Get min/max ranges for both plots
+    # smpl_x_min = smpl_T_vertices[0, 0, :, a].cpu().numpy().min()
+    # smpl_x_max = smpl_T_vertices[0, 0, :, a].cpu().numpy().max()
+    # smpl_y_min = smpl_T_vertices[0, 0, :, b].cpu().numpy().min() 
+    # smpl_y_max = smpl_T_vertices[0, 0, :, b].cpu().numpy().max()
+
+    # template_x_min = batch['template_mesh_verts'][0][:, a].cpu().numpy().min()
+    # template_x_max = batch['template_mesh_verts'][0][:, a].cpu().numpy().max()
+    # template_y_min = batch['template_mesh_verts'][0][:, b].cpu().numpy().min()
+    # template_y_max = batch['template_mesh_verts'][0][:, b].cpu().numpy().max()
+
+    # # Set same range for both plots
+    # x_min = min(smpl_x_min, template_x_min)
+    # x_max = max(smpl_x_max, template_x_max)
+    # y_min = min(smpl_y_min, template_y_min)
+    # y_max = max(smpl_y_max, template_y_max)
+
+    # plt.subplot(131).set_xlim(x_min, x_max)
+    # plt.subplot(131).set_ylim(y_min, y_max)
+    # plt.subplot(132).set_xlim(x_min, x_max)
+    # plt.subplot(132).set_ylim(y_min, y_max)
+    # plt.subplot(133).set_xlim(x_min, x_max)
+    # plt.subplot(133).set_ylim(y_min, y_max)
+
+    # plt.tight_layout()
+    # plt.savefig(f'vertex_comparison.png')
+    # plt.close()
+
+    # import ipdb; ipdb.set_trace()
+
+
+    # dvc_maps = []
+    # for k in range(N): # For each pose, render dvc maps for all views
+    #     vertices = batch['v_posed'][:, [k]]
+    #     dvc_maps.append(self.feature_renderer(
+    #         vertices=vertices,
+    #         dvc=dvc[:, [k]]
+    #     )['dvc_maps'])
+    # dvc_maps = torch.stack(dvc_maps, dim=1)
+
+
+    # """ b k n h w c """
+    # b, k, n = 0, 2, 0
+    # import matplotlib.pyplot as plt
+    # dvc_maps[~masks[:, None].repeat(1, N, 1,1,1,1).bool().squeeze()] = 0
+    # plt.figure(figsize=(10, 10))
+
+    # for k in range(N):
+    #     for n in range(N):
+    #         plt.subplot(N, N, k*N + n + 1)
+    #         plt.imshow(torch.norm(dvc_maps[b, k, n], dim=-1).cpu().detach().numpy())
+    #         plt.title(f'{k}th pose, on the {n}th pm')
+    #         plt.axis('off')
+    # # plt.colorbar()
+    # plt.savefig(f'dvc_maps.png')
+    # plt.show()
+
+    # import ipdb 
+    # ipdb.set_trace()
