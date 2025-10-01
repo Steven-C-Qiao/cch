@@ -116,6 +116,18 @@ class CCHTrainer(pl.LightningModule):
         return loss 
     
 
+    @torch.no_grad()
+    def forward_and_visualise(self, batch, batch_idx):
+
+        batch = self._process_inputs(batch, batch_idx, normalise=self.normalise)
+
+        preds = self(batch)
+
+        self.visualiser.visualise(preds, batch, batch_idx=batch_idx) 
+
+
+
+
     def _log_metrics_and_visualise(self, loss, loss_dict, metrics, split, preds, batch, global_step):
         if split == 'val':
             for key in list(loss_dict.keys()):
@@ -161,18 +173,18 @@ class CCHTrainer(pl.LightningModule):
 
 
                 if self.body_model == 'smplx':
-                    # smpl_T_output = smpl_model(
-                    #     betas=batch['betas'][i].view(K, -1),
-                    #     body_pose = torch.zeros_like(batch['body_pose'][i].view(K, -1)),
-                    #     global_orient = torch.zeros_like(batch['global_orient'][i].view(K, -1)),
-                    #     transl = torch.zeros_like(batch['transl'][i].view(K, -1)),
-                    #     left_hand_pose = torch.zeros_like(batch['left_hand_pose'][i].view(K, -1)),
-                    #     right_hand_pose = torch.zeros_like(batch['right_hand_pose'][i].view(K, -1)),
-                    #     expression = torch.zeros_like(batch['expression'][i].view(K, -1)),
-                    #     jaw_pose = torch.zeros_like(batch['jaw_pose'][i].view(K, -1)),
-                    #     leye_pose = torch.zeros_like(batch['leye_pose'][i].view(K, -1)),
-                    #     reye_pose = torch.zeros_like(batch['reye_pose'][i].view(K, -1)),
-                    # )   
+                    smpl_T_output = smpl_model(
+                        betas=batch['betas'][i].view(K, -1),
+                        body_pose = torch.zeros_like(batch['body_pose'][i].view(K, -1)),
+                        global_orient = torch.zeros_like(batch['global_orient'][i].view(K, -1)),
+                        transl = torch.zeros_like(batch['transl'][i].view(K, -1)),
+                        left_hand_pose = torch.zeros_like(batch['left_hand_pose'][i].view(K, -1)),
+                        right_hand_pose = torch.zeros_like(batch['right_hand_pose'][i].view(K, -1)),
+                        expression = torch.zeros_like(batch['expression'][i].view(K, -1)),
+                        jaw_pose = torch.zeros_like(batch['jaw_pose'][i].view(K, -1)),
+                        leye_pose = torch.zeros_like(batch['leye_pose'][i].view(K, -1)),
+                        reye_pose = torch.zeros_like(batch['reye_pose'][i].view(K, -1)),
+                    )   
                     smpl_output = smpl_model(
                         betas=batch['betas'][i].view(K, -1),
                         global_orient = batch['global_orient'][i].view(K, -1),
@@ -203,17 +215,17 @@ class CCHTrainer(pl.LightningModule):
                 else:
                     raise ValueError(f"Body model {self.body_model} not supported")
                 
-                # smpl_T_joints = smpl_T_output.joints[:, :self.num_joints]
-                # smpl_T_vertices = smpl_T_output.vertices
+                smpl_T_joints = smpl_T_output.joints[:, :self.num_joints]
+                smpl_T_vertices = smpl_T_output.vertices
 
-                # smpl_T_joints_list.append(smpl_T_joints)
-                # smpl_T_vertices_list.append(smpl_T_vertices)
+                smpl_T_joints_list.append(smpl_T_joints)
+                smpl_T_vertices_list.append(smpl_T_vertices)
                 smpl_vertices_list.append(smpl_output.vertices)
                 smpl_skinning_weights_list.append(smpl_model.lbs_weights)
                 smpl_full_pose_list.append(smpl_output.full_pose)
                 
-            # smpl_T_joints = torch.stack(smpl_T_joints_list, dim=0)
-            # smpl_T_vertices = torch.stack(smpl_T_vertices_list, dim=0)
+            smpl_T_joints = torch.stack(smpl_T_joints_list, dim=0)
+            smpl_T_vertices = torch.stack(smpl_T_vertices_list, dim=0)
             smpl_vertices = torch.stack(smpl_vertices_list, dim=0)
             smpl_skinning_weights = torch.stack(smpl_skinning_weights_list, dim=0)[:, None].repeat(1, K, 1, 1)
             smpl_full_pose = torch.stack(smpl_full_pose_list, dim=0)
@@ -289,12 +301,88 @@ class CCHTrainer(pl.LightningModule):
 
 
             # Render SMPL pointmaps
-            smpl_pytorch3d_mesh = Meshes(
-                verts=smpl_vertices.view(-1, self.num_smpl_vertices, 3),
-                faces=smpl_faces[None].repeat(B*K, 1, 1),
-                textures=TexturesVertex(verts_features=smpl_T_vertices.view(-1, self.num_smpl_vertices, 3))
+            # smpl_pytorch3d_mesh = Meshes(
+            #     verts=smpl_vertices.view(-1, self.num_smpl_vertices, 3),
+            #     faces=smpl_faces[None].repeat(B*K, 1, 1),
+            #     textures=TexturesVertex(verts_features=batch['smpl_T_vertices'].repeat(1, K, 1, 1).view(-1, self.num_smpl_vertices, 3))
+            # )
+            # ret = self.feature_renderer(smpl_pytorch3d_mesh)
+            # vc_maps = ret['maps']
+            # mask = ret['mask'].unsqueeze(-1)
+            # _, H, W, _ = vc_maps.shape
+            # target_size = W 
+            # crop_amount = (H - target_size) // 2  
+            # vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
+            # vc_maps = torch.nn.functional.interpolate(
+            #     vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            # )
+            # vc_maps = rearrange(vc_maps, '(b k) c h w -> b k h w c', b=B, k=K)
+            # batch['vc_maps'] = vc_maps
+
+            # mask = mask[:, crop_amount:H-crop_amount, :, :]
+            # mask = torch.nn.functional.interpolate(
+            #     mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
+            # )
+            # mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
+            # batch['smpl_mask'] = mask.squeeze(-1)
+
+            
+
+
+
+
+
+            template_mesh = batch['template_mesh']
+            template_mesh_verts = [torch.tensor(mesh.vertices, device=self.device, dtype=torch.float32) for mesh in template_mesh]
+            template_mesh_faces = [torch.tensor(mesh.faces, device=self.device, dtype=torch.long) for mesh in template_mesh]
+
+
+            template_full_mesh = batch['template_full_mesh']
+            template_full_lbs_weights = batch['template_full_lbs_weights']
+            
+            template_full_mesh_verts = [torch.tensor(mesh.vertices, device=self.device, dtype=torch.float32) for mesh in template_full_mesh]
+            template_full_mesh_faces = [torch.tensor(mesh.faces, device=self.device, dtype=torch.long) for mesh in template_full_mesh]
+
+            template_full_mesh_verts_posed_list = []
+            template_full_mesh_faces_expanded_list = [faces[None].repeat(K, 1, 1) for faces in template_full_mesh_faces]
+            template_full_mesh_verts_expanded_list = [verts[None].repeat(K, 1, 1) for verts in template_full_mesh_verts]
+
+
+            for b in range(B):
+                template_full_mesh_verts_posed, _ = general_lbs(
+                    pose=batch['pose'][b],
+                    J=batch['smpl_T_joints'][b].repeat(K, 1, 1),
+                    vc=template_full_mesh_verts[b][None].repeat(K, 1, 1),
+                    lbs_weights=template_full_lbs_weights[b][None].repeat(K, 1, 1),
+                    parents=self.smpl_male.parents,
+                )
+                template_full_mesh_verts_posed += batch['transl'][b][:, None, :]
+                template_full_mesh_verts_posed_list.append(template_full_mesh_verts_posed)
+
+
+            # Flatten list of B items of shape (K,N,3) into B*K items of shape (N,3)
+            template_full_mesh_verts_posed_list = [
+                verts[k] for verts in template_full_mesh_verts_posed_list 
+                for k in range(K) 
+            ]
+            template_full_mesh_faces_expanded_list = [
+                faces[k] for faces in template_full_mesh_faces_expanded_list 
+                for k in range(K) 
+            ]
+            template_full_mesh_verts_expanded_list = [
+                verts[k] for verts in template_full_mesh_verts_expanded_list 
+                for k in range(K) 
+            ]
+
+
+            template_full_posed_pytorch3d_mesh = Meshes(
+                verts=template_full_mesh_verts_posed_list,
+                faces=template_full_mesh_faces_expanded_list,
+                textures=TexturesVertex(verts_features=template_full_mesh_verts_expanded_list)
             )
-            ret = self.feature_renderer(smpl_pytorch3d_mesh)
+
+
+            ret = self.feature_renderer(template_full_posed_pytorch3d_mesh)
             vc_maps = ret['maps']
             mask = ret['mask'].unsqueeze(-1)
             _, H, W, _ = vc_maps.shape
@@ -315,44 +403,6 @@ class CCHTrainer(pl.LightningModule):
             batch['smpl_mask'] = mask.squeeze(-1)
 
             
-            template_mesh = batch['template_mesh']
-            template_mesh_verts = [torch.tensor(mesh.vertices, device=self.device, dtype=torch.float32) for mesh in template_mesh]
-            template_mesh_faces = [torch.tensor(mesh.faces, device=self.device, dtype=torch.long) for mesh in template_mesh]
-
-            # template_vertices_posed = general_lbs(
-            #     pose=batch['pose'],
-            #     J=batch['smpl_T_joints'],
-            #     vc=template_mesh_verts,
-            #     lbs_weights=batch['template_mesh_lbs_weights'],
-            #     parents=self.smpl_male.parents,
-            # )
-            # template_posed_pytorch3d_mesh = Meshes(
-            #     verts=template_vertices_posed,
-            #     faces=template_mesh_faces[None].repeat(B*K, 1, 1),
-            #     textures=TexturesVertex(verts_features=template_mesh_verts)
-            # )
-            # ret = self.feature_renderer(template_posed_pytorch3d_mesh)
-            # vc_maps = ret['maps']
-            # mask = ret['mask'].unsqueeze(-1)
-
-            # _, H, W, _ = vc_maps.shape
-            # target_size = W 
-            # crop_amount = (H - target_size) // 2  
-            
-            # vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
-            # vc_maps = torch.nn.functional.interpolate(
-            #     vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
-            # )
-            # vc_maps = rearrange(vc_maps, '(b k) c h w -> b k h w c', b=B, k=K)
-            # batch['vc_maps'] = vc_maps
-
-            # mask = mask[:, crop_amount:H-crop_amount, :, :]
-            # mask = torch.nn.functional.interpolate(
-            #     mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
-            # )
-            # mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
-            # batch['smpl_mask'] = mask.squeeze(-1)
-
 
 
             # ----------------------- Sampling -----------------------
@@ -374,14 +424,6 @@ class CCHTrainer(pl.LightningModule):
 
             batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, 24000)
 
-            # LEGACY: for SMPL alignment, not very good since arms always misaligned 
-            # Align Template Mesh with SMPL
-            # smpl_T_vertices_midpoint = (torch.max(smpl_T_vertices[..., 1], dim=-1)[0] + torch.min(smpl_T_vertices[..., 1], dim=-1)[0]) / 2
-            # template_mesh_verts_midpoint = torch.stack([(torch.max(torch.tensor(verts[:, 1], device=self.device)) + torch.min(torch.tensor(verts[:, 1], device=self.device))) / 2 for verts in template_mesh_verts])
-            # offset = (smpl_T_vertices_midpoint[:, 0] - template_mesh_verts_midpoint)
-
-            # template_mesh_verts = [torch.tensor(verts, device=self.device, dtype=torch.float32) for i, verts in enumerate(template_mesh_verts)]
-            # template_mesh_verts[0][:, 1] += offset[0]
 
 
             # self._test_smpl_scan_alignment(smpl_vertices, scan_mesh_verts)

@@ -108,20 +108,21 @@ class CCH(nn.Module):
             vp: (B, K, N, H, W, 3): Posed vertices for the k-th pose
             dvc: pose correctives: (B, K, N, H, W, 3) k-th pose blend shape for all N views 
         """
-        images = batch['imgs']
-        pose = batch['pose']
-        joints = batch['smpl_T_joints']
-        w_smpl = batch['smpl_w_maps']
-        mask = batch['masks']
-        
-
         ret = {}
+
+        images = batch['imgs']
 
         if len(images.shape) == 4:
             images = images.unsqueeze(0)
         B, K, C_in, H, W = images.shape
         assert K == 5
         N = 4 
+
+        pose = batch['pose']
+        joints = batch['smpl_T_joints'].repeat(1, K, 1, 1)
+        w_smpl = batch['smpl_w_maps']
+        mask = batch['masks']
+        
 
 
         canonical_tokens_list, patch_start_idx = self.aggregator(images[:, :N]) 

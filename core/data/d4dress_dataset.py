@@ -82,7 +82,7 @@ def d4dress_collate_fn(batch):
     
     nonstackable_keys = [
         'scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 'scan_mesh_verts_centered', 'scan_mesh_colors',
-        'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'gender', 'take_dir']
+        'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'template_full_mesh', 'template_full_lbs_weights', 'gender', 'take_dir']
 
 
     for key in collated.keys():
@@ -199,6 +199,11 @@ class D4DressDataset(Dataset):
         ret['template_mesh_verts'] = torch.tensor(full_filtered_vertices, dtype=torch.float32)
         ret['template_mesh_faces'] = torch.tensor(full_filtered_faces, dtype=torch.long)
         # ret['template_mesh_lbs_weights'] = torch.tensor(template_mesh_lbs_weights, dtype=torch.float32)
+
+        template_full_mesh = trimesh.load(os.path.join(template_dir, 'full_mesh.ply'))
+        template_full_lbs_weights = np.load(os.path.join(template_dir, 'full_lbs_weights.npy'))
+        ret['template_full_mesh'] = template_full_mesh
+        ret['template_full_lbs_weights'] = torch.tensor(template_full_lbs_weights, dtype=torch.float32)
 
 
         # -------------- SMPL T joints and vertices --------------

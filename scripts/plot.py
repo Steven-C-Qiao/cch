@@ -4,6 +4,7 @@ import os
 import torch
 import argparse
 import glob
+from tqdm import tqdm
 from pathlib import Path
 
 from loguru import logger
@@ -57,65 +58,28 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         os.makedirs(vis_save_dir)
 
 
-
     model = CCHTrainer(
         cfg=cfg,
         dev=dev,
         vis_save_dir=vis_save_dir,
         plot=True
     )
-
-    datamodule = CCHDataModule(cfg)
-
-
-
-    # Callbacks
-    checkpoint_callbacks = [
-        ModelCheckpoint(
-            dirpath=model_save_dir,
-            filename='val_loss_{epoch:03d}',
-            save_top_k=1,
-            save_last=True,
-            verbose=True,
-            monitor='val_loss',
-            mode='min'
-        ),
-        ModelCheckpoint( # this is the vc_init cfd 
-            dirpath=model_save_dir,
-            filename='vc_cfd_{epoch:03d}',
-            save_top_k=1,
-            save_last=False,
-            verbose=True,
-            monitor='vc_cfd',
-            mode='min'
-        ),
-    ]
-
-    tensorboard_logger = TensorBoardLogger(exp_dir, name='lightning_logs')
-
-    trainer = pl.Trainer(
-        max_epochs=cfg.TRAIN.NUM_EPOCHS,
-        accelerator='auto',
-        devices=1, 
-        strategy='auto',
-        callbacks=checkpoint_callbacks,
-        logger=tensorboard_logger,
-        precision=cfg.SPEEDUP.MIXED_PRECISION,
-        log_every_n_steps=10,
-        gradient_clip_val=1.0,
-        num_sanity_val_steps=0,
-    )
-
-
     if load_path is not None:
         logger.info(f"Loading checkpoint: {load_path}")
         ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
-        model.load_state_dict(ckpt['state_dict'], strict=False)
+        model.load_state_dict(ckpt['state_dict'], strict=True)
         # logger.log_hyperparams(ckpt['hyper_parameters'])
 
-    trainer.fit(model, datamodule, ckpt_path=resume_path)
-    # trainer.validate(model, datamodule=datamodule, ckpt_path=resume_path)
-    # trainer.fit(model, datamodule)
+    datamodule = CCHDataModule(cfg)
+    datamodule.setup('train')
+    train_dataloader = datamodule.train_dataloader()
+
+    model.eval()
+    with torch.no_grad():
+        for batch_idx, batch in tqdm(enumerate(train_dataloader)):
+            model.forward_and_visualise(batch, batch_idx)
+
+
 
 
 if __name__ == '__main__':
@@ -168,7 +132,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f'Device: {device}')
 
-    # os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
 
     # device_ids = list(map(int, args.gpus.split(",")))
     # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")

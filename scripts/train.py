@@ -36,7 +36,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=None, plot=False):
-    set_seed(42)
+    set_seed(4)
     
     # Get config
     cfg = get_cch_cfg_defaults()
@@ -86,7 +86,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         cfg=cfg,
         dev=dev,
         vis_save_dir=vis_save_dir,
-        plot=False
+        plot=True
     )
 
     if cfg.SPEEDUP.COMPILE:
@@ -140,6 +140,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         precision=cfg.SPEEDUP.MIXED_PRECISION,
         # log_every_n_steps=10,
         # enable_progress_bar=False,
+        num_sanity_val_steps=0
     )
 
 

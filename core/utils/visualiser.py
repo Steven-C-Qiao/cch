@@ -1,8 +1,10 @@
 import torch 
 import os 
 
-
+import matplotlib
+matplotlib.use('Agg')  # Set the backend to Agg before importing pyplot
 import matplotlib.pyplot as plt
+
 import numpy as np
 import pytorch_lightning as pl 
 import matplotlib.colors
@@ -31,7 +33,8 @@ class Visualiser(pl.LightningModule):
     def visualise(
         self, 
         predictions,
-        batch
+        batch,
+        batch_idx=None
     ):
         """
         Args:
@@ -57,6 +60,10 @@ class Visualiser(pl.LightningModule):
         if self.rank != 0:
             return None 
         
+        if batch_idx is not None:
+            self.counter = batch_idx
+        else:
+            self.counter = self.global_step
 
         # Convert predictions to numpy if tensor
         for k, v in predictions.items():
@@ -118,7 +125,7 @@ class Visualiser(pl.LightningModule):
             
             # Save figure
             plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_images.png'))
+            plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_images.png'))
             plt.close()
       
 
@@ -240,7 +247,7 @@ class Visualiser(pl.LightningModule):
 
 
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_pms.png'))
+        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_pms.png'))
         plt.close()
 
 
@@ -329,7 +336,7 @@ class Visualiser(pl.LightningModule):
 
 
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_pbs_pms.png'))
+        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_pbs_pms.png'))
         plt.close()
 
 
@@ -573,7 +580,7 @@ class Visualiser(pl.LightningModule):
 
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}.png'), dpi=200)
+        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}.png'), dpi=200)
 
         plt.close()
 
