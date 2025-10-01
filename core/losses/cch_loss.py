@@ -150,7 +150,7 @@ class CCHLoss(pl.LightningModule):
             total_loss = total_loss + vp_loss
   
 
-        loss_dict['total_loss'] = total_loss
+        # loss_dict['total_loss'] = total_loss
 
         # for k, v in loss_dict.items():
         #     print(k, v.item())

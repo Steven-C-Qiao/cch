@@ -86,7 +86,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         cfg=cfg,
         dev=dev,
         vis_save_dir=vis_save_dir,
-        plot=True
+        plot=False
     )
 
     if cfg.SPEEDUP.COMPILE:
@@ -102,6 +102,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
             dirpath=model_save_dir,
             filename='val_loss_{epoch:03d}',
             save_top_k=1,
+            every_n_epochs=5,
             save_last=True,
             verbose=True,
             monitor='val_loss',
@@ -109,20 +110,29 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         ),
         ModelCheckpoint( # this is the vc_init cfd 
             dirpath=model_save_dir,
-            filename='vc_pm_loss_{epoch:03d}',
+            filename='train_vc_cfd_{epoch:03d}',
             save_top_k=1,
             save_last=False,
             verbose=True,
-            monitor='vc_pm_loss',
+            monitor='train_vc_cfd',
+            mode='min'
+        ),
+        ModelCheckpoint(
+            dirpath=model_save_dir,
+            filename='val_vc_cfd_{epoch:03d}',
+            save_top_k=1,
+            save_last=False,
+            verbose=True,
+            monitor='val_vc_cfd',
             mode='min'
         ),
         # ModelCheckpoint( # this is the vp_cfd
         #     dirpath=model_save_dir,
-        #     filename='vp_cfd_{epoch:03d}',
+        #     filename='train_vp_cfd_{epoch:03d}',
         #     save_top_k=1,
         #     save_last=False,
         #     verbose=True,
-        #     monitor='vp_cfd',
+        #     monitor='train_vp_cfd',
         #     mode='min'
         # ),
     ]
@@ -140,7 +150,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         precision=cfg.SPEEDUP.MIXED_PRECISION,
         # log_every_n_steps=10,
         # enable_progress_bar=False,
-        num_sanity_val_steps=0
+        # num_sanity_val_steps=0
     )
 
 

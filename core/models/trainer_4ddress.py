@@ -129,16 +129,19 @@ class CCHTrainer(pl.LightningModule):
 
 
     def _log_metrics_and_visualise(self, loss, loss_dict, metrics, split, preds, batch, global_step):
-        if split == 'val':
-            for key in list(loss_dict.keys()):
-                loss_dict[f'val_{key}'] = loss_dict.pop(key)
-            for key in list(metrics.keys()):
-                metrics[f'val_{key}'] = metrics.pop(key)
+        if split == 'train':
+            on_step = True
+        else:
+            on_step = False
+            
+        for key in list(loss_dict.keys()):
+            loss_dict[f'{split}_{key}'] = loss_dict.pop(key)
+        for key in list(metrics.keys()):
+            metrics[f'{split}_{key}'] = metrics.pop(key)
         
-                
-        self.log(f'{split}_loss', loss, prog_bar=True, sync_dist=True, rank_zero_only=True)
-        self.log_dict(loss_dict, on_step=False, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
-        self.log_dict(metrics, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
+        self.log(f'{split}_loss', loss, prog_bar=True)
+        self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False)
+        self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False)
 
         # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
         #     self.visualiser.visualise(preds, batch) 

@@ -26,18 +26,18 @@ class CCHMetrics(pl.LightningModule):
         assert confidence.shape == batch['masks'][:, :N].shape
 
 
-        # if "vc_init" in predictions:
-        #     gt_vc = Pointclouds(
-        #         points=batch['template_mesh_verts']
-        #     )
-        #     pred_vc = predictions['vc_init']
-        #     mask = batch['masks'][:, :N] * confidence 
+        if "vc_init" in predictions:
+            gt_vc = Pointclouds(
+                points=batch['template_mesh_verts']
+            )
+            pred_vc = predictions['vc_init']
+            mask = batch['masks'][:, :N] * confidence 
 
-        #     pred_vc = rearrange(pred_vc, 'b n h w c -> b (n h w) c')
-        #     mask = rearrange(mask, 'b n h w -> b (n h w)')
+            pred_vc = rearrange(pred_vc, 'b n h w c -> b (n h w) c')
+            mask = rearrange(mask, 'b n h w -> b (n h w)')
 
-        #     vc_cfd, _, _ = self.masked_metric_cfd(gt_vc, pred_vc, mask)
-        #     ret['vc_cfd'] = vc_cfd
+            vc_cfd, _, _ = self.masked_metric_cfd(gt_vc, pred_vc, mask)
+            ret['vc_cfd'] = vc_cfd
 
         
         if "vp_init" in predictions:
