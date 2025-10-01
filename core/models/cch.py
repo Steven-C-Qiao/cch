@@ -109,6 +109,7 @@ class CCH(nn.Module):
             dvc: pose correctives: (B, K, N, H, W, 3) k-th pose blend shape for all N views 
         """
         ret = {}
+        images = batch['imgs']
 
         images = batch['imgs']
 
@@ -123,6 +124,14 @@ class CCH(nn.Module):
         w_smpl = batch['smpl_w_maps']
         mask = batch['masks']
         
+
+
+        pose = batch['pose']
+        joints = batch['smpl_T_joints'].repeat(1, K, 1, 1)
+        w_smpl = batch['smpl_w_maps']
+        mask = batch['masks']
+        
+
 
 
         canonical_tokens_list, patch_start_idx = self.aggregator(images[:, :N]) 

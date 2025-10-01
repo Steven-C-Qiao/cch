@@ -302,7 +302,6 @@ class CCHTrainer(pl.LightningModule):
 
 
 
-
             # Render SMPL pointmaps
             # smpl_pytorch3d_mesh = Meshes(
             #     verts=smpl_vertices.view(-1, self.num_smpl_vertices, 3),
@@ -406,6 +405,45 @@ class CCHTrainer(pl.LightningModule):
             batch['smpl_mask'] = mask.squeeze(-1)
 
             
+            template_mesh = batch['template_mesh']
+            template_mesh_verts = [torch.tensor(mesh.vertices, device=self.device, dtype=torch.float32) for mesh in template_mesh]
+            template_mesh_faces = [torch.tensor(mesh.faces, device=self.device, dtype=torch.long) for mesh in template_mesh]
+
+
+            # template_vertices_posed = general_lbs(
+            #     pose=batch['pose'],
+            #     J=batch['smpl_T_joints'],
+            #     vc=template_mesh_verts,
+            #     lbs_weights=batch['template_mesh_lbs_weights'],
+            #     parents=self.smpl_male.parents,
+            # )
+            # template_posed_pytorch3d_mesh = Meshes(
+            #     verts=template_vertices_posed,
+            #     faces=template_mesh_faces[None].repeat(B*K, 1, 1),
+            #     textures=TexturesVertex(verts_features=template_mesh_verts)
+            # )
+            # ret = self.feature_renderer(template_posed_pytorch3d_mesh)
+            # vc_maps = ret['maps']
+            # mask = ret['mask'].unsqueeze(-1)
+
+            # _, H, W, _ = vc_maps.shape
+            # target_size = W 
+            # crop_amount = (H - target_size) // 2  
+            
+            # vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
+            # vc_maps = torch.nn.functional.interpolate(
+            #     vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            # )
+            # vc_maps = rearrange(vc_maps, '(b k) c h w -> b k h w c', b=B, k=K)
+            # batch['vc_maps'] = vc_maps
+
+            # mask = mask[:, crop_amount:H-crop_amount, :, :]
+            # mask = torch.nn.functional.interpolate(
+            #     mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
+            # )
+            # mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
+            # batch['smpl_mask'] = mask.squeeze(-1)
+
 
 
             # ----------------------- Sampling -----------------------

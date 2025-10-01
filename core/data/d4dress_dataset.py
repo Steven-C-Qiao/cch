@@ -110,7 +110,7 @@ class D4DressDataset(Dataset):
     def __init__(self, cfg, ids):
         self.cfg = cfg
         self.num_frames_pp = 4
-        self.lengthen_by = 500
+        self.lengthen_by = 1000
 
         self.img_size = cfg.DATA.IMAGE_SIZE
         self.body_model = cfg.MODEL.BODY_MODEL
@@ -284,6 +284,14 @@ class D4DressDataset(Dataset):
             ret['imgs'].append(img_transformed)
             ret['masks'].append(mask_transformed)
 
+
+            # lbs_weights_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'lbs_images', 'lbs_image-f{}.pt'.format(sampled_frame))
+            # lbs_weights_fname = '/scratch/u5au/chexuan.u5au/4DDress/00122/Inner/Take2/Capture/0076/lbs_images/lbs_image-f00011.pt'
+            # lbs_weights = torch.load(lbs_weights_fname, map_location='cpu')
+            # print(f"Loaded lbs_weights type: {type(lbs_weights)}, is_sparse: {lbs_weights.is_sparse if hasattr(lbs_weights, 'is_sparse') else 'N/A'}")
+            # ret['smpl_w_maps'].append(lbs_weights)
+
+
         ret['imgs'] = torch.tensor(np.stack(ret['imgs']))
         ret['masks'] = torch.tensor(np.stack(ret['masks']))
         ret['R'] = torch.tensor(np.stack(ret['R']))
@@ -296,6 +304,7 @@ class D4DressDataset(Dataset):
         ret['betas'] = torch.tensor(np.stack(ret['betas']))
         ret['scan_rotation'] = torch.tensor(np.stack(ret['scan_rotation']))
         ret['sapiens_images'] = torch.tensor(np.stack(ret['sapiens_images']))
+        # ret['smpl_w_maps'] = torch.stack(ret['smpl_w_maps'])
         if self.body_model == 'smplx':
             ret['left_hand_pose'] = torch.tensor(np.stack(ret['left_hand_pose']))
             ret['right_hand_pose'] = torch.tensor(np.stack(ret['right_hand_pose']))
