@@ -47,6 +47,8 @@ class CCHTrainer(pl.LightningModule):
         self.body_model = cfg.MODEL.BODY_MODEL
         self.num_joints = 24 if self.body_model=='smpl' else 55
         self.num_smpl_vertices = 6890 if self.body_model=='smpl' else 10475
+        self.freeze_canonical_epochs = getattr(cfg.TRAIN, 'WARMUP_EPOCHS', 0)
+
 
         self.feature_renderer = FeatureRenderer(image_size=(256, 192)) 
 
@@ -76,6 +78,8 @@ class CCHTrainer(pl.LightningModule):
             smpl_male=self.smpl_male,
             smpl_female=self.smpl_female,
         )
+        self._freeze_canonical_modules()
+        self._unfreeze_pbs_modules()
 
         self.criterion = CCHLoss(cfg)
         self.metrics = CCHMetrics(cfg)
@@ -91,6 +95,11 @@ class CCHTrainer(pl.LightningModule):
     
     def on_train_epoch_start(self):
         self.visualiser.set_global_rank(self.global_rank)
+
+        # Update model freezing status based on current epoch
+        self._update_module_freezing()
+        # Update optimizer parameters if they changed
+        self._update_optimizer_parameters()
 
     def training_step(self, batch, batch_idx, split='train'):
         if self.first_batch is None:
@@ -116,6 +125,82 @@ class CCHTrainer(pl.LightningModule):
         return loss 
     
 
+    def _update_module_freezing(self):
+        """Update which modules are frozen based on current epoch."""
+        if not hasattr(self.model, 'model_pbs') or not self.model.model_pbs:
+            return
+            
+        if self.current_epoch < self.freeze_canonical_epochs:
+            # Stage 1: Freeze canonical modules, train only PBS modules
+            self._freeze_canonical_modules()
+            self._unfreeze_pbs_modules()
+            print(f"\nEpoch {self.current_epoch}: Frozen canonical modules, training PBS modules only\n")
+        else:
+            # Stage 2: Train all modules
+            self._unfreeze_all_modules()
+            print(f"\nEpoch {self.current_epoch}: Training all modules\n")
+
+    def _freeze_canonical_modules(self):
+        """Freeze canonical stage modules (aggregator, canonical_head, skinning_head)."""
+        # Freeze aggregator
+        for param in self.model.aggregator.parameters():
+            param.requires_grad = False
+        
+        # Freeze canonical head
+        for param in self.model.canonical_head.parameters():
+            param.requires_grad = False
+            
+        # Freeze skinning head if it exists
+        if hasattr(self.model, 'skinning_head'):
+            for param in self.model.skinning_head.parameters():
+                param.requires_grad = False
+    
+    def _unfreeze_pbs_modules(self):
+        """Unfreeze PBS modules (pbs_aggregator, pbs_head)."""
+        if hasattr(self.model, 'pbs_aggregator'):
+            for param in self.model.pbs_aggregator.parameters():
+                param.requires_grad = True
+                
+        if hasattr(self.model, 'pbs_head'):
+            for param in self.model.pbs_head.parameters():
+                param.requires_grad = True
+    
+    def _unfreeze_all_modules(self):
+        """Unfreeze all modules for joint training."""
+        # Unfreeze canonical modules
+        for param in self.model.aggregator.parameters():
+            param.requires_grad = True
+            
+        for param in self.model.canonical_head.parameters():
+            param.requires_grad = True
+            
+        if hasattr(self.model, 'skinning_head'):
+            for param in self.model.skinning_head.parameters():
+                param.requires_grad = True
+        
+        # Unfreeze PBS modules
+        self._unfreeze_pbs_modules()
+
+    def _update_optimizer_parameters(self):
+        """Update optimizer parameters when module freezing changes."""
+        if hasattr(self, 'optimizers') and self.optimizers() is not None:
+            optimizer = self.optimizers()
+            
+            # Get current trainable parameters
+            trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+            criterion_params = list(self.criterion.parameters())
+            new_params = trainable_params + criterion_params
+            
+            # Get current optimizer parameter groups
+            current_param_ids = set(id(p) for group in optimizer.param_groups for p in group['params'])
+            new_param_ids = set(id(p) for p in new_params)
+            
+            # Only update if parameters have changed
+            if current_param_ids != new_param_ids:
+                # Create new parameter groups
+                optimizer.param_groups = [{'params': new_params, 'lr': self.cfg.TRAIN.LR}]
+                print(f"Updated optimizer with {len(new_params)} trainable parameters")
+
     @torch.no_grad()
     def forward_and_visualise(self, batch, batch_idx):
 
@@ -140,6 +225,10 @@ class CCHTrainer(pl.LightningModule):
             metrics[f'{split}_{key}'] = metrics.pop(key)
         
         self.log(f'{split}_loss', loss, prog_bar=True)
+        self.log(f'{split}_vc_cfd', metrics.pop(f'{split}_vc_cfd'), prog_bar=True)
+        self.log(f'{split}_vp_init_cfd', metrics.pop(f'{split}_vp_init_cfd'), prog_bar=True)
+        if f'{split}_vp_cfd' in metrics:
+            self.log(f'{split}_vp_cfd', metrics.pop(f'{split}_vp_cfd'), prog_bar=True)
         self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False)
         self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False)
 
@@ -302,36 +391,6 @@ class CCHTrainer(pl.LightningModule):
 
 
 
-            # Render SMPL pointmaps
-            # smpl_pytorch3d_mesh = Meshes(
-            #     verts=smpl_vertices.view(-1, self.num_smpl_vertices, 3),
-            #     faces=smpl_faces[None].repeat(B*K, 1, 1),
-            #     textures=TexturesVertex(verts_features=batch['smpl_T_vertices'].repeat(1, K, 1, 1).view(-1, self.num_smpl_vertices, 3))
-            # )
-            # ret = self.feature_renderer(smpl_pytorch3d_mesh)
-            # vc_maps = ret['maps']
-            # mask = ret['mask'].unsqueeze(-1)
-            # _, H, W, _ = vc_maps.shape
-            # target_size = W 
-            # crop_amount = (H - target_size) // 2  
-            # vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
-            # vc_maps = torch.nn.functional.interpolate(
-            #     vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
-            # )
-            # vc_maps = rearrange(vc_maps, '(b k) c h w -> b k h w c', b=B, k=K)
-            # batch['vc_maps'] = vc_maps
-
-            # mask = mask[:, crop_amount:H-crop_amount, :, :]
-            # mask = torch.nn.functional.interpolate(
-            #     mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
-            # )
-            # mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
-            # batch['smpl_mask'] = mask.squeeze(-1)
-
-            
-
-
-
 
 
             template_mesh = batch['template_mesh']
@@ -410,41 +469,6 @@ class CCHTrainer(pl.LightningModule):
             template_mesh_faces = [torch.tensor(mesh.faces, device=self.device, dtype=torch.long) for mesh in template_mesh]
 
 
-            # template_vertices_posed = general_lbs(
-            #     pose=batch['pose'],
-            #     J=batch['smpl_T_joints'],
-            #     vc=template_mesh_verts,
-            #     lbs_weights=batch['template_mesh_lbs_weights'],
-            #     parents=self.smpl_male.parents,
-            # )
-            # template_posed_pytorch3d_mesh = Meshes(
-            #     verts=template_vertices_posed,
-            #     faces=template_mesh_faces[None].repeat(B*K, 1, 1),
-            #     textures=TexturesVertex(verts_features=template_mesh_verts)
-            # )
-            # ret = self.feature_renderer(template_posed_pytorch3d_mesh)
-            # vc_maps = ret['maps']
-            # mask = ret['mask'].unsqueeze(-1)
-
-            # _, H, W, _ = vc_maps.shape
-            # target_size = W 
-            # crop_amount = (H - target_size) // 2  
-            
-            # vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
-            # vc_maps = torch.nn.functional.interpolate(
-            #     vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
-            # )
-            # vc_maps = rearrange(vc_maps, '(b k) c h w -> b k h w c', b=B, k=K)
-            # batch['vc_maps'] = vc_maps
-
-            # mask = mask[:, crop_amount:H-crop_amount, :, :]
-            # mask = torch.nn.functional.interpolate(
-            #     mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
-            # )
-            # mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
-            # batch['smpl_mask'] = mask.squeeze(-1)
-
-
 
             # ----------------------- Sampling -----------------------
             # Sample from Vp
@@ -487,44 +511,49 @@ class CCHTrainer(pl.LightningModule):
     
 
     def configure_optimizers(self):
-        # Only include trainable parameters (excluding frozen aggregator and canonical_head)
+        # # Only include trainable parameters (excluding frozen aggregator and canonical_head)
+        # trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+        # params = trainable_params + list(self.criterion.parameters())
+
+        # Only include trainable parameters (dynamically updated based on freezing)
         trainable_params = [p for p in self.model.parameters() if p.requires_grad]
-        params = trainable_params + list(self.criterion.parameters())
+        criterion_params = list(self.criterion.parameters())
+        params = trainable_params + criterion_params
         optimizer = optim.Adam(params, lr=self.cfg.TRAIN.LR)
 
         # Optional warmup (linear) followed by cosine annealing
         if self.cfg.TRAIN.LR_SCHEDULER == 'cosine':
             warmup_epochs = int(getattr(self.cfg.TRAIN, 'WARMUP_EPOCHS', 0))
             
-            if warmup_epochs > 0:
-                # Create warmup scheduler
-                warmup = optim.lr_scheduler.LinearLR(
-                    optimizer,
-                    start_factor=1 / 3,
-                    end_factor=1.0,
-                    total_iters=warmup_epochs
-                )
+            # if warmup_epochs > 0:
+            #     # Create warmup scheduler
+            #     warmup = optim.lr_scheduler.LinearLR(
+            #         optimizer,
+            #         start_factor=1 / 3,
+            #         end_factor=1.0,
+            #         total_iters=warmup_epochs
+            #     )
                 
-                # Create cosine scheduler
-                cosine = optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer,
-                    T_max=max(1, self.cfg.TRAIN.NUM_EPOCHS - warmup_epochs),
-                    eta_min=self.cfg.TRAIN.LR * 0.1
-                )
+            #     # Create cosine scheduler
+            #     cosine = optim.lr_scheduler.CosineAnnealingLR(
+            #         optimizer,
+            #         T_max=max(1, self.cfg.TRAIN.NUM_EPOCHS - warmup_epochs),
+            #         eta_min=self.cfg.TRAIN.LR * 0.1
+            #     )
                 
-                # Combine using SequentialLR
-                scheduler = optim.lr_scheduler.SequentialLR(
-                    optimizer,
-                    schedulers=[warmup, cosine],
-                    milestones=[warmup_epochs]
-                )
-            else:
+            #     # Combine using SequentialLR
+            #     scheduler = optim.lr_scheduler.SequentialLR(
+            #         optimizer,
+            #         schedulers=[warmup, cosine],
+            #         milestones=[warmup_epochs]
+            #     )
+            # else:
                 # No warmup, just cosine
-                scheduler = optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer,
-                    T_max=self.cfg.TRAIN.NUM_EPOCHS,
-                    eta_min=self.cfg.TRAIN.LR * 0.1
-                )
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                optimizer,
+                T_max=self.cfg.TRAIN.NUM_EPOCHS,
+                eta_min=self.cfg.TRAIN.LR * 0.1
+            )
             
             return {
                 "optimizer": optimizer,

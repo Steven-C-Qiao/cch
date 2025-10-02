@@ -62,7 +62,12 @@ class CCHLoss(pl.LightningModule):
         if "vc_init" in predictions:
             pred_vc = predictions['vc_init']
             gt_vc_smpl_pm = batch['vc_maps'][:, :N]
-            mask = batch['smpl_mask'][:, :N]
+            
+            image_mask = batch['masks'][:, :N]
+            smpl_mask = batch['smpl_mask'][:, :N]
+
+            mask = image_mask * smpl_mask # take intersection of masks
+            
             confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
             
             vc_pm_loss = self.vc_pm_loss(
@@ -124,17 +129,18 @@ class CCHLoss(pl.LightningModule):
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp']
             mask = batch['masks']
-            confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
 
+            # confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
+
+            # mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+            # if confidence is not None:
+            #     confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
+
+
+            confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
             mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             if confidence is not None:
-                confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
-
-
-            # confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
-            # mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
-            # if confidence is not None:
-            #     confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+                confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
 
             pred_vp = rearrange(pred_vp, 'b k n h w c -> (b k) (n h w) c')
 
@@ -154,6 +160,7 @@ class CCHLoss(pl.LightningModule):
 
         # for k, v in loss_dict.items():
         #     print(k, v.item())
+        # print("total_loss", total_loss.item())
         # import ipdb; ipdb.set_trace()
         
         return total_loss, loss_dict
@@ -178,10 +185,11 @@ class MaskedUncertaintyChamferLoss(nn.Module):
     def forward(self, x_gt, x_pred, mask, confidence=None):
         assert x_pred.shape[:2] == mask.shape[:2]
 
-        mask_flat = mask.squeeze(-1).bool()  # (B, V2)
+        mask = mask.squeeze(-1).bool()  # (B, V2)
         
-        x_pred_list = [x_pred[b][mask_flat[b]] for b in range(x_pred.shape[0])]
-        conf_list = [confidence[b][mask_flat[b]] for b in range(x_pred.shape[0])] if confidence is not None else None
+        x_pred_list = [x_pred[b][mask[b]] for b in range(x_pred.shape[0])]
+        conf_list = [confidence[b][mask[b]] for b in range(x_pred.shape[0])] if confidence is not None else None
+        log_conf_list = [self.get_conf_log(conf_list[b])[-1] for b in range(len(conf_list))] if confidence is not None else None
 
         x_pred_ptclds = Pointclouds(points=x_pred_list)
 
@@ -197,19 +205,18 @@ class MaskedUncertaintyChamferLoss(nn.Module):
         loss_gt2pred = loss[1]
 
         
+        loss_pred2gt_list = []
+        for b in range(x_pred.shape[0]):
+            loss_pred2gt_list.append(loss_pred2gt[b][:mask[b].sum()])
+
+        loss_pred2gt = torch.cat(loss_pred2gt_list, dim=0)
+
         if confidence is not None:
-            conf_padded = torch.zeros_like(loss_pred2gt)
-            log_conf_padded = torch.zeros_like(loss_pred2gt)
-            
-            for b in range(len(conf_list)):
-                num_valid_points = len(conf_list[b])
-                if num_valid_points > 0:
-                    conf, log_conf = self.get_conf_log(conf_list[b])
-                    conf_padded[b, :num_valid_points] = conf
-                    log_conf_padded[b, :num_valid_points] = log_conf
+            conf = torch.cat(conf_list, dim=0)
+            log_conf = torch.cat(log_conf_list, dim=0)
+            loss_pred2gt = loss_pred2gt * conf - self.alpha * log_conf
 
-
-            loss_pred2gt = loss_pred2gt * conf_padded - self.alpha * log_conf_padded
+        loss_pred2gt = filter_by_quantile(loss_pred2gt, 0.98)
 
         return loss_pred2gt.mean() + loss_gt2pred.mean() 
     
@@ -267,6 +274,115 @@ class MaskedUncertaintyExpL2Loss(nn.Module):
         return loss.sum() / mask.sum()
     
 
+def filter_by_quantile(loss_tensor, valid_range, min_elements=1000, hard_max=100):
+    """
+    Filter loss tensor by keeping only values below a certain quantile threshold.
+    
+    This helps remove outliers that could destabilize training.
+    
+    Args:
+        loss_tensor: Tensor containing loss values
+        valid_range: Float between 0 and 1 indicating the quantile threshold
+        min_elements: Minimum number of elements required to apply filtering
+        hard_max: Maximum allowed value for any individual loss
+    
+    Returns:
+        Filtered and clamped loss tensor
+    """
+    if loss_tensor.numel() <= min_elements:
+        # Too few elements, just return as-is
+        return loss_tensor
+
+    # Randomly sample if tensor is too large to avoid memory issues
+    if loss_tensor.numel() > 100000000:
+        # Flatten and randomly select 1M elements
+        indices = torch.randperm(loss_tensor.numel(), device=loss_tensor.device)[:1_000_000]
+        loss_tensor = loss_tensor.view(-1)[indices]
+
+    # First clamp individual values to prevent extreme outliers
+    loss_tensor = loss_tensor.clamp(max=hard_max)
+
+    # Compute quantile threshold
+    quantile_thresh = torch_quantile(loss_tensor.detach(), valid_range)
+    quantile_thresh = min(quantile_thresh, hard_max)
+
+    # Apply quantile filtering if enough elements remain
+    quantile_mask = loss_tensor < quantile_thresh
+    if quantile_mask.sum() > min_elements:
+        return loss_tensor[quantile_mask]
+    return loss_tensor
+
+
+def torch_quantile(
+    input,
+    q,
+    dim = None,
+    keepdim: bool = False,
+    *,
+    interpolation: str = "nearest",
+    out: torch.Tensor = None,
+) -> torch.Tensor:
+    """Better torch.quantile for one SCALAR quantile.
+
+    Using torch.kthvalue. Better than torch.quantile because:
+        - No 2**24 input size limit (pytorch/issues/67592),
+        - Much faster, at least on big input sizes.
+
+    Arguments:
+        input (torch.Tensor): See torch.quantile.
+        q (float): See torch.quantile. Supports only scalar input
+            currently.
+        dim (int | None): See torch.quantile.
+        keepdim (bool): See torch.quantile. Supports only False
+            currently.
+        interpolation: {"nearest", "lower", "higher"}
+            See torch.quantile.
+        out (torch.Tensor | None): See torch.quantile. Supports only
+            None currently.
+    """
+    # https://github.com/pytorch/pytorch/issues/64947
+    # Sanitization: q
+    try:
+        q = float(q)
+        assert 0 <= q <= 1
+    except Exception:
+        raise ValueError(f"Only scalar input 0<=q<=1 is currently supported (got {q})!")
+
+    # Handle dim=None case
+    if dim_was_none := dim is None:
+        dim = 0
+        input = input.reshape((-1,) + (1,) * (input.ndim - 1))
+
+    # Set interpolation method
+    if interpolation == "nearest":
+        inter = round
+    elif interpolation == "lower":
+        inter = floor
+    elif interpolation == "higher":
+        inter = ceil
+    else:
+        raise ValueError(
+            "Supported interpolations currently are {'nearest', 'lower', 'higher'} "
+            f"(got '{interpolation}')!"
+        )
+
+    # Validate out parameter
+    if out is not None:
+        raise ValueError(f"Only None value is currently supported for out (got {out})!")
+
+    # Compute k-th value
+    k = inter(q * (input.shape[dim] - 1)) + 1
+    out = torch.kthvalue(input, k, dim, keepdim=True, out=out)[0]
+
+    # Handle keepdim and dim=None cases
+    if keepdim:
+        return out
+    if dim_was_none:
+        return out.squeeze()
+    else:
+        return out.squeeze(dim)
+
+    return out
 
 
 # class CanonicalRGBConfLoss(nn.Module):

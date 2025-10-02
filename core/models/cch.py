@@ -88,6 +88,10 @@ class CCH(nn.Module):
                 intermediate_layer_idx=s2_cfg['intermediate_layer_idx']
             )
 
+        # Initialize PBS modules with small values for delta outputs
+        if self.model_pbs:
+            self._initialize_pbs_modules()
+
         # self._count_parameters()
             
     def forward(self, batch):
@@ -111,8 +115,6 @@ class CCH(nn.Module):
         ret = {}
         images = batch['imgs']
 
-        images = batch['imgs']
-
         if len(images.shape) == 4:
             images = images.unsqueeze(0)
         B, K, C_in, H, W = images.shape
@@ -124,15 +126,6 @@ class CCH(nn.Module):
         w_smpl = batch['smpl_w_maps']
         mask = batch['masks']
         
-
-
-        pose = batch['pose']
-        joints = batch['smpl_T_joints'].repeat(1, K, 1, 1)
-        w_smpl = batch['smpl_w_maps']
-        mask = batch['masks']
-        
-
-
 
         canonical_tokens_list, patch_start_idx = self.aggregator(images[:, :N]) 
 
@@ -180,12 +173,6 @@ class CCH(nn.Module):
         vc_init_expanded = vc_init.unsqueeze(1).repeat(1, K, 1, 1, 1, 1) # (B, K, N, H, W, 3)
         w_expanded = w.unsqueeze(1).repeat(1, K, 1, 1, 1, 1) # (B, K, N, H, W, 25)
 
-        # print(joints.shape)
-        # print(self.parents.shape)
-        # print(w_expanded.shape)
-        # print(vc_init_expanded.shape)
-        # print(pose.shape)
-        # import ipdb; ipdb.set_trace()
 
         vp_init, J_init = general_lbs(
             vc=rearrange(vc_init_expanded, 'b k n h w c -> (b k) (n h w) c'),
@@ -261,6 +248,41 @@ class CCH(nn.Module):
 
         return ret 
     
+
+
+    def _initialize_pbs_modules(self):
+        """
+        Initialize PBS modules (pbs_aggregator and pbs_head) with small values.
+        This ensures they output small delta values to be added to vc.
+        """
+        def init_small_weights(module):
+            """Initialize module parameters with small values."""
+            if isinstance(module, (nn.Linear, nn.Conv1d, nn.Conv2d, nn.ConvTranspose2d)):
+                # Initialize weights with small normal distribution
+                nn.init.normal_(module.weight, mean=0.0, std=0.01)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0.0)
+            elif isinstance(module, nn.LayerNorm):
+                # Keep LayerNorm initialization as default (weight=1, bias=0)
+                pass
+            elif isinstance(module, nn.Parameter):
+                # Initialize parameters with small values
+                nn.init.normal_(module, mean=0.0, std=0.01)
+        
+        # Initialize PBS aggregator
+        if hasattr(self, 'pbs_aggregator'):
+            self.pbs_aggregator.apply(init_small_weights)
+            # Special handling for camera and register tokens in aggregator
+            if hasattr(self.pbs_aggregator, 'camera_token'):
+                nn.init.normal_(self.pbs_aggregator.camera_token, mean=0.0, std=0.01)
+            if hasattr(self.pbs_aggregator, 'register_token'):
+                nn.init.normal_(self.pbs_aggregator.register_token, mean=0.0, std=0.01)
+        
+        # Initialize PBS head
+        if hasattr(self, 'pbs_head'):
+            self.pbs_head.apply(init_small_weights)
+        
+        print("PBS modules initialized with small values for delta outputs")
 
 
 
