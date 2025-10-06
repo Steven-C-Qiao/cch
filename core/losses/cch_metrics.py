@@ -5,11 +5,15 @@ from einops import rearrange
 from pytorch3d.loss import chamfer_distance
 from pytorch3d.structures import Pointclouds
 
+from core.utils.loss_utils import filter_by_quantile
+
 class CCHMetrics(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
         self.threshold = cfg.LOSS.CONFIDENCE_THRESHOLD
+
+        self.filter_by_quantile = True
 
     def forward(self, predictions, batch):
         ret = {}
@@ -87,12 +91,12 @@ class CCHMetrics(pl.LightningModule):
 
 
     def masked_metric_cfd(self, x_gt, x_pred, mask):
-        # Filter x_pred using mask to reduce computation
-        mask_flat = mask.bool()  # (B, V2)
-        
-        x_pred_list = [x_pred[b][mask_flat[b]] for b in range(x_pred.shape[0])]
-        
-        # Convert list to Pointclouds object for chamfer_distance compatibility
+
+        mask = mask.squeeze(-1).bool()  # (B, V2)
+
+        x_gt_list = x_gt.points_list()
+        x_pred_list = [x_pred[b][mask[b]] for b in range(x_pred.shape[0])]
+
         x_pred_ptclds = Pointclouds(points=x_pred_list)
         
         cfd_ret, _ = chamfer_distance(
@@ -101,23 +105,29 @@ class CCHMetrics(pl.LightningModule):
             point_reduction=None
         )
 
-        loss_pred2gt = cfd_ret[0]  # Shape: (B, P) where P is max points across batch
-        loss_gt2pred = cfd_ret[1]
+        cfd_sqrd_pred2gt = cfd_ret[0]  
+        cfd_sqrd_gt2pred = cfd_ret[1]
 
-        # Handle padding: only sum over valid (non-padded) points
-        valid_points_per_batch = [len(x_pred_list[b]) for b in range(len(x_pred_list))]
-        total_valid_points = sum(valid_points_per_batch)
-        
-        # Create mask for valid points in the padded tensor
-        valid_mask = torch.zeros_like(loss_pred2gt)
-        for b, num_valid in enumerate(valid_points_per_batch):
-            if num_valid > 0:
-                valid_mask[b, :num_valid] = 1.0
-        
-        masked_loss_pred2gt = loss_pred2gt * valid_mask
+        # ---------------------------- pred2gt ----------------------------
+        cfd_sqrd_pred2gt_list = []
 
-        dist_pred2gt = torch.sum(torch.sqrt(masked_loss_pred2gt)) / (total_valid_points + 1e-6) * 100.0
-        dist_gt2pred = torch.sqrt(loss_gt2pred).mean() * 100.0
+        for b in range(x_pred.shape[0]):
+            cfd_sqrd_b = cfd_sqrd_pred2gt[b][:mask[b].sum()]
+            filtered_cfd_sqrd_b = filter_by_quantile(cfd_sqrd_b, 0.98)
+            cfd_sqrd_pred2gt_list.append(filtered_cfd_sqrd_b)
 
-        return (dist_pred2gt+dist_gt2pred) / 2, dist_pred2gt, dist_gt2pred
+        cfd_sqrd_pred2gt = torch.cat(cfd_sqrd_pred2gt_list, dim=0)
+        cfd_pred2gt = torch.sqrt(cfd_sqrd_pred2gt).mean() * 100.0
+
+        # ---------------------------- gt2pred ----------------------------
+        cfd_sqrd_gt2pred_list = []
+        for b in range(len(x_gt_list)):
+            cfd_sqrd_gt2pred_list.append(cfd_sqrd_gt2pred[b][:x_gt_list[b].shape[0]])
+            # No filter for gt2pred 
+
+        cfd_sqrd_gt2pred = torch.cat(cfd_sqrd_gt2pred_list, dim=0)
+        cfd_gt2pred = torch.sqrt(cfd_sqrd_gt2pred).mean() * 100.0
+
+
+        return (cfd_pred2gt+cfd_gt2pred) / 2, cfd_pred2gt, cfd_gt2pred
     

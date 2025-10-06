@@ -50,7 +50,7 @@ class CCHTrainer(pl.LightningModule):
         self.freeze_canonical_epochs = getattr(cfg.TRAIN, 'WARMUP_EPOCHS', 0)
 
 
-        self.feature_renderer = FeatureRenderer(image_size=(256, 192)) 
+        self.feature_renderer = FeatureRenderer(image_size=(512, 384))#image_size=(256, 192)) 
 
         self.smpl_male = smplx.create(
             model_type=self.body_model,
@@ -104,8 +104,8 @@ class CCHTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx, split='train'):
         if self.first_batch is None:
             self.first_batch = batch
-        if self.dev:
-            batch = self.first_batch
+        # if self.dev:
+        #     batch = self.first_batch
 
         batch = self._process_inputs(batch, batch_idx, normalise=self.normalise)
 
@@ -123,98 +123,10 @@ class CCHTrainer(pl.LightningModule):
         # import ipdb; ipdb.set_trace()
         
         return loss 
-    
-
-    def _update_module_freezing(self):
-        """Update which modules are frozen based on current epoch."""
-        if not hasattr(self.model, 'model_pbs') or not self.model.model_pbs:
-            return
-            
-        if self.current_epoch < self.freeze_canonical_epochs:
-            # Stage 1: Freeze canonical modules, train only PBS modules
-            self._freeze_canonical_modules()
-            self._unfreeze_pbs_modules()
-            print(f"\nEpoch {self.current_epoch}: Frozen canonical modules, training PBS modules only\n")
-        else:
-            # Stage 2: Train all modules
-            self._unfreeze_all_modules()
-            print(f"\nEpoch {self.current_epoch}: Training all modules\n")
-
-    def _freeze_canonical_modules(self):
-        """Freeze canonical stage modules (aggregator, canonical_head, skinning_head)."""
-        # Freeze aggregator
-        for param in self.model.aggregator.parameters():
-            param.requires_grad = False
-        
-        # Freeze canonical head
-        for param in self.model.canonical_head.parameters():
-            param.requires_grad = False
-            
-        # Freeze skinning head if it exists
-        if hasattr(self.model, 'skinning_head'):
-            for param in self.model.skinning_head.parameters():
-                param.requires_grad = False
-    
-    def _unfreeze_pbs_modules(self):
-        """Unfreeze PBS modules (pbs_aggregator, pbs_head)."""
-        if hasattr(self.model, 'pbs_aggregator'):
-            for param in self.model.pbs_aggregator.parameters():
-                param.requires_grad = True
-                
-        if hasattr(self.model, 'pbs_head'):
-            for param in self.model.pbs_head.parameters():
-                param.requires_grad = True
-    
-    def _unfreeze_all_modules(self):
-        """Unfreeze all modules for joint training."""
-        # Unfreeze canonical modules
-        for param in self.model.aggregator.parameters():
-            param.requires_grad = True
-            
-        for param in self.model.canonical_head.parameters():
-            param.requires_grad = True
-            
-        if hasattr(self.model, 'skinning_head'):
-            for param in self.model.skinning_head.parameters():
-                param.requires_grad = True
-        
-        # Unfreeze PBS modules
-        self._unfreeze_pbs_modules()
-
-    def _update_optimizer_parameters(self):
-        """Update optimizer parameters when module freezing changes."""
-        if hasattr(self, 'optimizers') and self.optimizers() is not None:
-            optimizer = self.optimizers()
-            
-            # Get current trainable parameters
-            trainable_params = [p for p in self.model.parameters() if p.requires_grad]
-            criterion_params = list(self.criterion.parameters())
-            new_params = trainable_params + criterion_params
-            
-            # Get current optimizer parameter groups
-            current_param_ids = set(id(p) for group in optimizer.param_groups for p in group['params'])
-            new_param_ids = set(id(p) for p in new_params)
-            
-            # Only update if parameters have changed
-            if current_param_ids != new_param_ids:
-                # Create new parameter groups
-                optimizer.param_groups = [{'params': new_params, 'lr': self.cfg.TRAIN.LR}]
-                print(f"Updated optimizer with {len(new_params)} trainable parameters")
-
-    @torch.no_grad()
-    def forward_and_visualise(self, batch, batch_idx):
-
-        batch = self._process_inputs(batch, batch_idx, normalise=self.normalise)
-
-        preds = self(batch)
-
-        self.visualiser.visualise(preds, batch, batch_idx=batch_idx) 
-
-
 
 
     def _log_metrics_and_visualise(self, loss, loss_dict, metrics, split, preds, batch, global_step):
-        if split == 'train':
+        if split == 'train' or split == 'test':
             on_step = True
         else:
             on_step = False
@@ -225,12 +137,12 @@ class CCHTrainer(pl.LightningModule):
             metrics[f'{split}_{key}'] = metrics.pop(key)
         
         self.log(f'{split}_loss', loss, prog_bar=True)
-        self.log(f'{split}_vc_cfd', metrics.pop(f'{split}_vc_cfd'), prog_bar=True)
-        self.log(f'{split}_vp_init_cfd', metrics.pop(f'{split}_vp_init_cfd'), prog_bar=True)
+        self.log(f'{split}_vc_cfd', metrics.pop(f'{split}_vc_cfd'), on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
+        self.log(f'{split}_vp_init_cfd', metrics.pop(f'{split}_vp_init_cfd'), on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
         if f'{split}_vp_cfd' in metrics:
-            self.log(f'{split}_vp_cfd', metrics.pop(f'{split}_vp_cfd'), prog_bar=True)
-        self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False)
-        self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False)
+            self.log(f'{split}_vp_cfd', metrics.pop(f'{split}_vp_cfd'), on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
+        self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
+        self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
 
         # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
         #     self.visualiser.visualise(preds, batch) 
@@ -238,7 +150,10 @@ class CCHTrainer(pl.LightningModule):
         if self.dev or self.plot:
             self.visualiser.visualise(preds, batch)
             if self.dev:
-                import ipdb; ipdb.set_trace()
+                for k, v in loss_dict.items():
+                    print(f"{k}: {v.item():.2f}", end='; ')
+                print('')
+                # import ipdb; ipdb.set_trace()
     
 
     @torch.no_grad()
@@ -567,6 +482,15 @@ class CCHTrainer(pl.LightningModule):
             return optimizer
 
 
+    @torch.no_grad()
+    def forward_and_visualise(self, batch, batch_idx):
+
+        batch = self._process_inputs(batch, batch_idx, normalise=self.normalise)
+
+        preds = self(batch)
+
+        self.visualiser.visualise(preds, batch, batch_idx=batch_idx) 
+
 
 
     def knn_ptcld(self, x, y, K=1):
@@ -696,6 +620,102 @@ class CCHTrainer(pl.LightningModule):
         )
         fig.write_image("pointclouds.png")
         import ipdb; ipdb.set_trace()
+
+
+
+
+    def _update_module_freezing(self):
+        """Update which modules are frozen based on current epoch."""
+        if not hasattr(self.model, 'model_pbs') or not self.model.model_pbs:
+            return
+            
+        if self.current_epoch < self.freeze_canonical_epochs:
+            # Stage 1: Freeze canonical modules, train only PBS modules
+            self._freeze_canonical_modules()
+            self._unfreeze_pbs_modules()
+            print(f"\nEpoch {self.current_epoch}: Frozen canonical modules, training PBS modules only\n")
+        else:
+            # Stage 2: Train all modules
+            self._unfreeze_all_modules()
+            print(f"\nEpoch {self.current_epoch}: Training all modules\n")
+
+    def _freeze_canonical_modules(self):
+        """Freeze canonical stage modules (aggregator, canonical_head, skinning_head)."""
+        # Freeze aggregator
+        for param in self.model.aggregator.parameters():
+            param.requires_grad = False
+        
+        # Freeze canonical head
+        for param in self.model.canonical_head.parameters():
+            param.requires_grad = False
+            
+        # Freeze skinning head if it exists
+        if hasattr(self.model, 'skinning_head'):
+            for param in self.model.skinning_head.parameters():
+                param.requires_grad = False
+    
+    def _unfreeze_pbs_modules(self):
+        """Unfreeze PBS modules (pbs_aggregator, pbs_head)."""
+        if hasattr(self.model, 'pbs_aggregator'):
+            for param in self.model.pbs_aggregator.parameters():
+                param.requires_grad = True
+                
+        if hasattr(self.model, 'pbs_head'):
+            for param in self.model.pbs_head.parameters():
+                param.requires_grad = True
+    
+    def _unfreeze_all_modules(self):
+        """Unfreeze all modules for joint training."""
+        # Unfreeze canonical modules
+        for param in self.model.aggregator.parameters():
+            param.requires_grad = True
+            
+        for param in self.model.canonical_head.parameters():
+            param.requires_grad = True
+            
+        if hasattr(self.model, 'skinning_head'):
+            for param in self.model.skinning_head.parameters():
+                param.requires_grad = True
+        
+        # Unfreeze PBS modules
+        self._unfreeze_pbs_modules()
+
+    def _update_optimizer_parameters(self):
+        """Update optimizer parameters when module freezing changes."""
+        if hasattr(self, 'optimizers') and self.optimizers() is not None:
+            optimizer = self.optimizers()
+            
+            # Get current trainable parameters
+            trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+            criterion_params = list(self.criterion.parameters())
+            new_params = trainable_params + criterion_params
+            
+            # Get current optimizer parameter groups
+            current_param_ids = set(id(p) for group in optimizer.param_groups for p in group['params'])
+            new_param_ids = set(id(p) for p in new_params)
+            
+            # Only update if parameters have changed
+            if current_param_ids != new_param_ids:
+                # Create new parameter groups
+                optimizer.param_groups = [{'params': new_params, 'lr': self.cfg.TRAIN.LR}]
+                print(f"Updated optimizer with {len(new_params)} trainable parameters")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
     # # Create scatter plot comparing scan and SMPL vertices

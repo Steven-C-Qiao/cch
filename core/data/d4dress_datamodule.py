@@ -55,3 +55,4 @@ class CCHDataModule(pl.LightningDataModule):
             pin_memory=self.cfg.TRAIN.PIN_MEMORY,
             collate_fn=d4dress_collate_fn
         )
+        

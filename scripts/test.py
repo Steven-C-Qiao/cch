@@ -1,104 +1,68 @@
 import os
 import torch
 import argparse
-import glob
-from pathlib import Path
 
 from loguru import logger
 
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
-from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning import seed_everything
 
 import sys
 sys.path.append('.')
 
 from core.configs.cch_cfg import get_cch_cfg_defaults
-# from core.models.trainer import CCHTrainer
-# from core.data.cch_datamodule import CCHDataModule
 from core.models.trainer_4ddress import CCHTrainer
 from core.data.d4dress_datamodule import CCHDataModule
 
 
-def run_train(exp_dir, cfg_opts=None, dev=False, device_ids=None, resume_path=None, load_path=None):
+def run_test(exp_dir, dev=False, resume_path=None, load_path=None):
     seed_everything(42)
     
     # Get config
     cfg = get_cch_cfg_defaults()
-    if cfg_opts is not None:
-        cfg.merge_from_list(cfg_opts)
-
-    # path = resume_path if resume_path is not None else load_path
-    # if path is not None:
-    #     path = str(Path(path).parent.parent / 'lightning_logs')
-    #     if os.path.exists(path):
-    #         version_dirs = sorted(glob.glob(os.path.join(path, 'version_*')))
-    #         if version_dirs:
-    #             latest_version = version_dirs[-1]
-    #             hparams_file = os.path.join(latest_version, 'hparams.yaml')
-    #             if os.path.exists(hparams_file):
-    #                 cfg.merge_from_file(hparams_file)
-    #                 logger.info(f"Loaded hyperparameters from: {hparams_file}")
-
-    if dev:
-        cfg.TRAIN.BATCH_SIZE = 2
-
-    # Create directories
-    model_save_dir = os.path.join(exp_dir, 'saved_models')
-    if not os.path.exists(model_save_dir):
-        os.makedirs(model_save_dir)
-
-    vis_save_dir = os.path.join(exp_dir, 'vis')
-    if not os.path.exists(vis_save_dir):
-        os.makedirs(vis_save_dir)
-
-
 
     model = CCHTrainer(
         cfg=cfg,
         dev=dev,
-        vis_save_dir=vis_save_dir
+        vis_save_dir=None
     )
+
+    if load_path is not None:
+        logger.info(f"Loading checkpoint: {load_path}")
+        ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
+        model_state = model.state_dict()
+        pretrained_state = ckpt['state_dict']
+        
+        # Print shape mismatches
+        mismatched = {k: (v.shape, model_state[k].shape) 
+                     for k, v in pretrained_state.items() 
+                     if k in model_state and v.shape != model_state[k].shape}
+        if mismatched:
+            logger.info("Shape mismatches found:")
+            for k, (pretrained_shape, model_shape) in mismatched.items():
+                logger.info(f"{k}: checkpoint shape {pretrained_shape}, model shape {model_shape}")
+        
+        filtered_state = {k: v for k, v in pretrained_state.items() 
+                         if k in model_state and v.shape == model_state[k].shape}
+        logger.info(f"Loading {len(filtered_state)}/{len(pretrained_state)} keys from checkpoint")
+        model.load_state_dict(filtered_state, strict=True)
+        # logger.log_hyperparams(ckpt['hyper_parameters'])
+    model.eval()
 
     datamodule = CCHDataModule(cfg)
 
-
-
-    # Callbacks
-    checkpoint_callbacks = [
-        ModelCheckpoint(
-            dirpath=model_save_dir,
-            filename='val_loss_{epoch:03d}',
-            save_top_k=1,
-            save_last=True,
-            verbose=True,
-            monitor='val_loss',
-            mode='min'
-        ),
-    ]
 
     tensorboard_logger = TensorBoardLogger(exp_dir, name='lightning_logs')
 
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
-        accelerator='gpu',
-        # devices=device_ids, 
-        # strategy=DDPStrategy(find_unused_parameters=True) if not dev else 'auto',
-        strategy=DDPStrategy() if not dev else 'auto',
-        callbacks=checkpoint_callbacks,
+        accelerator=cfg.SPEEDUP.ACCELERATOR,
+        num_nodes=1,
+        devices="auto", 
+        strategy="auto",
         logger=tensorboard_logger,
-        log_every_n_steps=100,
-        gradient_clip_val=1.0,
     )
-
-
-    if load_path is not None:
-        logger.info(f"Loading checkpoint: {load_path}")
-        ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
-        model.load_state_dict(ckpt['state_dict'], strict=False)
-        # logger.log_hyperparams(ckpt['hyper_parameters'])
 
     trainer.test(model, datamodule, ckpt_path=resume_path)
 
@@ -110,14 +74,6 @@ if __name__ == '__main__':
         '-E', 
         type=str,
         help='Path to directory where logs and checkpoints are saved.'
-    )
-    parser.add_argument(
-        '--cfg_opts', 
-        '-O', 
-        nargs='*', 
-        default=None,
-        help='Command line options to modify experiment config e.g. ''-O TRAIN.NUM_EPOCHS 120'' '
-                'will change number of training epochs to 120 in the config.'
     )
     parser.add_argument(
         '--resume_training_states', 
@@ -149,16 +105,12 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f'Device: {device}')
 
-    # device_ids = list(map(int, args.gpus.split(",")))
-    # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")
 
     assert ((args.resume_training_states is not None) * (args.load_from_ckpt is not None) == 0), 'Specify either resume_training_states or load_from_ckpt, not both'
 
-    run_train(
+    run_test(
         exp_dir=args.experiment_dir,
-        cfg_opts=args.cfg_opts,
         dev=args.dev,
-        # device_ids=device_ids,
         resume_path=args.resume_training_states,
         load_path=args.load_from_ckpt
     )

@@ -367,7 +367,7 @@ class Visualiser(pl.LightningModule):
         batch
     ):
         subfig_size = 4
-        s = 0.1 # scatter point size
+        s = 0.05 # scatter point size
         gt_alpha, pred_alpha = 0.5, 0.5
 
         B, N, H, W, C = predictions['vc_init'].shape

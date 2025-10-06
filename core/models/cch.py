@@ -89,8 +89,8 @@ class CCH(nn.Module):
             )
 
         # Initialize PBS modules with small values for delta outputs
-        if self.model_pbs:
-            self._initialize_pbs_modules()
+        # if self.model_pbs:
+        #     self._initialize_pbs_modules()
 
         # self._count_parameters()
             

@@ -57,9 +57,6 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
 
     torch.set_float32_matmul_precision(cfg.SPEEDUP.MATMUL_PRECISION)
 
-    if dev:
-        cfg.TRAIN.BATCH_SIZE = 1
-
     # Create directories
     model_save_dir = os.path.join(exp_dir, 'saved_models')
     if not os.path.exists(model_save_dir):
@@ -70,15 +67,20 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         os.makedirs(vis_save_dir)
 
 
-    # Copy config file to experiment directory
-    import shutil
-    from pathlib import Path
-    
-    config_source = Path('core/configs/cch_cfg.py')
-    config_dest = Path(exp_dir) / 'cch_cfg.py'
-    
-    shutil.copy2(config_source, config_dest)
-    shutil.copy2(Path('submit.sh'), Path(exp_dir) / 'submit.sh')
+    if dev or plot:
+        cfg.TRAIN.BATCH_SIZE = 1
+        cfg.TRAIN.LR = 0.
+        model.eval()
+    else:
+        # Copy config file to experiment directory
+        import shutil
+        from pathlib import Path
+        
+        config_source = Path('core/configs/cch_cfg.py')
+        config_dest = Path(exp_dir) / 'cch_cfg.py'
+        
+        shutil.copy2(config_source, config_dest)
+        shutil.copy2(Path('submit.sh'), Path(exp_dir) / 'submit.sh')
 
 
 
@@ -86,7 +88,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         cfg=cfg,
         dev=dev,
         vis_save_dir=vis_save_dir,
-        plot=False
+        plot=plot
     )
 
     if cfg.SPEEDUP.COMPILE:
@@ -108,15 +110,15 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
             monitor='val_loss',
             mode='min'
         ),
-        # ModelCheckpoint( # this is the vc_init cfd 
-        #     dirpath=model_save_dir,
-        #     filename='train_vc_cfd_{epoch:03d}',
-        #     save_top_k=1,
-        #     save_last=False,
-        #     verbose=True,
-        #     monitor='train_vc_cfd',
-        #     mode='min'
-        # ),
+        ModelCheckpoint( # this is the vc_init cfd 
+            dirpath=model_save_dir,
+            filename='train_vc_cfd_{epoch:03d}',
+            save_top_k=1,
+            save_last=False,
+            verbose=True,
+            monitor='train_vc_cfd',
+            mode='min'
+        ),
         ModelCheckpoint(
             dirpath=model_save_dir,
             filename='val_vc_cfd_{epoch:03d}',
@@ -168,7 +170,11 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     if load_path is not None:
         logger.info(f"Loading checkpoint: {load_path}")
         ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
-        model.load_state_dict(ckpt['state_dict'], strict=False)
+        model_state = model.state_dict()
+        pretrained_state = ckpt['state_dict']
+        filtered_state = {k: v for k, v in pretrained_state.items() if k in model_state and v.shape == model_state[k].shape}
+        logger.info(f"Loading {len(filtered_state)}/{len(pretrained_state)} keys from checkpoint")
+        model.load_state_dict(filtered_state, strict=False)
         # logger.log_hyperparams(ckpt['hyper_parameters'])
 
     trainer.fit(model, datamodule, ckpt_path=resume_path)
