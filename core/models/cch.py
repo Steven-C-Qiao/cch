@@ -247,6 +247,193 @@ class CCH(nn.Module):
             ret['vc'] = vc
 
         return ret 
+
+    @torch.no_grad
+    def _forward_vc(self, batch):
+        ret = {}
+        images = batch['imgs']
+
+        if len(images.shape) == 4:
+            images = images.unsqueeze(0)
+        B, K, C_in, H, W = images.shape
+        assert K == 5
+        N = 4 
+
+        pose = batch['pose']
+        joints = batch['smpl_T_joints'].repeat(1, K, 1, 1)
+        w_smpl = batch['smpl_w_maps']
+        mask = batch['masks']
+        
+
+        canonical_tokens_list, patch_start_idx = self.aggregator(images[:, :N]) 
+
+        if self.use_sapiens:
+            sapiens_images = batch['sapiens_images'][:, :N]
+            sapiens_images = rearrange(sapiens_images, 'b n c h w -> (b n) c h w')
+            sapiens_tokens = self.sapiens(sapiens_images)
+            sapiens_tokens = rearrange(sapiens_tokens, '(b n) p c -> b n p c', b=B, n=N)
+            sapiens_tokens_list = [sapiens_tokens] * len(canonical_tokens_list)
+            ret['sapiens_tokens_list'] = sapiens_tokens_list
+
+        if self.use_sapiens:
+            canonical_sapiens_tokens_list = [
+                torch.concat(
+                    [
+                        canonical_tokens, 
+                        sapiens_tokens
+                    ], 
+                    dim=-1
+                ) 
+                for canonical_tokens, sapiens_tokens in zip(canonical_tokens_list, sapiens_tokens_list)
+            ]
+        else:
+            canonical_sapiens_tokens_list = canonical_tokens_list
+
+        ret['canonical_tokens_list'] = canonical_sapiens_tokens_list
+
+        vc_init, vc_init_conf = self.canonical_head(canonical_sapiens_tokens_list, images[:, :N], patch_start_idx=patch_start_idx)
+        vc_init = torch.clamp(vc_init, -2, 2)
+
+        vc_init = vc_init * mask.unsqueeze(-1)[:, :N] # Mask background pixels to origin, important for backward chamfer metrics
+
+        ret['vc_init'] = vc_init
+        ret['vc_init_conf'] = vc_init_conf
+
+
+        if self.model_skinning_weights:
+            w, w_conf = self.skinning_head(canonical_sapiens_tokens_list, images[:, :N], patch_start_idx=patch_start_idx, additional_conditioning=vc_init)
+            w = F.softmax(w, dim=-1)
+        else:
+            w, w_conf = w_smpl, None
+
+        ret['w'] = w
+        ret['w_conf'] = vc_init_conf #w_conf
+
+        return ret 
+
+
+
+    @torch.no_grad
+    def _forward_vp(self, preds, batch, novel_pose):
+        """
+        Given the canonical reconstruction vc, predict vp given novel pose 
+        """
+        assert "vc_init" in preds 
+        assert "w" in preds 
+        assert "canonical_tokens_list" in preds 
+        assert self.model_pbs 
+
+        ret = {}
+        images = batch['imgs']
+
+        if len(images.shape) == 4:
+            images = images.unsqueeze(0)
+        B, K, C_in, H, W = images.shape
+        assert K == 5
+        N = 4 
+
+        pose = batch['pose']
+        joints = batch['smpl_T_joints'].repeat(1, K, 1, 1)
+        mask = batch['masks']
+
+        vc_init = preds['vc_init']
+        w = preds['w']
+        canonical_tokens_list = preds['canonical_tokens_list']
+        if self.use_sapiens:
+            sapiens_tokens_list = preds['sapiens_tokens_list']
+        else:
+            sapiens_tokens_list = None
+
+
+        print(pose.shape, novel_pose.shape)
+
+        pose = torch.cat([pose[:, :N], novel_pose], dim=1)
+        
+        print(pose.shape)
+        import ipdb; ipdb.set_trace()
+
+
+        # ---------- PBS stage ----------
+        vc_init_expanded = vc_init.unsqueeze(1).repeat(1, K, 1, 1, 1, 1) # (B, K, N, H, W, 3)
+        w_expanded = w.unsqueeze(1).repeat(1, K, 1, 1, 1, 1) # (B, K, N, H, W, 25)
+
+
+        vp_init, J_init = general_lbs(
+            vc=rearrange(vc_init_expanded, 'b k n h w c -> (b k) (n h w) c'),
+            pose=rearrange(pose, 'b k c -> (b k) c'),
+            lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k) (n h w) j'),
+            J=rearrange(joints, 'b k j c -> (b k) j c'),
+            parents=self.parents 
+        )
+        vp_init = rearrange(vp_init, '(b k) (n h w) c -> b k n h w c', b=B, k=K, n=N, h=H, w=W)
+        J_init = rearrange(J_init, '(b k) j c -> b k j c', b=B, k=K)
+
+
+        vp_init = vp_init * (mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1).unsqueeze(-1))
+
+        ret['vp_init'] = vp_init
+        ret['J_init'] = J_init
+
+
+        if self.model_pbs:
+            pbs_aggregator_input = torch.cat([rearrange(vc_init_expanded, 'b k n h w c -> (b k) n c h w'),
+                                              rearrange(vp_init, 'b k n h w c -> (b k) n c h w')], dim=-3).contiguous()
+            
+            pbs_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
+
+
+            if self.use_sapiens:
+                full_tokens_list = [
+                    torch.concat(
+                        [
+                            pbs_tokens, 
+                            agg_tokens.repeat_interleave(K, dim=0),
+                            sapiens_tokens.repeat_interleave(K, dim=0)
+                        ],
+                        dim=-1
+                    ) 
+                    for pbs_tokens, agg_tokens, sapiens_tokens in zip(pbs_tokens_list, canonical_tokens_list, sapiens_tokens_list)
+                ]
+            else:
+                full_tokens_list = [
+                    torch.concat(
+                        [
+                            pbs_tokens, 
+                            agg_tokens.repeat_interleave(K, dim=0)
+                        ], 
+                        dim=-1
+                    ) 
+                    for pbs_tokens, agg_tokens in zip(pbs_tokens_list, canonical_tokens_list)
+                ]
+
+            dvc, dvc_conf = self.pbs_head(full_tokens_list, rearrange(images.unsqueeze(2).repeat_interleave(N, dim=2), 'b k n c h w -> (b k) n c h w'), patch_start_idx=patch_start_idx)
+            dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
+            dvc = rearrange(dvc, '(b k) n h w c -> b k n h w c', b=B, k=K)
+            dvc_conf = rearrange(dvc_conf, '(b k) n h w -> b k n h w', b=B, k=K)
+
+
+            vc = vc_init_expanded + dvc
+
+
+            vp, _ = general_lbs(
+                vc=rearrange(vc, 'b k n h w c -> (b k) (n h w) c'),
+                pose=rearrange(pose, 'b k c -> (b k) c'),
+                lbs_weights=rearrange(w_expanded, 'b k n h w j -> (b k) (n h w) j'),
+                J=rearrange(joints, 'b k j c -> (b k) j c'),
+                parents=self.parents 
+            )
+            vp = rearrange(vp, '(b k) (n h w) c -> b k n h w c', b=B, k=K, n=N, h=H, w=W)
+
+            vp = vp * (mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1).unsqueeze(-1))
+            
+            ret['vp'] = vp
+            ret['dvc'] = dvc
+            ret['dvc_conf'] = dvc_conf
+            ret['vc'] = vc
+
+        return ret 
+
+
     
 
 

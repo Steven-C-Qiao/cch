@@ -5,6 +5,7 @@
 *.js
 *.pkl
 *.npz
+*.out
 
 __pycache__
 

@@ -145,6 +145,7 @@ class D4DressDataset(Dataset):
 
         self.sapiens_transform = sapiens_transform
 
+        
 
     def __len__(self):
         return len(self.ids) * self.lengthen_by

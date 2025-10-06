@@ -491,6 +491,18 @@ class CCHTrainer(pl.LightningModule):
 
         self.visualiser.visualise(preds, batch, batch_idx=batch_idx) 
 
+    def build_avatar(self, batch):
+
+        batch = self._process_inputs(batch, batch_idx=0, normalise=self.normalise)
+
+        preds_vc = self.model._forward_vc(batch)
+
+        return preds_vc 
+
+    def drive_avatar(self, vc, batch):
+        preds_vp = self.model._forward_vp(vc, batch, None)
+        return preds_vp 
+
 
 
     def knn_ptcld(self, x, y, K=1):
