@@ -6,6 +6,8 @@
 *.pkl
 *.npz
 *.out
+*.ply
+*.blend
 
 __pycache__
 

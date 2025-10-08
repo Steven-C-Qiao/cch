@@ -7,11 +7,11 @@ H36M_REGRESSOR = 'model_files/J_regressor_h36m.npy'
 # ------------------- DensePose Files for Textured Rendering -------------------
 DP_UV_PROCESSED_FILE = 'model_files/UV_Processed.mat'
 
-# BASE_PATH = '/scratches/kyuban/cq244/CCH/cch'
-# DATA_PATH = '/scratches/kyuban/cq244/datasets/4DDress'
+BASE_PATH = '/scratch/cq244/CCH/cch'
+DATA_PATH = '/scratch/cq244/datasets/4DDress'
 
 # DATA_PATH = '/scratch/u5au/chexuan.u5au/4DDress'
 # BASE_PATH = '/scratch/u5au/chexuan.u5au/cch/'
 
-DATA_PATH = '/scratch/u5aa/chexuan.u5aa/4DDress'
-BASE_PATH = '/scratch/u5aa/chexuan.u5aa/cch/'
+# DATA_PATH = '/scratch/u5aa/chexuan.u5aa/4DDress'
+# BASE_PATH = '/scratch/u5aa/chexuan.u5aa/cch/'

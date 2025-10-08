@@ -499,8 +499,8 @@ class CCHTrainer(pl.LightningModule):
 
         return preds_vc 
 
-    def drive_avatar(self, vc, batch):
-        preds_vp = self.model._forward_vp(vc, batch, None)
+    def drive_avatar(self, vc, batch, novel_pose):
+        preds_vp = self.model._forward_vp(vc, batch, novel_pose)
         return preds_vp 
 
 

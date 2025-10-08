@@ -345,12 +345,8 @@ class CCH(nn.Module):
             sapiens_tokens_list = None
 
 
-        print(pose.shape, novel_pose.shape)
+        pose[:, -1, :] = novel_pose
 
-        pose = torch.cat([pose[:, :N], novel_pose], dim=1)
-        
-        print(pose.shape)
-        import ipdb; ipdb.set_trace()
 
 
         # ---------- PBS stage ----------
