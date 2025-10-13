@@ -472,23 +472,23 @@ class Solver:
 
 
             
-        fig = plt.figure(figsize=(subfig_size * num_cols, subfig_size * num_rows))
-        r = 0
+        # fig = plt.figure(figsize=(subfig_size * num_cols, subfig_size * num_rows))
+        # r = 0
 
 
-        for i in range(num_total_plots):
-            verts = predictions['vp_list'][i]['vp'][0, -1, ...].cpu().detach().numpy() # B K N H W 3 -> N H W 3
-            verts = verts[scatter_mask]
-            ax = fig.add_subplot(num_rows, num_cols, i+1, projection='3d')
-            ax.scatter(verts[:, 0], 
-                    verts[:, 1], 
-                    verts[:, 2], c=color, s=s, alpha=gt_alpha)
-            ax.set_title(f'pred $V^{{{i+1}}}$')
-            _set_scatter_limits(ax, x)
+        # for i in range(num_total_plots):
+        #     verts = predictions['vp_list'][i]['vp'][0, -1, ...].cpu().detach().numpy() # B K N H W 3 -> N H W 3
+        #     verts = verts[scatter_mask]
+        #     ax = fig.add_subplot(num_rows, num_cols, i+1, projection='3d')
+        #     ax.scatter(verts[:, 0], 
+        #             verts[:, 1], 
+        #             verts[:, 2], c=color, s=s, alpha=gt_alpha)
+        #     ax.set_title(f'pred $V^{{{i+1}}}$')
+        #     _set_scatter_limits(ax, x)
 
-        plt.tight_layout()
-        plt.savefig(f'{self.id}_{self.take}_animation.png', dpi=200)
-        plt.close()
+        # plt.tight_layout()
+        # plt.savefig(f'{self.id}_{self.take}_animation.png', dpi=200)
+        # plt.close()
 
 
 def _no_annotations(fig):

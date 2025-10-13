@@ -5,8 +5,9 @@ import pickle
 
 import numpy as np
 import open3d as o3d
-
 import matplotlib.pyplot as plt
+
+from tqdm import tqdm
 from einops import rearrange
 
 viridis = plt.colormaps.get_cmap('viridis')
@@ -66,8 +67,8 @@ def denoise_point_cloud(points, k=8, threshold=2.0, iterations=3):
     # First remove outliers
     cleaned_points = remove_outliers(points, k=k, threshold=threshold)
     # Then smooth the remaining points
-    smoothed_points = smooth_point_cloud(cleaned_points, k=k, iterations=iterations)
-    return smoothed_points
+    # smoothed_points = smooth_point_cloud(cleaned_points, k=k, iterations=iterations)
+    return cleaned_points
 
 def estimate_normals(pcd, k=30):
     """
@@ -131,9 +132,10 @@ if __name__=="__main__":
 
         color = rearrange(batch['imgs'][0, :-1], 'n c h w -> n h w c')
 
-        from tqdm import tqdm
+        
 
-        for i in tqdm(range(len(vp_list))):
+        # for i in tqdm(range(len(vp_list))):
+        for i in [0]:
 
             
             vp_bknhwc = vp_list[i]['vp'] # B, K, N, H, W, 3
@@ -154,7 +156,7 @@ if __name__=="__main__":
             # print(vp_masked.shape) # eg 103845, 3
 
             # Denoise point cloud
-            vp_masked = denoise_point_cloud(vp_masked, k=8, threshold=10.0, iterations=1)
+            # vp_masked = denoise_point_cloud(vp_masked, k=16, threshold=10.0, iterations=1)
 
             # Convert to Open3D point cloud
             pcd = o3d.geometry.PointCloud()
@@ -170,7 +172,7 @@ if __name__=="__main__":
             # Perform Poisson reconstruction
             mesh = poisson_reconstruction(
                 pcd,
-                depth=8,  # Adjust based on point cloud density
+                depth=10,  # Adjust based on point cloud density
                 scale=1.1,
                 linear_fit=True
             )
