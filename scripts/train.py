@@ -70,7 +70,6 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     if dev or plot:
         cfg.TRAIN.BATCH_SIZE = 1
         cfg.TRAIN.LR = 0.
-        model.eval()
     else:
         # Copy config file to experiment directory
         import shutil
@@ -90,6 +89,8 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         vis_save_dir=vis_save_dir,
         plot=plot
     )
+    if dev or plot:
+        model.eval()
 
     if cfg.SPEEDUP.COMPILE:
         model = torch.compile(model)
@@ -128,24 +129,26 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
             monitor='val_vc_cfd',
             mode='min'
         ),
-        ModelCheckpoint( # this is the vp_cfd
-            dirpath=model_save_dir,
-            filename='train_vp_cfd_{epoch:03d}',
-            save_top_k=1,
-            save_last=False,
-            verbose=True,
-            monitor='train_vp_cfd',
-            mode='min'
-        ),
-        ModelCheckpoint( # this is the vp_cfd
-            dirpath=model_save_dir,
-            filename='val_vp_cfd_{epoch:03d}',
-            save_top_k=1,
-            save_last=False,
-            verbose=True,
-            monitor='val_vp_cfd',
-            mode='min'
-        ),
+        *([] if not cfg.MODEL.POSE_BLENDSHAPES else [
+            ModelCheckpoint( # this is the vp_cfd
+                dirpath=model_save_dir,
+                filename='train_vp_cfd_{epoch:03d}',
+                save_top_k=1,
+                save_last=False,
+                verbose=True,
+                monitor='train_vp_cfd',
+                mode='min'
+            ),
+            ModelCheckpoint( # this is the vp_cfd
+                dirpath=model_save_dir,
+                filename='val_vp_cfd_{epoch:03d}',
+                save_top_k=1,
+                save_last=False,
+                verbose=True,
+                monitor='val_vp_cfd',
+                mode='min'
+            )
+        ]),
     ]
 
 
@@ -172,11 +175,22 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
         model_state = model.state_dict()
         pretrained_state = ckpt['state_dict']
-        filtered_state = {k: v for k, v in pretrained_state.items() if k in model_state and v.shape == model_state[k].shape}
+        
+        # Print shape mismatches
+        shape_mismatches = {k: (v.shape, model_state[k].shape) 
+                          for k, v in pretrained_state.items() 
+                          if k in model_state and v.shape != model_state[k].shape}
+        if shape_mismatches:
+            logger.info("Shape mismatches found:")
+            for k, (pretrained_shape, model_shape) in shape_mismatches.items():
+                logger.info(f"{k}: checkpoint shape {pretrained_shape}, model shape {model_shape}")
+        
+        filtered_state = {k: v for k, v in pretrained_state.items() 
+                         if k in model_state and v.shape == model_state[k].shape}
         logger.info(f"Loading {len(filtered_state)}/{len(pretrained_state)} keys from checkpoint")
         model.load_state_dict(filtered_state, strict=False)
         # logger.log_hyperparams(ckpt['hyper_parameters'])
-
+        
     trainer.fit(model, datamodule, ckpt_path=resume_path)
     # trainer.test(model, datamodule)
 

@@ -269,17 +269,20 @@ class D4DressDataset(Dataset):
             # Load images and apply transforms
             img = load_image(img_fname)
             mask = load_image(mask_fname)
+
+            masked_img = img * mask[..., None]
             
             # Convert to PIL Images for transforms
             img_pil = Image.fromarray(img)
             mask_pil = Image.fromarray(mask)
+            masked_img_pil = Image.fromarray(masked_img)
             
             # Apply transforms
             # img_transformed = self.normalise(self.transform(img_pil))
             img_transformed = self.transform(img_pil)
             mask_transformed = self.mask_transform(mask_pil).squeeze()
 
-            sapiens_image = sapiens_transform(img_pil)
+            sapiens_image = sapiens_transform(masked_img_pil)
 
             ret['sapiens_images'].append(sapiens_image)
             ret['imgs'].append(img_transformed)

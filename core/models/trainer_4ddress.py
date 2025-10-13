@@ -50,7 +50,7 @@ class CCHTrainer(pl.LightningModule):
         self.freeze_canonical_epochs = getattr(cfg.TRAIN, 'WARMUP_EPOCHS', 0)
 
 
-        self.feature_renderer = FeatureRenderer(image_size=(512, 384))#image_size=(256, 192)) 
+        self.feature_renderer = FeatureRenderer(image_size=(256, 192))#(512, 384))#image_size=(256, 192)) 
 
         self.smpl_male = smplx.create(
             model_type=self.body_model,
@@ -78,8 +78,8 @@ class CCHTrainer(pl.LightningModule):
             smpl_male=self.smpl_male,
             smpl_female=self.smpl_female,
         )
-        self._freeze_canonical_modules()
-        self._unfreeze_pbs_modules()
+        # self._freeze_canonical_modules()
+        # self._unfreeze_pbs_modules()
 
         self.criterion = CCHLoss(cfg)
         self.metrics = CCHMetrics(cfg)
@@ -97,9 +97,9 @@ class CCHTrainer(pl.LightningModule):
         self.visualiser.set_global_rank(self.global_rank)
 
         # Update model freezing status based on current epoch
-        self._update_module_freezing()
+        # self._update_module_freezing()
         # Update optimizer parameters if they changed
-        self._update_optimizer_parameters()
+        # self._update_optimizer_parameters()
 
     def training_step(self, batch, batch_idx, split='train'):
         if self.first_batch is None:
@@ -491,6 +491,7 @@ class CCHTrainer(pl.LightningModule):
 
         self.visualiser.visualise(preds, batch, batch_idx=batch_idx) 
 
+
     def build_avatar(self, batch):
 
         batch = self._process_inputs(batch, batch_idx=0, normalise=self.normalise)
@@ -502,6 +503,7 @@ class CCHTrainer(pl.LightningModule):
     def drive_avatar(self, vc, batch, novel_pose):
         preds_vp = self.model._forward_vp(vc, batch, novel_pose)
         return preds_vp 
+
 
 
 

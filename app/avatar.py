@@ -221,7 +221,7 @@ class Solver:
         self.take = take
         self.novel_pose_path = novel_pose_path
 
-        self.stride = 25
+        self.stride = 2
 
         seed_everything(42)
 
@@ -542,11 +542,11 @@ if __name__ == '__main__':
 
     assert (args.load_from_ckpt is not None), 'Specify load_from_ckpt'
 
-    id = '00134'
-    take = 'Take3'
-    frames = ['00006', '00006', '00006', '00006', '00006']
-    cameras = ['0004', '0028', '0052', '0076', '0076']
-    novel_pose_path = f'/scratch/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
+    # id = '00134'
+    # take = 'Take3'
+    # frames = ['00006', '00006', '00006', '00006', '00006']
+    # cameras = ['0004', '0028', '0052', '0076', '0076']
+    # novel_pose_path = f'/scratch/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
 
 
     # id = '00147'
@@ -556,11 +556,11 @@ if __name__ == '__main__':
     # novel_pose_path = f'/scratch/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
 
 
-    # id = '00148'
-    # take = 'Take1'
-    # frames = ['00021', '00021', '00021', '00021', '00021']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
-    # novel_pose_path = f'/scratch/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
+    id = '00148'
+    take = 'Take1'
+    frames = ['00021', '00021', '00021', '00021', '00021']
+    cameras = ['0004', '0028', '0052', '0076', '0076']
+    novel_pose_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/{id}/Inner/{take}/SMPLX'
 
 
     # id = '00188'

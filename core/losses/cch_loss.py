@@ -77,7 +77,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            vc_pm_loss = check_and_fix_inf_nan(vc_pm_loss, 'vc_pm_loss')
+            # vc_pm_loss = check_and_fix_inf_nan(vc_pm_loss, 'vc_pm_loss')
 
             vc_pm_loss *= self.cfg.LOSS.VC_PM_LOSS_WEIGHT
             loss_dict['vc_pm_loss'] = vc_pm_loss
@@ -96,7 +96,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            w_loss = check_and_fix_inf_nan(w_loss, 'w_loss')
+            # w_loss = check_and_fix_inf_nan(w_loss, 'w_loss')
 
             w_loss *= self.cfg.LOSS.W_REGULARISER_WEIGHT
             loss_dict['w_loss'] = w_loss
@@ -121,7 +121,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             ) 
-            vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_init_chamfer_loss')
+            # vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_init_chamfer_loss')
             vp_loss *= self.cfg.LOSS.VP_INIT_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_init_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
@@ -151,7 +151,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 # confidence
             ) 
-            vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_chamfer_loss')
+            # vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_chamfer_loss')
             vp_loss *= self.cfg.LOSS.VP_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
@@ -216,8 +216,11 @@ class MaskedUncertaintyChamferLoss(nn.Module):
             conf = torch.cat(conf_list, dim=0)
             log_conf = torch.cat(log_conf_list, dim=0)
             loss_pred2gt = loss_pred2gt * conf - self.alpha * log_conf
+            loss_gt2pred *= 5000.
 
         loss_pred2gt = filter_by_quantile(loss_pred2gt, 0.98)
+
+        # print(loss_pred2gt.mean(), loss_gt2pred.mean())
 
         return loss_pred2gt.mean() + loss_gt2pred.mean() 
     
