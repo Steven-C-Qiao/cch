@@ -39,6 +39,7 @@ class CCHTrainer(pl.LightningModule):
         self.save_scenepic = True 
         self.dev = dev
         self.cfg = cfg
+        self.B = cfg.TRAIN.BATCH_SIZE
         self.use_sapiens = cfg.MODEL.USE_SAPIENS
         self.normalise = cfg.DATA.NORMALISE
         self.vis_frequency = cfg.VISUALISE_FREQUENCY if not dev else 5
@@ -66,9 +67,18 @@ class CCHTrainer(pl.LightningModule):
             gender='female',
             num_pca_comps=12,
         )
+        self.smpl_neutral = smplx.create(
+            model_type=self.body_model,
+            model_path="model_files/",
+            num_betas=10,
+            gender='neutral',
+            num_pca_comps=12,
+        )
         for param in self.smpl_male.parameters():
             param.requires_grad = False
         for param in self.smpl_female.parameters():
+            param.requires_grad = False
+        for param in self.smpl_neutral.parameters():
             param.requires_grad = False
 
         self.parents = self.smpl_male.parents
@@ -107,13 +117,15 @@ class CCHTrainer(pl.LightningModule):
         # if self.dev:
         #     batch = self.first_batch
 
-        batch = self._process_inputs(batch, batch_idx, normalise=self.normalise)
+        # batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
+        batch = self.process_thuman(batch)
 
         preds = self(batch)
 
         loss, loss_dict = self.criterion(preds, batch)
 
         metrics = self.metrics(preds, batch)
+
 
         self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, self.global_step)
 
@@ -137,12 +149,17 @@ class CCHTrainer(pl.LightningModule):
             metrics[f'{split}_{key}'] = metrics.pop(key)
         
         self.log(f'{split}_loss', loss, prog_bar=True)
-        self.log(f'{split}_vc_cfd', metrics.pop(f'{split}_vc_cfd'), on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
-        self.log(f'{split}_vp_init_cfd', metrics.pop(f'{split}_vp_init_cfd'), on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
+        if f'{split}_vc_cfd' in metrics:
+            self.log(f'{split}_vc_cfd', metrics.pop(f'{split}_vc_cfd'), 
+                     on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True, batch_size=self.B)
+        if f'{split}_vp_init_cfd' in metrics:
+            self.log(f'{split}_vp_init_cfd', metrics.pop(f'{split}_vp_init_cfd'), 
+                     on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True, batch_size=self.B)
         if f'{split}_vp_cfd' in metrics:
-            self.log(f'{split}_vp_cfd', metrics.pop(f'{split}_vp_cfd'), on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True)
-        self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
-        self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True)
+            self.log(f'{split}_vp_cfd', metrics.pop(f'{split}_vp_cfd'), 
+                     on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True, batch_size=self.B)
+        self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True, batch_size=self.B)
+        self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True, batch_size=self.B)
 
         # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
         #     self.visualiser.visualise(preds, batch) 
@@ -157,7 +174,7 @@ class CCHTrainer(pl.LightningModule):
     
 
     @torch.no_grad()
-    def _process_inputs(self, batch, batch_idx, normalise=False):
+    def process_4ddress(self, batch, batch_idx, normalise=False):
         with torch.autocast(enabled=False, device_type='cuda'):
 
             B, K = batch['imgs'].shape[:2]
@@ -231,7 +248,7 @@ class CCHTrainer(pl.LightningModule):
                 smpl_skinning_weights_list.append(smpl_model.lbs_weights)
                 smpl_full_pose_list.append(smpl_output.full_pose)
                 
-            smpl_T_joints = torch.stack(smpl_T_joints_list, dim=0)
+            smpl_T_joints = torch.stack(smpl_T_joints_list, dim=0).repeat(1, K, 1, 1)
             smpl_T_vertices = torch.stack(smpl_T_vertices_list, dim=0)
             smpl_vertices = torch.stack(smpl_vertices_list, dim=0)
             smpl_skinning_weights = torch.stack(smpl_skinning_weights_list, dim=0)[:, None].repeat(1, K, 1, 1)
@@ -412,6 +429,68 @@ class CCHTrainer(pl.LightningModule):
             # self._test_sampling(scan_mesh_centered, vp_ptcld)
 
         return batch 
+    
+
+    # will be used in trainer 
+    def process_thuman(self, batch):
+        with torch.autocast(enabled=False, device_type='cuda'):
+            B, K = batch['imgs'].shape[:2]
+            N = 4
+
+            smpl_model = self.smpl_neutral # neutral is used to fit THuman 
+            smpl_skinning_weights = torch.tensor(self.smpl_male.lbs_weights, device=self.device)
+
+            # Convert list of dicts into dict of stacked tensors
+            # TODO: Properly scale, differnet operations for 2.0 and 2.1 
+            smplx_params = [params for sublist in batch['smplx_param'] for params in sublist]
+            smplx_params = {
+                k: torch.stack([torch.tensor(d[k], device=self.device, dtype=torch.float32) for d in smplx_params]).flatten(0, 1)
+                for k in smplx_params[0].keys()
+            }
+            smplx_params.pop('transl')
+
+            smplx_T_params = {
+                k: torch.zeros_like(smplx_params[k])
+                for k in smplx_params.keys()
+            }
+            smplx_T_params['betas'] = smplx_params['betas']
+
+            smpl_output = smpl_model(return_full_pose=True, **smplx_params)
+            smpl_T_output = smpl_model(return_full_pose=True, **smplx_T_params)
+
+            batch['smpl_T_joints'] = rearrange(smpl_T_output.joints[:, :self.num_joints], '(b k) j c -> b k j c', b=B, k=K)
+            batch['pose'] = rearrange(smpl_output.full_pose, '(b k) c -> b k c', b=B, k=K)    
+
+            # scan_meshes = [mesh for sublist in batch['scan_mesh'] for mesh in sublist] # flatten list of lists into single list of trimeshes
+            scan_verts = [verts for sublist in batch['scan_verts'] for verts in sublist]
+            scan_faces = [faces for sublist in batch['scan_faces'] for faces in sublist]
+
+            dists, idx = self.knn_ptcld(
+                Pointclouds(points=scan_verts), 
+                smpl_output.vertices.view(-1, smpl_output.vertices.shape[-2], 3), 
+                K=1
+            )
+
+            
+
+            smpl_weights_flat = smpl_skinning_weights.expand(B*K, -1, -1)
+            idx_expanded = idx.repeat(1, 1, self.num_joints)
+            # print(idx_expanded.shape)
+            # print(smpl_weights_flat.shape)
+            # import ipdb; ipdb.set_trace()
+            scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
+            scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
+            batch['scan_skinning_weights'] = scan_w
+
+
+            scan_mesh_pytorch3d = Meshes(
+                verts=scan_verts,
+                faces=scan_faces
+            )
+            vp = sample_points_from_meshes(scan_mesh_pytorch3d, 24000)
+            vp_ptcld = Pointclouds(points=vp)
+            batch['vp_ptcld'] = vp_ptcld
+        return batch
 
 
 
@@ -485,7 +564,7 @@ class CCHTrainer(pl.LightningModule):
     @torch.no_grad()
     def forward_and_visualise(self, batch, batch_idx):
 
-        batch = self._process_inputs(batch, batch_idx, normalise=self.normalise)
+        batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
 
         preds = self(batch)
 
@@ -494,7 +573,7 @@ class CCHTrainer(pl.LightningModule):
 
     def build_avatar(self, batch):
 
-        batch = self._process_inputs(batch, batch_idx=0, normalise=self.normalise)
+        batch = self.process_4ddress(batch, batch_idx=0, normalise=self.normalise)
 
         preds_vc = self.model._forward_vc(batch)
 

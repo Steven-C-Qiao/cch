@@ -36,7 +36,7 @@ class CCHLoss(pl.LightningModule):
 
 
 
-        if "vc_init" in predictions:
+        if "vc_init" in predictions and "template_mesh_verts" in batch:
             gt_vc = Pointclouds(
                 points=batch['template_mesh_verts']
             )
@@ -60,7 +60,7 @@ class CCHLoss(pl.LightningModule):
             total_loss = total_loss + vc_loss
 
 
-        if "vc_init" in predictions:
+        if "vc_init" in predictions and "vc_maps" in batch:
             pred_vc = predictions['vc_init']
             gt_vc_smpl_pm = batch['vc_maps'][:, :N]
             
@@ -84,7 +84,7 @@ class CCHLoss(pl.LightningModule):
             total_loss = total_loss + vc_pm_loss
 
 
-        if "w" in predictions:
+        if "w" in predictions and "smpl_w_maps" in batch:
             pred_w = predictions['w']
             gt_w = batch['smpl_w_maps'][:, :N]
             mask = batch['masks'][:, :N]
@@ -102,7 +102,7 @@ class CCHLoss(pl.LightningModule):
             loss_dict['w_loss'] = w_loss
             total_loss = total_loss + w_loss
 
-        if "vp_init" in predictions:
+        if "vp_init" in predictions and "vp_ptcld" in batch:
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp_init']
             mask = batch['masks']
@@ -126,7 +126,7 @@ class CCHLoss(pl.LightningModule):
             loss_dict['vp_init_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
 
-        if "vp" in predictions:
+        if "vp" in predictions and "vp_ptcld" in batch:
             gt_vp = batch['vp_ptcld']
             pred_vp = predictions['vp']
             mask = batch['masks']

@@ -20,7 +20,8 @@ from core.configs.cch_cfg import get_cch_cfg_defaults
 # from core.models.trainer import CCHTrainer
 # from core.data.cch_datamodule import CCHDataModule
 from core.models.trainer_4ddress import CCHTrainer
-from core.data.d4dress_datamodule import CCHDataModule
+# from core.data.d4dress_datamodule import CCHDataModule
+from core.data.full_dataset import FullDataModule
 
 def set_seed(seed=42):
     """Set random seed for reproducibility."""
@@ -92,10 +93,14 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     if dev or plot:
         model.eval()
 
+    if dev or plot:
+        model.eval()
+
     if cfg.SPEEDUP.COMPILE:
         model = torch.compile(model)
 
-    datamodule = CCHDataModule(cfg)
+    # datamodule = CCHDataModule(cfg)
+    datamodule = FullDataModule(cfg)
 
 
 
@@ -166,7 +171,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         gradient_clip_val=1.0,
         # log_every_n_steps=10,
         # enable_progress_bar=False,
-        # num_sanity_val_steps=0
+        num_sanity_val_steps=0
     )
 
 
@@ -245,7 +250,7 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f'Device: {device}')
 
-    # os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
 
     # device_ids = list(map(int, args.gpus.split(",")))
     # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")

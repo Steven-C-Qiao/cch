@@ -60,7 +60,7 @@ if __name__ == "__main__":
     datamodule.setup(stage='fit')
     batch = next(iter(datamodule.train_dataloader()))
 
-    batch = model._process_inputs(batch, batch_idx=0)
+    batch = model.process_4ddress(batch, batch_idx=0)
 
     print(batch['sapiens_images'].device)
 

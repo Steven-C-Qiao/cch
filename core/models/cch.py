@@ -122,8 +122,8 @@ class CCH(nn.Module):
         N = 4 
 
         pose = batch['pose']
-        joints = batch['smpl_T_joints'].repeat(1, K, 1, 1)
-        w_smpl = batch['smpl_w_maps']
+        joints = batch['smpl_T_joints'] # .repeat(1, K, 1, 1)
+        # w_smpl = batch['smpl_w_maps']
         mask = batch['masks']
         
 
@@ -163,6 +163,7 @@ class CCH(nn.Module):
             w, w_conf = self.skinning_head(canonical_sapiens_tokens_list, images[:, :N], patch_start_idx=patch_start_idx, additional_conditioning=vc_init)
             w = F.softmax(w, dim=-1)
         else:
+            assert False 
             w, w_conf = w_smpl, None
 
         ret['w'] = w

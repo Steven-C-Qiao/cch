@@ -156,9 +156,10 @@ class Visualiser(pl.LightningModule):
             num_rows += 1
             vc_init = predictions['vc_init']
 
-            num_rows += 1
-            vc_init_err = np.linalg.norm(predictions['vc_init'] - batch['vc_maps'][:, :N], axis=-1) * batch['smpl_mask'][:, :N]
-            vc_init_err[vc_init_err >= 0.2] = 0.0
+            if 'vc_maps' in batch:
+                num_rows += 1
+                vc_init_err = np.linalg.norm(predictions['vc_init'] - batch['vc_maps'][:, :N], axis=-1) * batch['smpl_mask'][:, :N]
+                vc_init_err[vc_init_err >= 0.2] = 0.0
 
 
             vc_init[~mask_N.astype(bool)] = 0
@@ -175,7 +176,12 @@ class Visualiser(pl.LightningModule):
         if 'vc_maps' in batch:
             num_rows += 1
             vc_maps = batch['vc_maps']
-            smpl_mask = batch['smpl_mask']
+            if 'smpl_mask' in batch:
+                smpl_mask = batch['smpl_mask']
+            elif 'mask' in batch:
+                smpl_mask = batch['mask'][:, :N]
+            else:
+                raise ValueError("smpl_mask or mask not found in batch")
             vc_maps[~smpl_mask.astype(bool)] = 0
             vc_maps = (vc_maps - vc_maps.min()) / (vc_maps.max() - vc_maps.min())
             vc_maps[~smpl_mask.astype(bool)] = 1
@@ -214,6 +220,7 @@ class Visualiser(pl.LightningModule):
                 plt.title(f'$V_c$ init {n}')
                 row += 1
 
+            if 'vc_maps' in batch:
                 ax = plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 im = plt.imshow(vc_init_err[0, n], cmap='viridis')
                 plt.colorbar(im, ax=ax)
@@ -497,6 +504,20 @@ class Visualiser(pl.LightningModule):
                 _set_scatter_limits(ax, x)
             r += 1
 
+        if 'vp_ptcld' in batch:
+            vp_ptcld = batch['vp_ptcld']
+            vp_list = vp_ptcld.points_list()
+            for k in range(K):
+                vp = vp_list[k].cpu().detach().numpy()
+                ax = fig.add_subplot(num_rows, K, r*K+k+1, projection='3d')
+                ax.scatter(vp[:, 0], 
+                           vp[:, 1], 
+                           vp[:, 2], s=s, alpha=gt_alpha)
+                ax.set_title(f'gt vp $V^{k+1}$')
+                _set_scatter_limits(ax, x)
+            r += 1
+
+
         # predicted initial V_n^c
         if 'vc_maps' in batch:
             for n in range(N):
@@ -513,14 +534,15 @@ class Visualiser(pl.LightningModule):
             r += 1
 
 
-        # Additional row for gt canonical scatter and initial predictions
-        ax = fig.add_subplot(num_rows, K, r*K+1, projection='3d')
-        vc_gt = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
-        ax.scatter(vc_gt[:, 0], 
-                   vc_gt[:, 1], 
-                   vc_gt[:, 2], c='blue', s=s, alpha=gt_alpha, label=f'$V^c$')
-        _set_scatter_limits(ax, x)
-        ax.set_title(f'gt $V^c$')
+        if 'template_mesh_verts' in batch:
+            # Additional row for gt canonical scatter and initial predictions
+            ax = fig.add_subplot(num_rows, K, r*K+1, projection='3d')
+            vc_gt = batch['template_mesh_verts'][0]#.cpu().detach().numpy()
+            ax.scatter(vc_gt[:, 0], 
+                    vc_gt[:, 1], 
+                    vc_gt[:, 2], c='blue', s=s, alpha=gt_alpha, label=f'$V^c$')
+            _set_scatter_limits(ax, x)
+            ax.set_title(f'gt $V^c$')
 
 
         if "vc_init" in predictions:
