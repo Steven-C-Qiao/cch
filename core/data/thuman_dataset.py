@@ -1,11 +1,7 @@
-import os.path as osp
 import numpy as np
 from PIL import Image
-import random
-import os, cv2
-import trimesh
+import os
 import torch
-# import vedo
 
 from collections import defaultdict
 
@@ -15,49 +11,53 @@ from torch.utils.data import Dataset
 from core.data.thuman_metadata import THuman_metadata
 from core.data.d4dress_utils import load_pickle
 
-PATH_TO_THUMAN = '/scratches/kyuban/cq244/datasets/THuman'
+from core.configs.paths import THUMAN_PATH
 
 
 
-
-
-def thuman_collate_fn(batch):
-    """
-    Custom collate function to handle variable-sized mesh data.
-    Returns lists for mesh data that can't be stacked, and tensors for data that can.
-    """
-    collated = defaultdict(list)
+# def custom_collate_fn(batch):
+#     """
+#     Custom collate function to handle variable-sized mesh data.
+#     Returns lists for mesh data that can't be stacked, and tensors for data that can.
+#     """
+#     collated = defaultdict(list)
     
-    for sample in batch:
-        for key, value in sample.items():
-            collated[key].append(value)
+#     for sample in batch:
+#         for key, value in sample.items():
+#             collated[key].append(value)
     
-    nonstackable_keys = [
-        'scan_verts', 'scan_faces', 'smplx_param', 'gender', 'scan_ids', 'camera_ids'
-    ]
+#     nonstackable_keys = [
+#         #THuman
+#         'scan_verts', 'scan_faces', 'smplx_param', 'gender', 'scan_ids', 'camera_ids', 'dataset',
+#         #4DDress
+#         'scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 'scan_mesh_verts_centered', 'scan_mesh_colors',
+#         'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'template_full_mesh', 
+#         'template_full_lbs_weights', 'gender', 'take_dir', 'dataset'
+#     ]
 
 
-    for key in collated.keys():
-        if collated[key] and (key not in nonstackable_keys):
-            try:
-                collated[key] = torch.stack(collated[key])
-            except RuntimeError as e:
-                print(f"Warning: Could not stack {key}, keeping as list. Error: {e}")
-                # Keep as list if stacking fails
+#     for key in collated.keys():
+#         if collated[key] and (key not in nonstackable_keys):
+#             try:
+#                 collated[key] = torch.stack(collated[key])
+#             except RuntimeError as e:
+#                 print(f"Warning: Could not stack {key}, keeping as list. Error: {e}")
+#                 # Keep as list if stacking fails
     
-    # Keep mesh data as lists since they have different vertex counts
-    for key in nonstackable_keys:
-        if key in collated:
-            # Keep as list - don't try to stack
-            pass
+#     # Keep mesh data as lists since they have different vertex counts
+#     for key in nonstackable_keys:
+#         if key in collated:
+#             # Keep as list - don't try to stack
+#             pass
     
-    return dict(collated)
+#     return dict(collated)
 
 
 
 class THumanDataset(Dataset):
     def __init__(self, cfg):
         self.cfg = cfg
+        self.lengthen_by = 20
         self.metadata = THuman_metadata
 
         self.ids = list(self.metadata.keys())
@@ -70,7 +70,7 @@ class THumanDataset(Dataset):
         ]
 
         self.num_frames_pp = 4
-        self.lengthen_by = 500
+        self.lengthen_by = 50
 
         self.img_size = cfg.DATA.IMAGE_SIZE
         self.body_model = cfg.MODEL.BODY_MODEL
@@ -86,14 +86,15 @@ class THumanDataset(Dataset):
         )
 
     def __len__(self):
-        return len(self.ids) 
+        return len(self.ids) * self.lengthen_by
     
     def __getitem__(self, index):
         ret = defaultdict(list)
+        ret['dataset'] = 'THuman'
 
         N, K = 4, 5 
 
-        id = self.ids[index]
+        id = self.ids[index // self.lengthen_by]
         gender = self.metadata[id]['gender']
         ret['gender'] = gender
 
@@ -115,7 +116,7 @@ class THumanDataset(Dataset):
 
         for i, scan_id in enumerate(sampled_scan_ids):
 
-            img_fname = os.path.join(PATH_TO_THUMAN, 'render/thuman2_36views', scan_id, 'render', f'{sampled_cameras[i]}.png')
+            img_fname = os.path.join(THUMAN_PATH, 'render/thuman2_36views', scan_id, 'render', f'{sampled_cameras[i]}.png')
             rgba = Image.open(img_fname).convert('RGBA')
             
             # Extract mask from alpha channel
@@ -130,7 +131,7 @@ class THumanDataset(Dataset):
             ret['imgs'].append(img_transformed)
             ret['masks'].append(mask_transformed)
 
-            smplx_fname = os.path.join(PATH_TO_THUMAN, 'smplx', scan_id, f'smplx_param.pkl')
+            smplx_fname = os.path.join(THUMAN_PATH, 'smplx', scan_id, f'smplx_param.pkl')
             smplx_param = np.load(smplx_fname, allow_pickle=True)
             smplx_param['left_hand_pose'] = smplx_param['left_hand_pose'][:, :12]
             smplx_param['right_hand_pose'] = smplx_param['right_hand_pose'][:, :12]
@@ -138,11 +139,7 @@ class THumanDataset(Dataset):
             for k, v in smplx_param.items():
                 ret[k].append(v)
 
-            # this is slow, load pickle instead
-            # scan_fname = os.path.join(PATH_TO_THUMAN, 'model', scan_id, f'{scan_id}.obj')
-            # scan = trimesh.load(scan_fname, process=False, maintain_order=True, skip_materials=True)
-            # ret['scan_mesh'].append(scan) \
-            scan_fname = os.path.join(PATH_TO_THUMAN, 'pickled', f'{scan_id}.pkl')
+            scan_fname = os.path.join(THUMAN_PATH, 'pickled', f'{scan_id}.pkl')
             scan = load_pickle(scan_fname)
             verts = scan['vertices'] / smplx_param['scale'] - smplx_param['transl']
             ret['scan_verts'].append(torch.tensor(verts).float())

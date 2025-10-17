@@ -2,6 +2,7 @@ import torch
 import smplx
 import torch.optim as optim
 import pytorch_lightning as pl
+import numpy as np
 from einops import rearrange
 
 from pytorch3d.loss import chamfer_distance
@@ -117,15 +118,19 @@ class CCHTrainer(pl.LightningModule):
         # if self.dev:
         #     batch = self.first_batch
 
-        # batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
-        batch = self.process_thuman(batch)
+
+        # Route processing by dataset source to avoid mixing logic
+        batch = batch[0] if np.random.rand() < 0.75 else batch[1]
+        if batch['dataset'][0] == '4DDress':
+            batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
+        elif batch['dataset'][0] == 'THuman':
+            batch = self.process_thuman(batch)
 
         preds = self(batch)
 
         loss, loss_dict = self.criterion(preds, batch)
 
         metrics = self.metrics(preds, batch)
-
 
         self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, self.global_step)
 
@@ -248,7 +253,7 @@ class CCHTrainer(pl.LightningModule):
                 smpl_skinning_weights_list.append(smpl_model.lbs_weights)
                 smpl_full_pose_list.append(smpl_output.full_pose)
                 
-            smpl_T_joints = torch.stack(smpl_T_joints_list, dim=0).repeat(1, K, 1, 1)
+            smpl_T_joints = torch.stack(smpl_T_joints_list, dim=0)#.repeat(1, K, 1, 1)
             smpl_T_vertices = torch.stack(smpl_T_vertices_list, dim=0)
             smpl_vertices = torch.stack(smpl_vertices_list, dim=0)
             smpl_skinning_weights = torch.stack(smpl_skinning_weights_list, dim=0)[:, None].repeat(1, K, 1, 1)
@@ -256,7 +261,7 @@ class CCHTrainer(pl.LightningModule):
 
             smpl_faces = torch.tensor(self.smpl_male.faces, dtype=torch.int32, device=self.device)
 
-            # batch['smpl_T_joints'] = smpl_T_joints
+            batch['smpl_T_joints'] = smpl_T_joints
             batch['pose'] = smpl_full_pose
 
 
@@ -340,11 +345,10 @@ class CCHTrainer(pl.LightningModule):
             template_full_mesh_faces_expanded_list = [faces[None].repeat(K, 1, 1) for faces in template_full_mesh_faces]
             template_full_mesh_verts_expanded_list = [verts[None].repeat(K, 1, 1) for verts in template_full_mesh_verts]
 
-
             for b in range(B):
                 template_full_mesh_verts_posed, _ = general_lbs(
                     pose=batch['pose'][b],
-                    J=batch['smpl_T_joints'][b].repeat(K, 1, 1),
+                    J=batch['smpl_T_joints'][b],
                     vc=template_full_mesh_verts[b][None].repeat(K, 1, 1),
                     lbs_weights=template_full_lbs_weights[b][None].repeat(K, 1, 1),
                     parents=self.smpl_male.parents,
@@ -432,13 +436,14 @@ class CCHTrainer(pl.LightningModule):
     
 
     # will be used in trainer 
+    @torch.no_grad()
     def process_thuman(self, batch):
         with torch.autocast(enabled=False, device_type='cuda'):
             B, K = batch['imgs'].shape[:2]
             N = 4
 
             smpl_model = self.smpl_neutral # neutral is used to fit THuman 
-            smpl_skinning_weights = torch.tensor(self.smpl_male.lbs_weights, device=self.device)
+            smpl_skinning_weights = self.smpl_male.lbs_weights
 
             # Convert list of dicts into dict of stacked tensors
             # TODO: Properly scale, differnet operations for 2.0 and 2.1 
@@ -457,7 +462,7 @@ class CCHTrainer(pl.LightningModule):
 
             smpl_output = smpl_model(return_full_pose=True, **smplx_params)
             smpl_T_output = smpl_model(return_full_pose=True, **smplx_T_params)
-
+            
             batch['smpl_T_joints'] = rearrange(smpl_T_output.joints[:, :self.num_joints], '(b k) j c -> b k j c', b=B, k=K)
             batch['pose'] = rearrange(smpl_output.full_pose, '(b k) c -> b k c', b=B, k=K)    
 
@@ -465,22 +470,20 @@ class CCHTrainer(pl.LightningModule):
             scan_verts = [verts for sublist in batch['scan_verts'] for verts in sublist]
             scan_faces = [faces for sublist in batch['scan_faces'] for faces in sublist]
 
-            dists, idx = self.knn_ptcld(
-                Pointclouds(points=scan_verts), 
-                smpl_output.vertices.view(-1, smpl_output.vertices.shape[-2], 3), 
-                K=1
-            )
+            # dists, idx = self.knn_ptcld(
+            #     Pointclouds(points=scan_verts), 
+            #     smpl_output.vertices.view(-1, smpl_output.vertices.shape[-2], 3), 
+            #     K=1
+            # )
 
-            
-
-            smpl_weights_flat = smpl_skinning_weights.expand(B*K, -1, -1)
-            idx_expanded = idx.repeat(1, 1, self.num_joints)
-            # print(idx_expanded.shape)
-            # print(smpl_weights_flat.shape)
-            # import ipdb; ipdb.set_trace()
-            scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
-            scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
-            batch['scan_skinning_weights'] = scan_w
+            # smpl_weights_flat = smpl_skinning_weights.expand(B*K, -1, -1)
+            # idx_expanded = idx.repeat(1, 1, self.num_joints)
+            # # print(idx_expanded.shape)
+            # # print(smpl_weights_flat.shape)
+            # # import ipdb; ipdb.set_trace()
+            # scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
+            # scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
+            # batch['scan_skinning_weights'] = scan_w
 
 
             scan_mesh_pytorch3d = Meshes(
@@ -495,8 +498,13 @@ class CCHTrainer(pl.LightningModule):
 
 
     def validation_step(self, batch, batch_idx):
-        with torch.no_grad():
-            loss = self.training_step(batch, batch_idx, split='val')
+        batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
+        preds = self(batch)
+        loss, loss_dict = self.criterion(preds, batch)
+        metrics = self.metrics(preds, batch)
+        self._log_metrics_and_visualise(loss, loss_dict, metrics, 'val', preds, batch, self.global_step)
+        # with torch.no_grad():
+        #     loss = self.training_step(batch, batch_idx, split='val')
         return loss
 
     def test_step(self, batch, batch_idx):

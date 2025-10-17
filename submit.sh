@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=exp_037_vp_sapiens
-#SBATCH --output=exp/exp_037_vp_sapiens/exp_037_vp_sapiens-%j.out
+#SBATCH --job-name=exp_038
+#SBATCH --output=exp/exp_038_thuman/exp_038_thuman-%j.out
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=4
 #SBATCH --ntasks-per-node=4
@@ -13,5 +13,5 @@ source ~/miniforge3/bin/activate dev
 # export NCCL_DEBUG=INFO
 
 srun python3 scripts/train.py \
-    -E exp/exp_037_vp_sapiens \
-    -L exp/exp_037_vp_sapiens/saved_models/last-v1.ckpt
+    -E exp/exp_038_thuman \
+    -L exp/exp_038_thuman/saved_models/val_vp_cfd_epoch=001.ckpt

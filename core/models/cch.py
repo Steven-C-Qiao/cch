@@ -174,7 +174,6 @@ class CCH(nn.Module):
         vc_init_expanded = vc_init.unsqueeze(1).repeat(1, K, 1, 1, 1, 1) # (B, K, N, H, W, 3)
         w_expanded = w.unsqueeze(1).repeat(1, K, 1, 1, 1, 1) # (B, K, N, H, W, 25)
 
-
         vp_init, J_init = general_lbs(
             vc=rearrange(vc_init_expanded, 'b k n h w c -> (b k) (n h w) c'),
             pose=rearrange(pose, 'b k c -> (b k) c'),

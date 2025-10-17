@@ -490,19 +490,19 @@ class Visualiser(pl.LightningModule):
             r += 1
 
         # scan meshes
-        if "scan_mesh_verts_centered" in batch:
-            scan_mesh_verts = batch['scan_mesh_verts_centered'][0]
-            scan_mesh_colors = batch['scan_mesh_colors'][0]
-            for k in range(K):
-                verts = scan_mesh_verts[k].cpu().detach().numpy()
-                colors = (scan_mesh_colors[k].cpu().detach().numpy() / 255.).astype(np.float32)
-                ax = fig.add_subplot(num_rows, K, r*K+k+1, projection='3d')
-                ax.scatter(verts[:, 0], 
-                           verts[:, 1], 
-                           verts[:, 2], c=colors, s=s, alpha=gt_alpha)
-                ax.set_title(f'gt scan $V^{k+1}$')
-                _set_scatter_limits(ax, x)
-            r += 1
+        # if "scan_mesh_verts_centered" in batch:
+        #     scan_mesh_verts = batch['scan_mesh_verts_centered'][0]
+        #     scan_mesh_colors = batch['scan_mesh_colors'][0]
+        #     for k in range(K):
+        #         verts = scan_mesh_verts[k].cpu().detach().numpy()
+        #         colors = (scan_mesh_colors[k].cpu().detach().numpy() / 255.).astype(np.float32)
+        #         ax = fig.add_subplot(num_rows, K, r*K+k+1, projection='3d')
+        #         ax.scatter(verts[:, 0], 
+        #                    verts[:, 1], 
+        #                    verts[:, 2], c=colors, s=s, alpha=gt_alpha)
+        #         ax.set_title(f'gt scan $V^{k+1}$')
+        #         _set_scatter_limits(ax, x)
+        #     r += 1
 
         if 'vp_ptcld' in batch:
             vp_ptcld = batch['vp_ptcld']
@@ -555,7 +555,7 @@ class Visualiser(pl.LightningModule):
                        v[:, 2], c=color, s=s, alpha=gt_alpha, label=f'$V^c$ init')
             _set_scatter_limits(ax, x)
             ax.set_title(f'pred init $V^c$')
-        r += 1
+            r += 1
 
 
         # predicted initial V^k scatter

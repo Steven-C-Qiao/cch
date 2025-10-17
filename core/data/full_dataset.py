@@ -1,73 +1,49 @@
-from torch.utils.data import ConcatDataset, DataLoader
-import pytorch_lightning as pl
-from typing import Any, Dict, List, Optional
-
 import torch
-
+import pytorch_lightning as pl
+from collections import defaultdict
+from torch.utils.data import DataLoader, DistributedSampler
+from pytorch_lightning.utilities.combined_loader import CombinedLoader
 from core.data.thuman_dataset import THumanDataset
 from core.data.d4dress_dataset import D4DressDataset
 
 
-def full_collate_fn(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+def custom_collate_fn(batch):
     """
-    Collate function that works for both D4Dress and THuman samples.
-    It attempts to stack tensors when possible and leaves inherently
-    variable-sized structures (e.g., meshes) as lists.
+    Custom collate function to handle variable-sized mesh data.
+    Returns lists for mesh data that can't be stacked, and tensors for data that can.
     """
-    from collections import defaultdict
-
     collated = defaultdict(list)
-
+    
     for sample in batch:
         for key, value in sample.items():
             collated[key].append(value)
-
-    # Union of non-stackable keys across datasets
-    nonstackable_keys = set([
-        # From D4Dress
+    
+    nonstackable_keys = [
+        #THuman
+        'scan_verts', 'scan_faces', 'smplx_param', 'gender', 'scan_ids', 'camera_ids', 'dataset',
+        #4DDress
         'scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 'scan_mesh_verts_centered', 'scan_mesh_colors',
-        'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'template_full_mesh', 'template_full_lbs_weights',
-        'gender', 'take_dir',
-        # From THuman
-        'smplx_param',
-    ])
+        'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'template_full_mesh', 
+        'template_full_lbs_weights', 'gender', 'take_dir', 'dataset'
+    ]
 
-    # Try stacking for everything else
-    for key in list(collated.keys()):
-        if key in nonstackable_keys:
-            continue
-        values = collated[key]
-        if len(values) == 0:
-            continue
-        try:
-            if isinstance(values[0], torch.Tensor):
-                collated[key] = torch.stack(values)
-            else:
-                # Best-effort tensor conversion if all elements are stackable
-                collated[key] = torch.stack([v if isinstance(v, torch.Tensor) else torch.tensor(v) for v in values])
-        except Exception:
-            # Leave as list if stacking fails
+
+    for key in collated.keys():
+        if collated[key] and (key not in nonstackable_keys):
+            try:
+                collated[key] = torch.stack(collated[key])
+            except RuntimeError as e:
+                print(f"Warning: Could not stack {key}, keeping as list. Error: {e}")
+                # Keep as list if stacking fails
+    
+    # Keep mesh data as lists since they have different vertex counts
+    for key in nonstackable_keys:
+        if key in collated:
+            # Keep as list - don't try to stack
             pass
-
+    
     return dict(collated)
 
-
-class FullDataset(ConcatDataset):
-    """
-    Concatenation of D4Dress and THuman datasets for unified training.
-    """
-
-    def __init__(self, cfg, d4dress_ids: List[str] = None):
-        d4dress_ids = d4dress_ids or [
-            '00122', '00123', '00127', '00129', '00134', '00135', '00136', '00137',
-            '00140', '00147', '00148', '00149', '00151', '00152', '00154', '00156',
-            '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175',
-            '00176', '00179', '00180', '00185', '00187', '00190'
-        ]
-
-        d4dress = D4DressDataset(cfg=cfg, ids=d4dress_ids)
-        thuman = THumanDataset(cfg=cfg)
-        super().__init__([d4dress, thuman])
 
 
 class FullDataModule(pl.LightningDataModule):
@@ -75,50 +51,72 @@ class FullDataModule(pl.LightningDataModule):
         super().__init__()
         self.cfg = cfg
 
-        # Same ids as the D4Dress-only datamodule for consistency
-        self.train_ids = [
+        # 4DDress splits (reuse those used in the standalone datamodule)
+        self.d4dress_train_ids = [
             '00122', '00123', '00127', '00129', '00134', '00135', '00136', '00137',
             '00140', '00147', '00148', '00149', '00151', '00152', '00154', '00156',
             '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175',
             '00176', '00179', '00180', '00185', '00187', '00190'
         ]
-        self.val_ids = ['00188', '00191']
+        self.d4dress_val_ids = ['00188', '00191']
 
-        self._train_dataset = None
-        self._val_dataset = None
+        self.train_thuman = None
+        self.train_d4dress = None
+        self.val_d4dress = None
 
-    def setup(self, stage: Optional[str] = None):
-        d4dress_train = D4DressDataset(cfg=self.cfg, ids=self.train_ids)
-        d4dress_val = D4DressDataset(cfg=self.cfg, ids=self.val_ids)
-        thuman_all = THumanDataset(cfg=self.cfg)
+    def setup(self, stage=None):
+        # THuman used for training
+        self.train_thuman = THumanDataset(self.cfg)
+        # 4DDress train/val
+        self.train_d4dress = D4DressDataset(cfg=self.cfg, ids=self.d4dress_train_ids)
+        self.val_d4dress = D4DressDataset(cfg=self.cfg, ids=self.d4dress_val_ids)
 
-        # Use THuman for both train and val to provide pose/shape diversity
-        # self._train_dataset = ConcatDataset([thuman_all,d4dress_train])
-        self._train_dataset = ConcatDataset([thuman_all])
-        self._val_dataset = ConcatDataset([d4dress_val])
+        print(f"THuman train samples: {len(self.train_thuman)}")
+        print(f"4DDress train samples: {len(self.train_d4dress)}")
+        print(f"4DDress val samples: {len(self.val_d4dress)}")
+        
+
 
     def train_dataloader(self):
-        return DataLoader(
-            self._train_dataset,
+        thuman_loader = DataLoader(
+            self.train_thuman,
             batch_size=self.cfg.TRAIN.BATCH_SIZE,
             shuffle=True,
             drop_last=True,
             num_workers=self.cfg.TRAIN.NUM_WORKERS,
             pin_memory=self.cfg.TRAIN.PIN_MEMORY,
-            collate_fn=full_collate_fn,
+            collate_fn=custom_collate_fn,
         )
+
+        d4dress_loader = DataLoader(
+            self.train_d4dress,
+            batch_size=self.cfg.TRAIN.BATCH_SIZE,
+            shuffle=True,
+            drop_last=True,
+            num_workers=self.cfg.TRAIN.NUM_WORKERS,
+            pin_memory=self.cfg.TRAIN.PIN_MEMORY,
+            collate_fn=custom_collate_fn,
+        )
+        # combined_loader = CombinedLoader(
+        #     {"thuman": thuman_loader, "d4dress": d4dress_loader},
+        #     mode="max_size_cycle"
+        # )
+        # return combined_loader
+
+        return [thuman_loader, d4dress_loader]
 
     def val_dataloader(self):
         return DataLoader(
-            self._val_dataset,
+            self.val_d4dress,
             batch_size=self.cfg.TRAIN.BATCH_SIZE,
             shuffle=False,
             drop_last=True,
             num_workers=self.cfg.TRAIN.NUM_WORKERS,
             pin_memory=self.cfg.TRAIN.PIN_MEMORY,
-            collate_fn=full_collate_fn,
+            collate_fn=custom_collate_fn,
         )
 
     def test_dataloader(self):
         return self.val_dataloader()
+
 

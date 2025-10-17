@@ -34,8 +34,6 @@ class CCHLoss(pl.LightningModule):
         B, N, H, W, _ = predictions['vc_init'].shape
         K = 5 
 
-
-
         if "vc_init" in predictions and "template_mesh_verts" in batch:
             gt_vc = Pointclouds(
                 points=batch['template_mesh_verts']

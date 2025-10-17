@@ -69,40 +69,6 @@ def make_normalize_transform(
     return transforms.Normalize(mean=mean, std=std)
 
 
-def d4dress_collate_fn(batch):
-    """
-    Custom collate function to handle variable-sized mesh data.
-    Returns lists for mesh data that can't be stacked, and tensors for data that can.
-    """
-    collated = defaultdict(list)
-    
-    for sample in batch:
-        for key, value in sample.items():
-            collated[key].append(value)
-    
-    nonstackable_keys = [
-        'scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 'scan_mesh_verts_centered', 'scan_mesh_colors',
-        'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'template_full_mesh', 'template_full_lbs_weights', 'gender', 'take_dir']
-
-
-    for key in collated.keys():
-        if collated[key] and (key not in nonstackable_keys):
-            try:
-                collated[key] = torch.stack(collated[key])
-            except RuntimeError as e:
-                print(f"Warning: Could not stack {key}, keeping as list. Error: {e}")
-                # Keep as list if stacking fails
-    
-    # Keep mesh data as lists since they have different vertex counts
-    for key in nonstackable_keys:
-        if key in collated:
-            # Keep as list - don't try to stack
-            pass
-    
-    return dict(collated)
-
-
-
 
 
 
@@ -110,7 +76,7 @@ class D4DressDataset(Dataset):
     def __init__(self, cfg, ids):
         self.cfg = cfg
         self.num_frames_pp = 4
-        self.lengthen_by = 500
+        self.lengthen_by = 400
 
         self.img_size = cfg.DATA.IMAGE_SIZE
         self.body_model = cfg.MODEL.BODY_MODEL
@@ -152,6 +118,7 @@ class D4DressDataset(Dataset):
 
     def __getitem__(self, index):
         ret = defaultdict(list)
+        ret['dataset'] = '4DDress'
 
         id = self.ids[index // self.lengthen_by]
         layer = self.layer
@@ -316,6 +283,7 @@ class D4DressDataset(Dataset):
             ret['leye_pose'] = torch.tensor(np.stack(ret['leye_pose']))
             ret['reye_pose'] = torch.tensor(np.stack(ret['reye_pose']))
             ret['expression'] = torch.tensor(np.stack(ret['expression']))
+
 
         return ret
 
