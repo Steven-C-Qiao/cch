@@ -6,6 +6,7 @@ from pytorch3d.loss import chamfer_distance
 from pytorch3d.structures import Pointclouds
 
 from core.utils.loss_utils import filter_by_quantile
+from core.utils.general import check_and_fix_inf_nan
 
 class CCHMetrics(pl.LightningModule):
     def __init__(self, cfg):
@@ -46,6 +47,7 @@ class CCHMetrics(pl.LightningModule):
         
         if "vp_init" in predictions and "vp_ptcld" in batch:
             gt_vp = batch['vp_ptcld']
+            # gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp')
             pred_vp = predictions['vp_init']
             mask = batch['masks'][:, :N] * confidence 
 
@@ -57,7 +59,8 @@ class CCHMetrics(pl.LightningModule):
 
 
             # An extra frame in the end 
-            extra_gt_vp = Pointclouds(batch['vp_ptcld'].points_list()[4::K])
+            # extra_gt_vp = Pointclouds(batch['vp_ptcld'].points_list()[4::K])
+            extra_gt_vp = Pointclouds(batch['vp'][4::K])
             extra_pred_vp = rearrange(predictions['vp_init'][:, -1], 'b n h w c -> b (n h w) c')
             mask = rearrange((batch['masks'][:, :N] * confidence), 'b n h w -> b (n h w)')
 
@@ -67,6 +70,7 @@ class CCHMetrics(pl.LightningModule):
 
         if "vp" in predictions and "vp_ptcld" in batch:
             gt_vp = batch['vp_ptcld']
+            # gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp')
             pred_vp = predictions['vp']
             mask = batch['masks'][:, :N] * confidence 
 
@@ -77,7 +81,8 @@ class CCHMetrics(pl.LightningModule):
             ret['vp_cfd'] = vp_cfd 
 
             # An extra frame in the end 
-            extra_gt_vp = Pointclouds(batch['vp_ptcld'].points_list()[4::K])
+            # extra_gt_vp = Pointclouds(batch['vp_ptcld'].points_list()[4::K])
+            extra_gt_vp = Pointclouds(batch['vp'][4::K])
             extra_pred_vp = rearrange(predictions['vp'][:, -1], 'b n h w c -> b (n h w) c')
             mask = rearrange((batch['masks'][:, :N] * confidence), 'b n h w -> b (n h w)')
 

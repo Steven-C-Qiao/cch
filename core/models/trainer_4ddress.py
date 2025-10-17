@@ -415,6 +415,7 @@ class CCHTrainer(pl.LightningModule):
             vp = sample_points_from_meshes(scan_mesh_centered, 24000)
             vp_ptcld = Pointclouds(points=vp)
             batch['vp_ptcld'] = vp_ptcld
+            batch['vp'] = vp
 
 
 
@@ -493,6 +494,7 @@ class CCHTrainer(pl.LightningModule):
             vp = sample_points_from_meshes(scan_mesh_pytorch3d, 24000)
             vp_ptcld = Pointclouds(points=vp)
             batch['vp_ptcld'] = vp_ptcld
+            batch['vp'] = vp
         return batch
 
 

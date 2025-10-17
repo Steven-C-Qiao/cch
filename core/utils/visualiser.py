@@ -162,11 +162,11 @@ class Visualiser(pl.LightningModule):
                 vc_init_err[vc_init_err >= 0.2] = 0.0
 
 
-            vc_init[~mask_N.astype(bool)] = 0
+            # vc_init[~mask_N.astype(bool)] = 0
 
-            norm_min, norm_max = vc_init.min(), vc_init.max()
-            vc_init = (vc_init - norm_min) / (norm_max - norm_min) 
-            vc_init[~mask_N.astype(bool)] = 1
+            # norm_min, norm_max = vc_init.min(), vc_init.max()
+            # vc_init = (vc_init - norm_min) / (norm_max - norm_min) 
+            # vc_init[~mask_N.astype(bool)] = 1
         
         if 'vc_init_conf' in predictions:
             num_rows += 1
@@ -505,8 +505,9 @@ class Visualiser(pl.LightningModule):
         #     r += 1
 
         if 'vp_ptcld' in batch:
-            vp_ptcld = batch['vp_ptcld']
-            vp_list = vp_ptcld.points_list()
+            # vp_ptcld = batch['vp_ptcld']
+            # vp_list = vp_ptcld.points_list()
+            vp_list = batch['vp']
             for k in range(K):
                 vp = vp_list[k].cpu().detach().numpy()
                 ax = fig.add_subplot(num_rows, K, r*K+k+1, projection='3d')

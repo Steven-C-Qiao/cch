@@ -53,6 +53,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
+            vc_loss = check_and_fix_inf_nan(vc_loss, 'vc_loss')
             vc_loss *= self.cfg.LOSS.VC_CHAMFER_LOSS_WEIGHT
             loss_dict['vc_chamfer_loss'] = vc_loss
             total_loss = total_loss + vc_loss
@@ -75,7 +76,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            # vc_pm_loss = check_and_fix_inf_nan(vc_pm_loss, 'vc_pm_loss')
+            vc_pm_loss = check_and_fix_inf_nan(vc_pm_loss, 'vc_pm_loss')
 
             vc_pm_loss *= self.cfg.LOSS.VC_PM_LOSS_WEIGHT
             loss_dict['vc_pm_loss'] = vc_pm_loss
@@ -94,14 +95,18 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            # w_loss = check_and_fix_inf_nan(w_loss, 'w_loss')
+            w_loss = check_and_fix_inf_nan(w_loss, 'w_loss')
 
             w_loss *= self.cfg.LOSS.W_REGULARISER_WEIGHT
             loss_dict['w_loss'] = w_loss
             total_loss = total_loss + w_loss
 
         if "vp_init" in predictions and "vp_ptcld" in batch:
-            gt_vp = batch['vp_ptcld']
+            # gt_vp = batch['vp_ptcld']
+            gt_vp = batch['vp']
+            gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp')
+            # print(gt_vp.shape)
+
             pred_vp = predictions['vp_init']
             mask = batch['masks']
             confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
@@ -119,13 +124,16 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             ) 
-            # vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_init_chamfer_loss')
+            vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_init_chamfer_loss')
             vp_loss *= self.cfg.LOSS.VP_INIT_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_init_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
 
         if "vp" in predictions and "vp_ptcld" in batch:
-            gt_vp = batch['vp_ptcld']
+            # gt_vp = batch['vp_ptcld']
+            gt_vp = batch['vp']
+            gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp')
+
             pred_vp = predictions['vp']
             mask = batch['masks']
 
@@ -149,7 +157,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 # confidence
             ) 
-            # vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_chamfer_loss')
+            vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_chamfer_loss')
             vp_loss *= self.cfg.LOSS.VP_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
