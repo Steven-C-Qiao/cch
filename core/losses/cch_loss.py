@@ -101,8 +101,7 @@ class CCHLoss(pl.LightningModule):
             loss_dict['w_loss'] = w_loss
             total_loss = total_loss + w_loss
 
-        if "vp_init" in predictions and "vp_ptcld" in batch:
-            # gt_vp = batch['vp_ptcld']
+        if "vp_init" in predictions and "vp" in batch:
             gt_vp = batch['vp']
             gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp')
             # print(gt_vp.shape)
@@ -122,15 +121,14 @@ class CCHLoss(pl.LightningModule):
                 gt_vp,
                 pred_vp, 
                 mask,
-                confidence
+                # confidence
             ) 
             vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_init_chamfer_loss')
             vp_loss *= self.cfg.LOSS.VP_INIT_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_init_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
 
-        if "vp" in predictions and "vp_ptcld" in batch:
-            # gt_vp = batch['vp_ptcld']
+        if "vp" in predictions and "vp" in batch:
             gt_vp = batch['vp']
             gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp')
 

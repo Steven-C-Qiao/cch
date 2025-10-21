@@ -15,45 +15,6 @@ from core.configs.paths import THUMAN_PATH
 
 
 
-# def custom_collate_fn(batch):
-#     """
-#     Custom collate function to handle variable-sized mesh data.
-#     Returns lists for mesh data that can't be stacked, and tensors for data that can.
-#     """
-#     collated = defaultdict(list)
-    
-#     for sample in batch:
-#         for key, value in sample.items():
-#             collated[key].append(value)
-    
-#     nonstackable_keys = [
-#         #THuman
-#         'scan_verts', 'scan_faces', 'smplx_param', 'gender', 'scan_ids', 'camera_ids', 'dataset',
-#         #4DDress
-#         'scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 'scan_mesh_verts_centered', 'scan_mesh_colors',
-#         'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'template_full_mesh', 
-#         'template_full_lbs_weights', 'gender', 'take_dir', 'dataset'
-#     ]
-
-
-#     for key in collated.keys():
-#         if collated[key] and (key not in nonstackable_keys):
-#             try:
-#                 collated[key] = torch.stack(collated[key])
-#             except RuntimeError as e:
-#                 print(f"Warning: Could not stack {key}, keeping as list. Error: {e}")
-#                 # Keep as list if stacking fails
-    
-#     # Keep mesh data as lists since they have different vertex counts
-#     for key in nonstackable_keys:
-#         if key in collated:
-#             # Keep as list - don't try to stack
-#             pass
-    
-#     return dict(collated)
-
-
-
 class THumanDataset(Dataset):
     def __init__(self, cfg):
         self.cfg = cfg
@@ -70,7 +31,7 @@ class THumanDataset(Dataset):
         ]
 
         self.num_frames_pp = 4
-        self.lengthen_by = 50
+        self.lengthen_by = 20
 
         self.img_size = cfg.DATA.IMAGE_SIZE
         self.body_model = cfg.MODEL.BODY_MODEL
@@ -135,15 +96,21 @@ class THumanDataset(Dataset):
             smplx_param = np.load(smplx_fname, allow_pickle=True)
             smplx_param['left_hand_pose'] = smplx_param['left_hand_pose'][:, :12]
             smplx_param['right_hand_pose'] = smplx_param['right_hand_pose'][:, :12]
+            if scan_id >= '0526':
+                from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_euler_angles, euler_angles_to_matrix, matrix_to_axis_angle
+                global_orient = torch.tensor(smplx_param['global_orient'])
+                global_orient = matrix_to_euler_angles(axis_angle_to_matrix(global_orient), 'XYZ') + torch.tensor([-torch.pi/2, 0., 0.])
+                smplx_param['global_orient'] = matrix_to_axis_angle(euler_angles_to_matrix(global_orient, 'XYZ')).numpy()
+
             ret['smplx_param'].append(smplx_param)
             for k, v in smplx_param.items():
                 ret[k].append(v)
 
-            scan_fname = os.path.join(THUMAN_PATH, 'pickled', f'{scan_id}.pkl')
+            scan_fname = os.path.join(THUMAN_PATH, 'cleaned', f'{scan_id}.pkl')
             scan = load_pickle(scan_fname)
-            verts = scan['vertices'] / smplx_param['scale'] - smplx_param['transl']
-            ret['scan_verts'].append(torch.tensor(verts).float())
-            ret['scan_faces'].append(torch.tensor(scan['faces']).long())
+            # verts = scan['vertices'] / smplx_param['scale'] - smplx_param['transl']
+            ret['scan_verts'].append(torch.tensor(scan['scan_verts']).float())
+            ret['scan_faces'].append(torch.tensor(scan['scan_faces']).long())
 
 
         # Attempt to stack each value in ret, keep as is if not stackable
@@ -156,44 +123,3 @@ class THumanDataset(Dataset):
 
         return ret
     
-
-
-
-        def opengl_to_pytorch3d_camera(self, R, T, K):
-            """
-            Convert OpenGL camera parameters to PyTorch3D camera format.
-            
-            Args:
-                R (torch.Tensor): Rotation matrix in OpenGL format (3x3)
-                T (torch.Tensor): Translation vector in OpenGL format (3,)
-                K (torch.Tensor): Camera intrinsics matrix (4x4)
-                
-            Returns:
-                R_pytorch3d (torch.Tensor): Rotation matrix in PyTorch3D format
-                T_pytorch3d (torch.Tensor): Translation vector in PyTorch3D format 
-                K_pytorch3d (torch.Tensor): Camera intrinsics in PyTorch3D format
-            """
-            # OpenGL to PyTorch3D coordinate system conversion
-            # PyTorch3D: +X right, +Y up, +Z front (facing out from camera)
-            # OpenGL: +X right, +Y up, -Z front (facing into camera)
-            coord_transform = torch.tensor([
-                [1, 0, 0],
-                [0, 1, 0], 
-                [0, 0, -1]
-            ], device=R.device)
-
-            # Convert rotation
-            R_pytorch3d = R @ coord_transform
-
-            # Convert translation 
-            T_pytorch3d = T.clone()
-            T_pytorch3d[..., 2] *= -1
-
-            # Camera intrinsics remain the same
-            
-            S = torch.tensor([  [1, 0,       0],
-                                [0, -1,  H - 1],
-                                [0,  0,       1]], device=K.device, dtype=K.dtype)
-            K_pytorch3d = S @ K[:3, :3] @ S.T
-
-            return R_pytorch3d, T_pytorch3d, K_pytorch3d
