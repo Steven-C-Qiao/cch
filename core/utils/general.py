@@ -26,7 +26,7 @@ from typing import Any, Mapping, Protocol, runtime_checkable
 
 
 
-def check_and_fix_inf_nan(input_tensor, loss_name="default", hard_max=100):
+def check_and_fix_inf_nan(input_tensor, loss_name="default", hard_max=100, ids=None):
     """
     Checks if 'input_tensor' contains inf or nan values and clamps extreme values.
     
@@ -44,6 +44,7 @@ def check_and_fix_inf_nan(input_tensor, loss_name="default", hard_max=100):
     has_inf_nan = torch.isnan(input_tensor).any() or torch.isinf(input_tensor).any()
     if has_inf_nan:
         logging.warning(f"Tensor {loss_name} contains inf or nan values. Replacing with zeros.")
+        logging.warning(f"ID: {ids}")
         input_tensor = torch.where(
             torch.isnan(input_tensor) | torch.isinf(input_tensor),
             torch.zeros_like(input_tensor),

@@ -1,17 +1,18 @@
-import numpy as np
-from PIL import Image
 import os
 import torch
-
-from collections import defaultdict
-
+import numpy as np
 import torchvision.transforms as transforms
+
+from PIL import Image
+from collections import defaultdict
 from torch.utils.data import Dataset
 
-from core.data.thuman_metadata import THuman_metadata
-from core.data.d4dress_utils import load_pickle
+from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_euler_angles, euler_angles_to_matrix, matrix_to_axis_angle
 
 from core.configs.paths import THUMAN_PATH
+from core.data.thuman_metadata import THuman_metadata
+from core.data.d4dress_utils import load_pickle
+from core.utils.camera_utils import uv_to_pixel_space, custom_opengl2pytorch3d
 
 
 
@@ -77,7 +78,7 @@ class THumanDataset(Dataset):
 
         for i, scan_id in enumerate(sampled_scan_ids):
 
-            img_fname = os.path.join(THUMAN_PATH, 'render/thuman2_36views', scan_id, 'render', f'{sampled_cameras[i]}.png')
+            img_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, 'render', f'{sampled_cameras[i]}.png')
             rgba = Image.open(img_fname).convert('RGBA')
             
             # Extract mask from alpha channel
@@ -97,7 +98,6 @@ class THumanDataset(Dataset):
             smplx_param['left_hand_pose'] = smplx_param['left_hand_pose'][:, :12]
             smplx_param['right_hand_pose'] = smplx_param['right_hand_pose'][:, :12]
             if scan_id >= '0526':
-                from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_euler_angles, euler_angles_to_matrix, matrix_to_axis_angle
                 global_orient = torch.tensor(smplx_param['global_orient'])
                 global_orient = matrix_to_euler_angles(axis_angle_to_matrix(global_orient), 'XYZ') + torch.tensor([-torch.pi/2, 0., 0.])
                 smplx_param['global_orient'] = matrix_to_axis_angle(euler_angles_to_matrix(global_orient, 'XYZ')).numpy()
@@ -112,6 +112,24 @@ class THumanDataset(Dataset):
             ret['scan_verts'].append(torch.tensor(scan['scan_verts']).float())
             ret['scan_faces'].append(torch.tensor(scan['scan_faces']).long())
 
+
+            calib_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, 'calib', f'{sampled_cameras[i]}.txt')
+            calib = np.loadtxt(calib_fname)
+            extrinsic = calib[:4].reshape(4,4)
+            intrinsic = calib[4:].reshape(4,4)
+
+            intrinsic = uv_to_pixel_space(intrinsic)
+            intrinsic[0, 2] = 256
+            intrinsic[1, 2] = 256
+
+            extrinsic = torch.tensor(extrinsic).float()
+            intrinsic = torch.tensor(intrinsic).float()
+
+            cam_R, cam_T = custom_opengl2pytorch3d(extrinsic)
+            ret['cam_R'].append(cam_R)
+            ret['cam_T'].append(cam_T)
+
+            ret['cam_K'].append(intrinsic)
 
         # Attempt to stack each value in ret, keep as is if not stackable
         for key in list(ret.keys()):

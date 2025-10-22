@@ -53,6 +53,7 @@ class CCHTrainer(pl.LightningModule):
 
 
         self.feature_renderer = FeatureRenderer(image_size=(256, 192))#(512, 384))#image_size=(256, 192)) 
+        self.thuman_renderer = FeatureRenderer(image_size=(512, 512))
 
         self.smpl_male = smplx.create(
             model_type=self.body_model,
@@ -114,7 +115,7 @@ class CCHTrainer(pl.LightningModule):
 
 
         # Route processing by dataset source to avoid mixing logic
-        batch = batch[0] if np.random.rand() < 0.75 else batch[1]
+        batch = batch[0] if np.random.rand() < 0.999 else batch[1]
         if batch['dataset'][0] == '4DDress':
             batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
         elif batch['dataset'][0] == 'THuman':
@@ -440,8 +441,6 @@ class CCHTrainer(pl.LightningModule):
             smpl_model = self.smpl_neutral # neutral is used to fit THuman 
             smpl_skinning_weights = self.smpl_male.lbs_weights
 
-            # Convert list of dicts into dict of stacked tensors
-            # TODO: Properly scale, differnet operations for 2.0 and 2.1 
             smplx_params = [params for sublist in batch['smplx_param'] for params in sublist]
             smplx_params = {
                 k: torch.stack([torch.tensor(d[k], device=self.device, dtype=torch.float32) for d in smplx_params]).flatten(0, 1)
@@ -461,24 +460,22 @@ class CCHTrainer(pl.LightningModule):
             batch['smpl_T_joints'] = rearrange(smpl_T_output.joints[:, :self.num_joints], '(b k) j c -> b k j c', b=B, k=K)
             batch['pose'] = rearrange(smpl_output.full_pose, '(b k) c -> b k c', b=B, k=K)    
 
-            # scan_meshes = [mesh for sublist in batch['scan_mesh'] for mesh in sublist] # flatten list of lists into single list of trimeshes
             scan_verts = [verts for sublist in batch['scan_verts'] for verts in sublist]
             scan_faces = [faces for sublist in batch['scan_faces'] for faces in sublist]
 
-            # dists, idx = self.knn_ptcld(
-            #     Pointclouds(points=scan_verts), 
-            #     smpl_output.vertices.view(-1, smpl_output.vertices.shape[-2], 3), 
-            #     K=1
-            # )
 
-            # smpl_weights_flat = smpl_skinning_weights.expand(B*K, -1, -1)
-            # idx_expanded = idx.repeat(1, 1, self.num_joints)
-            # # print(idx_expanded.shape)
-            # # print(smpl_weights_flat.shape)
-            # # import ipdb; ipdb.set_trace()
-            # scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
-            # scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
-            # batch['scan_skinning_weights'] = scan_w
+
+            dists, idx = self.knn_ptcld(
+                Pointclouds(points=scan_verts), 
+                smpl_output.vertices.view(-1, smpl_output.vertices.shape[-2], 3), 
+                K=1
+            )
+
+            smpl_weights_flat = smpl_skinning_weights.expand(B*K, -1, -1)
+            idx_expanded = idx.repeat(1, 1, self.num_joints)
+            scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
+            scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
+            batch['scan_skinning_weights'] = scan_w
 
 
             scan_mesh_pytorch3d = Meshes(
@@ -491,48 +488,44 @@ class CCHTrainer(pl.LightningModule):
             batch['vp'] = vp
 
 
+            # ----------------------- Render -----------------------
+            cam_R, cam_T = batch['cam_R'], batch['cam_T']
 
-            # smpl_vertices = smpl_output.vertices
-            # # Create scatter plot of SMPL and scan vertices
-            # import matplotlib.pyplot as plt
+            cameras = PerspectiveCameras(
+                R=cam_R.flatten(0, 1), 
+                T=cam_T.flatten(0, 1), 
+                # K=cam_K.flatten(0, 1),
+                focal_length=724.0773,
+                principal_point=[(256, 256),],
+                image_size=[(512, 512),],
+                device=self.device,
+                in_ndc=False
+            )
+            self.thuman_renderer._set_cameras(cameras)
 
-            # # Create 3D figure
-            # fig = plt.figure(figsize=(12, 6))
+
+            # Render skinning weight pointmaps
+            pytorch3d_mesh = Meshes(
+                verts=scan_verts,
+                faces=scan_faces,
+                textures=TexturesVertex(verts_features=scan_w)
+            )
+
+            renderer_output = self.thuman_renderer(pytorch3d_mesh)
+            w_maps = renderer_output['maps']
+
+            _, H, W, _ = w_maps.shape
+            target_size = W 
+            crop_amount = (H - target_size) // 2  
+            w_maps = w_maps[:, crop_amount:H-crop_amount, :, :]
+            w_maps = torch.nn.functional.interpolate(
+                w_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            )
+            w_maps = rearrange(w_maps, '(b k) j h w -> b k h w j', b=B, k=K)
             
-            # # SMPL vertices plot
-            # ax1 = fig.add_subplot(121, projection='3d')
-            # smpl_verts = smpl_vertices[0].detach().cpu().numpy()
-            # ax1.scatter(smpl_verts[:,0], smpl_verts[:,1], smpl_verts[:,2], s=0.1, c='blue', marker='.', alpha=0.6)
-            # ax1.set_title('SMPL Vertices')
-            # ax1.set_xlabel('X')
-            # ax1.set_ylabel('Y') 
-            # ax1.set_zlabel('Z')
+            batch['smpl_w_maps'] = w_maps
+        
 
-            # # Scan vertices plot
-            # ax2 = fig.add_subplot(122, projection='3d')
-            # scan_verts = scan_verts[0].detach().cpu().numpy()
-            # ax2.scatter(smpl_verts[:,0], smpl_verts[:,1], smpl_verts[:,2], s=0.1, c='blue', marker='.', alpha=0.6)
-            # ax2.scatter(scan_verts[:,0], scan_verts[:,1], scan_verts[:,2], s=0.1, c='red', marker='.', alpha=0.6)
-            # ax2.set_title('Scan Vertices')
-            # ax2.set_xlabel('X')
-            # ax2.set_ylabel('Y')
-            # ax2.set_zlabel('Z')
-
-            # # Set equal aspect ratio for both plots
-            # ax1.set_box_aspect([1,1,1])
-            # ax2.set_box_aspect([1,1,1])
-
-            # # Make ticks equal scale
-            # ax1.set_aspect('equal', adjustable='box')
-            # ax2.set_aspect('equal', adjustable='box')
-            
-            
-
-            # plt.tight_layout()
-            # # plt.show()
-            # plt.savefig('smpl_scan_alignment.png')
-            # plt.close()
-            # import ipdb; ipdb.set_trace()
         return batch
 
 
