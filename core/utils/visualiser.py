@@ -185,6 +185,21 @@ class Visualiser(pl.LightningModule):
             vc_maps[~smpl_mask.astype(bool)] = 0
             vc_maps = (vc_maps - vc_maps.min()) / (vc_maps.max() - vc_maps.min())
             vc_maps[~smpl_mask.astype(bool)] = 1
+        
+        if 'vc_smpl_maps' in batch:
+            num_rows += 1
+            vc_maps = batch['vc_smpl_maps']
+            if 'smpl_mask' in batch:
+                smpl_mask = batch['smpl_mask']
+            elif 'mask' in batch:
+                smpl_mask = batch['mask'][:, :N]
+            else:
+                raise ValueError("smpl_mask or mask not found in batch")
+            vc_maps[~smpl_mask.astype(bool)] = 0
+            vc_maps = (vc_maps - vc_maps.min()) / (vc_maps.max() - vc_maps.min())
+            vc_maps[~smpl_mask.astype(bool)] = 1
+        
+        
 
 
         if 'smpl_w_maps' in batch:
@@ -208,7 +223,7 @@ class Visualiser(pl.LightningModule):
                 plt.title(f'Image {n}')
                 row += 1
 
-            if 'vc_maps' in batch:
+            if 'vc_maps' in batch or 'vc_smpl_maps' in batch:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 plt.imshow(vc_maps[0, n])
                 plt.title(f'$V_c$ maps {n}')
@@ -448,6 +463,9 @@ class Visualiser(pl.LightningModule):
         if 'vc_maps' in batch:
             vc_maps = _normalise_to_rgb_range(batch['vc_maps'], batch['smpl_mask'])
 
+        if 'vc_smpl_maps' in batch:
+            vc_maps = _normalise_to_rgb_range(batch['vc_smpl_maps'], batch['smpl_mask'])
+
         if 'smpl_w_maps' in batch:
             smpl_w_maps = np.argmax(batch['smpl_w_maps'], axis=-1)
 
@@ -520,7 +538,7 @@ class Visualiser(pl.LightningModule):
 
 
         # predicted initial V_n^c
-        if 'vc_maps' in batch:
+        if 'vc_maps' in batch or 'vc_smpl_maps' in batch:
             for n in range(N):
                 ax = fig.add_subplot(num_rows, K, r*K+n+1)
                 ax.imshow(vc_maps[0, n])

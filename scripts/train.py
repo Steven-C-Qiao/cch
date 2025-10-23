@@ -166,7 +166,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
         precision=cfg.SPEEDUP.MIXED_PRECISION,
-        gradient_clip_val=1.0,
+        # gradient_clip_val=1.0,
         # log_every_n_steps=10,
         # enable_progress_bar=False,
         num_sanity_val_steps=0

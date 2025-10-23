@@ -60,7 +60,7 @@ class FeatureRenderer(pl.LightningModule):
             blur_radius=0.0,
             faces_per_pixel=1,
             bin_size=None,
-            max_faces_per_bin=80000 # Otherwise overflows 
+            max_faces_per_bin=160000 # Otherwise overflows 
         )
         
         self.renderer = MeshRenderer(

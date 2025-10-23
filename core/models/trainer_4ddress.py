@@ -115,7 +115,7 @@ class CCHTrainer(pl.LightningModule):
 
 
         # Route processing by dataset source to avoid mixing logic
-        batch = batch[0] if np.random.rand() < 0.999 else batch[1]
+        batch = batch[0] if np.random.rand() < 0.8 else batch[1]
         if batch['dataset'][0] == '4DDress':
             batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
         elif batch['dataset'][0] == 'THuman':
@@ -504,27 +504,61 @@ class CCHTrainer(pl.LightningModule):
             self.thuman_renderer._set_cameras(cameras)
 
 
-            # Render skinning weight pointmaps
-            pytorch3d_mesh = Meshes(
-                verts=scan_verts,
-                faces=scan_faces,
-                textures=TexturesVertex(verts_features=scan_w)
-            )
+            if 'smpl_w_maps' in batch and len(batch['smpl_w_maps']) == B:
+                batch['smpl_w_maps'] = rearrange(batch['smpl_w_maps'], 'b k c h w -> b k h w c')
+            else:
+                # Render skinning weight pointmaps
+                pytorch3d_mesh = Meshes(
+                    verts=scan_verts,
+                    faces=scan_faces,
+                    textures=TexturesVertex(verts_features=scan_w)
+                )
 
-            renderer_output = self.thuman_renderer(pytorch3d_mesh)
-            w_maps = renderer_output['maps']
+                renderer_output = self.thuman_renderer(pytorch3d_mesh)
+                w_maps = renderer_output['maps']
 
-            _, H, W, _ = w_maps.shape
-            target_size = W 
-            crop_amount = (H - target_size) // 2  
-            w_maps = w_maps[:, crop_amount:H-crop_amount, :, :]
-            w_maps = torch.nn.functional.interpolate(
-                w_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
-            )
-            w_maps = rearrange(w_maps, '(b k) j h w -> b k h w j', b=B, k=K)
+                _, H, W, _ = w_maps.shape
+                target_size = W 
+                crop_amount = (H - target_size) // 2  
+                w_maps = w_maps[:, crop_amount:H-crop_amount, :, :]
+                w_maps = torch.nn.functional.interpolate(
+                    w_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+                )
+                w_maps = rearrange(w_maps, '(b k) j h w -> b k h w j', b=B, k=K)
+                
+                batch['smpl_w_maps'] = w_maps
             
-            batch['smpl_w_maps'] = w_maps
-        
+
+            if 'vc_smpl_maps' in batch and len(batch['vc_smpl_maps']) == B:
+                batch['vc_smpl_maps'] = rearrange(batch['vc_smpl_maps'], 'b k c h w -> b k h w c')
+            else:
+                pytorch3d_smpl_mesh = Meshes(
+                    verts=smpl_output.vertices,
+                    faces=torch.tensor(smpl_model.faces, device=self.device).expand(B*K, -1, -1),
+                    textures=TexturesVertex(verts_features=smpl_T_output.vertices)
+                )
+
+                renderer_output = self.thuman_renderer(pytorch3d_smpl_mesh)
+                vc_maps = renderer_output['maps']
+                vc_mask = renderer_output['mask'].unsqueeze(-1)
+
+                _, H, W, _ = vc_maps.shape
+                target_size = W 
+                crop_amount = (H - target_size) // 2  
+                vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
+                vc_maps = torch.nn.functional.interpolate(
+                    vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+                )
+                vc_maps = rearrange(vc_maps, '(b k) j h w -> b k h w j', b=B, k=K)
+
+                vc_mask = vc_mask[:, crop_amount:H-crop_amount, :, :]
+                vc_mask = torch.nn.functional.interpolate(
+                    vc_mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
+                )
+                vc_mask = rearrange(vc_mask, '(b k) c h w -> b k h w c', b=B, k=K)
+                batch['smpl_mask'] = vc_mask.squeeze(-1)
+                
+                batch['vc_smpl_maps'] = vc_maps
 
         return batch
 

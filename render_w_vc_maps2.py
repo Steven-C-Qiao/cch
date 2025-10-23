@@ -1,8 +1,15 @@
+
+
+import torch
+import pytorch_lightning as pl
+from collections import defaultdict
+from torch.utils.data import DataLoader, DistributedSampler
+from pytorch_lightning.utilities.combined_loader import CombinedLoader
+
 import os
 import torch
 import numpy as np
 import torchvision.transforms as transforms
-from scipy.sparse import load_npz
 
 from PIL import Image
 from collections import defaultdict
@@ -15,27 +22,6 @@ from core.data.thuman_metadata import THuman_metadata
 from core.data.d4dress_utils import load_pickle
 from core.utils.camera_utils import uv_to_pixel_space, custom_opengl2pytorch3d
 
-
-def load_w_maps_sparse(w_maps_fname):
-    """
-    Load sparse w_maps from .npz file and convert back to dense format.
-    
-    Args:
-        w_maps_fname: Path to the .npz file containing sparse matrix
-        
-    Returns:
-        numpy array of shape (512, 512, 55) - dense w_map for single camera
-    """
-    # Load sparse matrix from .npz file
-    sparse_matrix = load_npz(w_maps_fname)
-    
-    # Convert sparse matrix back to dense format
-    dense_data = sparse_matrix.toarray()  # Shape: (512*512, 55)
-    
-    # Reshape back to original format: (512, 512, 55)
-    w_map = dense_data.reshape(512, 512, 55)
-    
-    return w_map
 
 
 class THumanDataset(Dataset):
@@ -69,19 +55,6 @@ class THumanDataset(Dataset):
             ]
         )
 
-        self.crop_transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Resize(self.img_size),
-            ]
-        )
-        self.mask_transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Resize(self.img_size, interpolation=Image.NEAREST),
-            ]
-        )
-
     def __len__(self):
         return len(self.ids) * self.lengthen_by
     
@@ -91,27 +64,18 @@ class THumanDataset(Dataset):
 
         N, K = 4, 5 
 
-        subject_id = self.ids[index // self.lengthen_by]
-        gender = self.metadata[subject_id]['gender']
+        id = self.ids[index // self.lengthen_by]
+        gender = self.metadata[id]['gender']
         ret['gender'] = gender
 
-        scans_ids = self.metadata[subject_id]['scans']
+        scans_ids = self.metadata[id]['scans']
         sampled_scan_ids = np.random.choice(scans_ids, size=K, replace=True)
         ret['scan_ids'] = sampled_scan_ids
         
         # Sample one camera ID from each row of camera angles
-        sampled_cameras = [
-            np.random.choice(['000', '010', '020', '030', '040', '050', '060', '070', '080'], size=1)[0],
-            np.random.choice(['090', '100', '110', '120', '130', '140', '150', '160', '170'], size=1)[0], 
-            np.random.choice(['180', '190', '200', '210', '220', '230', '240', '250', '260'], size=1)[0],
-            np.random.choice(['270', '280', '290', '300', '310', '320', '330', '340', '350'], size=1)[0]
-        ]
-        if len(sampled_cameras) < K:
-            additional_cameras = np.random.choice(self.camera_ids, size=K-len(sampled_cameras), replace=False)
-            sampled_cameras.extend(additional_cameras)
-        ret['camera_ids'] = sampled_cameras
-
+        sampled_cameras = self.camera_ids 
         
+        ret['camera_ids'] = sampled_cameras
 
         for i, scan_id in enumerate(sampled_scan_ids):
 
@@ -123,14 +87,12 @@ class THumanDataset(Dataset):
             img = rgba.convert('RGB')
 
             img_transformed = self.transform(img)
-            mask_transformed = self.mask_transform(mask).squeeze(-3)
+            mask_transformed = self.transform(mask).squeeze()
             
             # img_transformed = img_transformed * mask_transformed
             
             ret['imgs'].append(img_transformed)
             ret['masks'].append(mask_transformed)
-
-            
 
             smplx_fname = os.path.join(THUMAN_PATH, 'smplx', scan_id, f'smplx_param.pkl')
             smplx_param = np.load(smplx_fname, allow_pickle=True)
@@ -170,41 +132,6 @@ class THumanDataset(Dataset):
 
             ret['cam_K'].append(intrinsic)
 
-
-            try:
-                vc_maps_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id,  f'{scan_id}_vc_maps.npy')
-                vc_map = np.load(vc_maps_fname)  # (36, 512, 512, 3)
-
-                # Convert camera ID to index (e.g. '000' -> 0, '010' -> 1, etc)
-                camera_idx = int(sampled_cameras[i]) // 10
-                # Index into vc_map using camera index
-                vc_map = vc_map[camera_idx]  # (512, 512, 3)
-                # Create binary mask where pixels are non-zero (not background)
-                vc_mask = (vc_map != 0).any(axis=-1).astype(np.float32)
-
-                vc_map = self.crop_transform(vc_map)
-                assert vc_map.shape == (3, self.img_size, self.img_size)
-                vc_mask = self.mask_transform(vc_mask).squeeze()
-
-                w_maps_dir_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, f'{scan_id}_w_maps_sparse', f'{sampled_cameras[i]}.npz')
-                w_map = load_w_maps_sparse(w_maps_dir_fname)  # Shape: (512, 512, 55)
-                assert w_map.shape == (512, 512, 55)
-                w_map = self.crop_transform(w_map)
-                ret['vc_smpl_maps'].append(vc_map)
-                ret['smpl_mask'].append(vc_mask)
-                ret['smpl_w_maps'].append(w_map)
-            except:
-                pass
-
-        try:
-            assert len(ret['vc_smpl_maps']) == K
-            assert len(ret['smpl_mask']) == K
-            assert len(ret['smpl_w_maps']) == K
-        except:
-            ret.pop('vc_smpl_maps', None)
-            ret.pop('smpl_mask', None)
-            ret.pop('smpl_w_maps', None)
-
         # Attempt to stack each value in ret, keep as is if not stackable
         for key in list(ret.keys()):
             if isinstance(ret[key], (list, tuple)) and len(ret[key]) > 0:
@@ -215,3 +142,112 @@ class THumanDataset(Dataset):
 
         return ret
     
+
+def custom_collate_fn(batch, device=None):
+    """
+    Custom collate function to handle variable-sized mesh data.
+    Returns lists for mesh data that can't be stacked, and tensors for data that can.
+    If device is provided, moves tensors to the specified device.
+    """
+    collated = defaultdict(list)
+    
+    for sample in batch:
+        for key, value in sample.items():
+            collated[key].append(value)
+    
+    nonstackable_keys = [
+        #THuman
+        'scan_verts', 'scan_faces', 'smplx_param', 'gender', 'scan_ids', 'camera_ids', 'dataset',
+        #4DDress
+        'scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 'scan_mesh_verts_centered', 'scan_mesh_colors',
+        'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'template_full_mesh', 
+        'template_full_lbs_weights', 'gender', 'take_dir', 'dataset'
+    ]
+
+    for key in collated.keys():
+        if collated[key] and (key not in nonstackable_keys):
+            try:
+                collated[key] = torch.stack(collated[key])
+                # Move to device if specified
+                if device is not None and torch.is_tensor(collated[key]):
+                    collated[key] = collated[key].to(device)
+            except RuntimeError as e:
+                print(f"Warning: Could not stack {key}, keeping as list. Error: {e}")
+                # Keep as list if stacking fails
+    
+    # Keep mesh data as lists since they have different vertex counts
+    # But still move individual tensors to device if specified
+    for key in nonstackable_keys:
+        if key in collated and device is not None:
+            # Move individual tensors in the list to device
+            for i, item in enumerate(collated[key]):
+                if torch.is_tensor(item):
+                    collated[key][i] = item.to(device)
+    
+    return dict(collated)
+
+
+
+class AdHocDataModule(pl.LightningDataModule):
+    def __init__(self, cfg, device=None):
+        super().__init__()
+        self.cfg = cfg
+        self.device = device
+
+        self.train_thuman = None
+        self.train_d4dress = None
+        self.val_d4dress = None
+
+    def setup(self, stage=None):
+        # THuman used for training
+        self.train_thuman = THumanDataset(self.cfg)
+
+    def val_dataloader(self):
+        # Create a device-aware collate function
+        def device_aware_collate_fn(batch):
+            return custom_collate_fn(batch, device=self.device)
+        
+        return DataLoader(
+            self.train_thuman,
+            batch_size=self.cfg.TRAIN.BATCH_SIZE,
+            shuffle=False,
+            drop_last=False,
+            num_workers=0,
+            pin_memory=False,
+            collate_fn=device_aware_collate_fn,
+        )
+
+
+
+
+
+from core.models.trainer_4ddress import CCHTrainer
+from core.configs.cch_cfg import get_cch_cfg_defaults
+
+
+if __name__ == '__main__':
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    cfg = get_cch_cfg_defaults()
+
+    model = CCHTrainer(
+        cfg=cfg,
+    ).to(device)
+    
+
+    # Pass device to the data module
+    datsampler = AdHocDataModule(cfg, device=device)
+    datsampler.setup()
+    thuman_loader = datsampler.val_dataloader()  # Use val_dataloader method
+    
+    for batch in thuman_loader:
+        # Tensors are already moved to device by the device-aware collate function
+        batch = model.process_thuman(batch)
+        
+        import ipdb; ipdb.set_trace()     
+
+
+
+
+
+

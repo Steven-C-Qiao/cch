@@ -125,7 +125,6 @@ class CCH(nn.Module):
         joints = batch['smpl_T_joints'] # .repeat(1, K, 1, 1)
         # w_smpl = batch['smpl_w_maps']
         mask = batch['masks']
-        
 
         canonical_tokens_list, patch_start_idx = self.aggregator(images[:, :N]) 
 

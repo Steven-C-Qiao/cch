@@ -128,6 +128,7 @@ class D4DressDataset(Dataset):
         take_dir = os.path.join(PATH_TO_DATASET, id, layer, sampled_take)
 
         ret['take_dir'] = take_dir
+        ret['scan_ids'] = id   
 
         basic_info = load_pickle(os.path.join(take_dir, 'basic_info.pkl'))
         gender = basic_info['gender'] # is str

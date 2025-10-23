@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name=exp_041
-#SBATCH --output=exp/exp_042_th2p/exp_042-%j.out
+#SBATCH --job-name=exp_044_th2_smpl_vc_loss_init_conf
+#SBATCH --output=exp/exp_044_th2_smpl_vc_loss_init_conf/exp_044-%j.out
 #SBATCH --nodes=1
 #SBATCH --gpus-per-node=4
 #SBATCH --ntasks-per-node=4
@@ -13,5 +13,6 @@ source ~/miniforge3/bin/activate dev
 # export NCCL_DEBUG=INFO
 
 srun python3 scripts/train.py \
-    -E exp/exp_042_th2p \
-    -L exp/exp_035_vp_extend_031_scale_gt2pred_loss_5k/saved_models/last-v1.ckpt
+    -E exp/exp_044_th2_smpl_vc_loss_init_conf \
+    -R exp/exp_044_th2_smpl_vc_loss_init_conf/saved_models/last.ckpt
+    # -R exp/exp_045_fast/saved_models/last.ckpt
