@@ -88,7 +88,46 @@ class D4DressDataset(Dataset):
 
         self.takes = defaultdict(list)
         self.num_of_takes = defaultdict(int)
+        
+        # Pre-load template meshes and weights for all subjects and layers
+        self.template_meshes = defaultdict(dict)  # {id: {layer: {mesh_type: mesh}}}
+        self.template_lbs_weights = defaultdict(dict)  # {id: {layer: weights}}
+        self.smpl_T_data = defaultdict(dict)  # {id: {joints: ..., vertices: ...}}
+        
         for id in self.ids:
+            template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', id)
+            
+            # Load SMPL T data (same for both layers)
+            smpl_T_joints = np.load(os.path.join(template_dir, 'smpl_T_joints.npy'))
+            smpl_T_vertices = np.load(os.path.join(template_dir, 'smpl_T_vertices.npy'))
+            self.smpl_T_data[id] = {
+                'joints': torch.tensor(smpl_T_joints, dtype=torch.float32)[:, :self.num_joints],
+                'vertices': torch.tensor(smpl_T_vertices, dtype=torch.float32)
+            }
+            
+            # Load template meshes for each layer
+            for layer in self.layer:
+                suffix = '_w_outer' if layer == 'Outer' else ''
+                
+                # Load filtered mesh
+                full_filtered_mesh = trimesh.load(os.path.join(template_dir, f'filtered{suffix}.ply'))
+                full_filtered_vertices = torch.tensor(full_filtered_mesh.vertices, dtype=torch.float32)
+                full_filtered_faces = torch.tensor(full_filtered_mesh.faces, dtype=torch.long)
+                
+                # Load full mesh and LBS weights
+                template_full_mesh = trimesh.load(os.path.join(template_dir, f'full_mesh{suffix}.ply'))
+                template_full_lbs_weights = torch.tensor(
+                    np.load(os.path.join(template_dir, f'full_lbs_weights{suffix}.npy')), 
+                    dtype=torch.float32
+                )
+                
+                self.template_meshes[id][layer] = {
+                    'filtered_mesh': full_filtered_mesh,
+                    'filtered_vertices': full_filtered_vertices,
+                    'filtered_faces': full_filtered_faces,
+                    'full_mesh': template_full_mesh,
+                    'full_lbs_weights': template_full_lbs_weights
+                }
             
             inner_takes = os.listdir(os.path.join(PATH_TO_DATASET, id, self.layer[0]))
             inner_takes = [(take, 'Inner') for take in inner_takes if take.startswith('Take')]
@@ -151,33 +190,21 @@ class D4DressDataset(Dataset):
         ret['K'] = K
 
 
-        # ---- template mesh ----
-        template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', id)
-
-
-        full_filtered_mesh = trimesh.load(os.path.join(template_dir, f'filtered{suffix}.ply'))
-        full_filtered_vertices = full_filtered_mesh.vertices
-        full_filtered_faces = full_filtered_mesh.faces
-
-        # template_mesh_lbs_weights = np.load(os.path.join(template_dir, 'filtered_lbs_weights.npy'))
+        # ---- template mesh (use pre-loaded data) ----
+        layer = sampled_take[1]
+        template_data = self.template_meshes[id][layer]
         
-        ret['template_mesh'] = full_filtered_mesh
-        # ret['template_body_mesh'] = torch.tensor(body_mesh, dtype=torch.float32)
-        ret['template_mesh_verts'] = torch.tensor(full_filtered_vertices, dtype=torch.float32)
-        ret['template_mesh_faces'] = torch.tensor(full_filtered_faces, dtype=torch.long)
-        # ret['template_mesh_lbs_weights'] = torch.tensor(template_mesh_lbs_weights, dtype=torch.float32)
+        ret['template_mesh'] = template_data['filtered_mesh']
+        ret['template_mesh_verts'] = template_data['filtered_vertices']
+        ret['template_mesh_faces'] = template_data['filtered_faces']
+        
+        ret['template_full_mesh'] = template_data['full_mesh']
+        ret['template_full_lbs_weights'] = template_data['full_lbs_weights']
 
-        template_full_mesh = trimesh.load(os.path.join(template_dir, f'full_mesh{suffix}.ply'))
-        template_full_lbs_weights = np.load(os.path.join(template_dir, f'full_lbs_weights{suffix}.npy'))
-        ret['template_full_mesh'] = template_full_mesh
-        ret['template_full_lbs_weights'] = torch.tensor(template_full_lbs_weights, dtype=torch.float32)
-
-
-        # -------------- SMPL T joints and vertices --------------
-        smpl_T_joints = np.load(os.path.join(template_dir, 'smpl_T_joints.npy'))
-        smpl_T_vertices = np.load(os.path.join(template_dir, 'smpl_T_vertices.npy'))
-        ret['smpl_T_joints'] = torch.tensor(smpl_T_joints, dtype=torch.float32)[:, :self.num_joints]
-        ret['smpl_T_vertices'] = torch.tensor(smpl_T_vertices, dtype=torch.float32)
+        # -------------- SMPL T joints and vertices (use pre-loaded data) --------------
+        smpl_T_data = self.smpl_T_data[id]
+        ret['smpl_T_joints'] = smpl_T_data['joints']
+        ret['smpl_T_vertices'] = smpl_T_data['vertices']
 
 
         for i, sampled_frame in enumerate(sampled_frames):

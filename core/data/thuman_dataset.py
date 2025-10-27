@@ -213,7 +213,7 @@ class THumanDataset(Dataset):
                 except:
                         pass
 
-        del vc_map, vc_mask, w_map
+        # del vc_map, vc_mask, w_map
 
         return ret
     

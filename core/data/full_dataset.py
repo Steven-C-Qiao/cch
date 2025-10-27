@@ -109,7 +109,7 @@ class FullDataModule(pl.LightningDataModule):
         # )
         # return combined_loader
 
-        return [thuman_loader, d4dress_loader]
+        return [thuman_loader, thuman_loader]
 
     def val_dataloader(self):
         # thuman_val_loader = DataLoader(

@@ -715,7 +715,7 @@ THuman_metadata = {
         "gender": "male"
     },
     "167": {
-        "scans": ['0390', '0391', '0392'],
+        "scans": ['0391', '0392'],
         "gender": "male"
     },
     "168": {
