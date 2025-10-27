@@ -170,34 +170,34 @@ class Solver:
 
         print(f"Found {len(visible_vertices)} visible vertices out of {len(self.body_mesh.verts_packed())} total")
 
-        # # Visualize visible vertices in 3D
-        # fig = plt.figure(figsize=(8, 8))
-        # ax = fig.add_subplot(111, projection='3d')
-        # # Plot all vertices in red
-        # all_verts = self.body_mesh.verts_packed().cpu().detach().numpy()
-        # # ax.scatter(all_verts[:, 0], all_verts[:, 1], all_verts[:, 2], s=1, c='red', alpha=0.3, label='All vertices')
+        # Visualize visible vertices in 3D
+        fig = plt.figure(figsize=(8, 8))
+        ax = fig.add_subplot(111, projection='3d')
+        # Plot all vertices in red
+        all_verts = self.body_mesh.verts_packed().cpu().detach().numpy()
+        # ax.scatter(all_verts[:, 0], all_verts[:, 1], all_verts[:, 2], s=1, c='red', alpha=0.3, label='All vertices')
         
-        # # Plot visible vertices in blue
-        # visible_verts = all_verts[list(visible_vertices)]
-        # ax.scatter(visible_verts[:, 0], visible_verts[:, 1], visible_verts[:, 2], s=1, c='blue', alpha=0.8, label='Visible vertices')
+        # Plot visible vertices in blue
+        visible_verts = all_verts[list(visible_vertices)]
+        ax.scatter(visible_verts[:, 0], visible_verts[:, 1], visible_verts[:, 2], s=1, c='blue', alpha=0.8, label='Visible vertices')
         
 
-        # clothes_verts = self.clothing_mesh.verts_packed().cpu().detach().numpy()
-        # ax.scatter(clothes_verts[:, 0], clothes_verts[:, 1], clothes_verts[:, 2], s=0.5, c='green', alpha=0.8, label='Clothes vertices')
+        clothes_verts = self.clothing_mesh.verts_packed().cpu().detach().numpy()
+        ax.scatter(clothes_verts[:, 0], clothes_verts[:, 1], clothes_verts[:, 2], s=0.5, c='green', alpha=0.8, label='Clothes vertices')
 
-        # ax.view_init(elev=10, azim=20, vertical_axis='y')
-        # ax.legend()
-        # ax.set_title('Body Mesh Vertices (Red: All, Blue: Visible)')
-        # ax.set_box_aspect([1,1,1])
-        # ax.set_aspect('equal')
-        # # plt.show()
-        # # plt.close()
-        # plt.savefig('visible_vertices.png')
+        ax.view_init(elev=10, azim=20, vertical_axis='y')
+        ax.legend()
+        ax.set_title('Body Mesh Vertices (Red: All, Blue: Visible)')
+        ax.set_box_aspect([1,1,1])
+        ax.set_aspect('equal')
+        # plt.show()
         # plt.close()
+        plt.savefig('visible_vertices.png')
+        plt.close()
 
         # Convert visible vertices set to sorted numpy array and save
         visible_vertices_array = np.array(sorted(list(visible_vertices)))
-        save_path = os.path.join('/scratches/kyuban/cq244/CCH/cch/model_files/4DDress_visible_vertices', f'{id}.npy')
+        save_path = os.path.join('/scratches/kyuban/cq244/CCH/cch/model_files/4DDress_visible_vertices', f'{id}_outer.npy')
         np.save(save_path, visible_vertices_array)
 
 
@@ -245,6 +245,8 @@ if __name__ == "__main__":
             '00140', '00147', '00148', '00149', '00151', '00152', '00154', '00156', 
             '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175', 
             '00176', '00179', '00180', '00185', '00187', '00188', '00190', '00191']
+
+    outer = True 
     
     for id in ids:
         print(f'Processing {id}')
@@ -254,14 +256,15 @@ if __name__ == "__main__":
             
         upper_mesh = trimesh.load(os.path.join(template_dir, 'upper.ply'))
         body_mesh = trimesh.load(os.path.join(template_dir, 'body.ply'))
+        outer_mesh = trimesh.load(os.path.join(template_dir, 'outer.ply'))
         if os.path.exists(os.path.join(template_dir, 'lower.ply')):
             lower_mesh = trimesh.load(os.path.join(template_dir, 'lower.ply'))
-            full_mesh = trimesh.util.concatenate([lower_mesh, body_mesh, upper_mesh])
-            clothing_mesh = trimesh.util.concatenate([lower_mesh, upper_mesh])
+            full_mesh = trimesh.util.concatenate([body_mesh, lower_mesh, upper_mesh, outer_mesh])
+            clothing_mesh = trimesh.util.concatenate([lower_mesh, upper_mesh, outer_mesh])
 
         else:
-            full_mesh = trimesh.util.concatenate([body_mesh, upper_mesh])
-            clothing_mesh = upper_mesh
+            full_mesh = trimesh.util.concatenate([body_mesh, upper_mesh, outer_mesh])
+            clothing_mesh = trimesh.util.concatenate([upper_mesh, outer_mesh])
 
         # Convert trimeshes to pytorch3d meshes
         body_verts = torch.tensor(body_mesh.vertices, dtype=torch.float32)

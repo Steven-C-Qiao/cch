@@ -332,7 +332,7 @@ class CCH(nn.Module):
         N = 4 
 
         pose = batch['pose']
-        joints = batch['smpl_T_joints']# .repeat(1, K, 1, 1)
+        joints = batch['smpl_T_joints']
         mask = batch['masks']
 
         vc_init = preds['vc_init']

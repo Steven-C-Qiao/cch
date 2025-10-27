@@ -321,19 +321,19 @@ class Solver:
         logger.info("Saving predictions and batch data...")
         
         # Create output directory if it doesn't exist
-        os.makedirs('app/avatar_outputs', exist_ok=True)
+        # os.makedirs('app/avatar_outputs', exist_ok=True)
         
         # Save vp_list
-        with open('app/avatar_outputs/vp_list.pkl', 'wb') as f:
-            pickle.dump(vp_list, f)
+        # with open('app/avatar_outputs/vp_list.pkl', 'wb') as f:
+        #     pickle.dump(vp_list, f)
             
-        # Save full predictions dict
-        with open('app/avatar_outputs/preds.pkl', 'wb') as f:
-            pickle.dump(preds, f)
+        # # Save full predictions dict
+        # with open('app/avatar_outputs/preds.pkl', 'wb') as f:
+        #     pickle.dump(preds, f)
             
-        # Save initial batch
-        with open('app/avatar_outputs/init_batch.pkl', 'wb') as f:
-            pickle.dump(init_batch, f)
+        # # Save initial batch
+        # with open('app/avatar_outputs/init_batch.pkl', 'wb') as f:
+        #     pickle.dump(init_batch, f)
 
         return vp_list
     
@@ -457,43 +457,84 @@ class Solver:
 
 
 
-        # Save individual subplots for gif
-        frames = []
-        temp_fig = plt.figure(figsize=(subfig_size*4, subfig_size))
+        # # Save individual subplots for gif
+        # frames = []
+        # temp_fig = plt.figure(figsize=(subfig_size*4, subfig_size))
         azims = [0, 90, 180, 270]
         
-        for i in range(num_total_plots):
-            verts = predictions['vp_list'][i]['vp'][0, -1, ...].cpu().detach().numpy()
+        # for i in range(num_total_plots):
+        #     verts = predictions['vp_list'][i]['vp'][0, -1, ...].cpu().detach().numpy()
+        #     verts = verts[scatter_mask]
+            
+        #     for j, azim in enumerate(azims):
+        #         ax = temp_fig.add_subplot(1, 4, j+1, projection='3d')
+        #         ax.scatter(
+        #             verts[:, 0], 
+        #             verts[:, 1], 
+        #             verts[:, 2], c=color, s=s, alpha=gt_alpha
+        #         )
+        #         # ax.set_title(f'pred $V^{{{i+1}}}$')
+        #         _set_scatter_limits(ax, x, elev=10, azim=azim)
+        #     _no_annotations(temp_fig)
+        #     plt.tight_layout(pad=0.)
+            
+        #     # Save frame to memory
+        #     temp_fig.canvas.draw()
+        #     frame = np.frombuffer(temp_fig.canvas.tostring_rgb(), dtype=np.uint8)
+        #     frame = frame.reshape(temp_fig.canvas.get_width_height()[::-1] + (3,))
+        #     frames.append(Image.fromarray(frame))
+            
+        #     # Clear figure for next frame
+        #     plt.clf()
+        
+        # plt.close(temp_fig)
+        
+        # # Save as gif
+        # frames[0].save(
+        #     f'{self.id}_{self.take}_animation.gif',
+        #     save_all=True,
+        #     append_images=frames[1:],
+        #     duration=100, # 500ms per frame
+        #     loop=0,
+        #     dpi=(200, 200) # Higher DPI for better quality
+        # )
+
+        # Create GIF for vp_init if available
+        vp_init_frames = []
+        # Create a new figure for vp_init
+        vp_init_fig = plt.figure(figsize=(subfig_size*4, subfig_size))
+        
+        for i in range(num_total_plots):  # Iterate over K frames
+            verts = predictions['vp_list'][i]['vp_init'][0, -1, ...].cpu().detach().numpy()
             verts = verts[scatter_mask]
             
             for j, azim in enumerate(azims):
-                ax = temp_fig.add_subplot(1, 4, j+1, projection='3d')
+                ax = vp_init_fig.add_subplot(1, 4, j+1, projection='3d')
                 ax.scatter(
                     verts[:, 0], 
                     verts[:, 1], 
                     verts[:, 2], c=color, s=s, alpha=gt_alpha
                 )
-                # ax.set_title(f'pred $V^{{{i+1}}}$')
                 _set_scatter_limits(ax, x, elev=10, azim=azim)
-            _no_annotations(temp_fig)
+            _no_annotations(vp_init_fig)
             plt.tight_layout(pad=0.)
             
             # Save frame to memory
-            temp_fig.canvas.draw()
-            frame = np.frombuffer(temp_fig.canvas.tostring_rgb(), dtype=np.uint8)
-            frame = frame.reshape(temp_fig.canvas.get_width_height()[::-1] + (3,))
-            frames.append(Image.fromarray(frame))
+            vp_init_fig.canvas.draw()
+            frame = np.frombuffer(vp_init_fig.canvas.tostring_rgb(), dtype=np.uint8)
+            frame = frame.reshape(vp_init_fig.canvas.get_width_height()[::-1] + (3,))
+            vp_init_frames.append(Image.fromarray(frame))
             
             # Clear figure for next frame
             plt.clf()
         
-        plt.close(temp_fig)
-        
-        # Save as gif
-        frames[0].save(
-            f'{self.id}_{self.take}_animation.gif',
+        plt.close(vp_init_fig)
+            
+        # Save vp_init as gif
+        vp_init_frames[0].save(
+            f'{self.id}_{self.take}_vp_init_animation.gif',
             save_all=True,
-            append_images=frames[1:],
+            append_images=vp_init_frames[1:],
             duration=100, # 500ms per frame
             loop=0,
             dpi=(200, 200) # Higher DPI for better quality
@@ -571,11 +612,12 @@ if __name__ == '__main__':
 
     assert (args.load_from_ckpt is not None), 'Specify load_from_ckpt'
 
-    id = '00134'
-    take = 'Take3'
-    frames = ['00006', '00006', '00006', '00006', '00006']
-    cameras = ['0004', '0028', '0052', '0076', '0076']
-    novel_pose_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/{id}/Inner/{take}/SMPLX'
+    # id = '00134'
+    # take = 'Take3'
+    # frames = ['00006', '00006', '00006', '00006', '00006']
+    # cameras = ['0004', '0028', '0052', '0076', '0076']
+    # novel_pose_path = f'/scratches/kyuban/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
+
 
     # id = '00147'
     # take = 'Take6'
@@ -588,14 +630,14 @@ if __name__ == '__main__':
     # take = 'Take1'
     # frames = ['00021', '00021', '00021', '00021', '00021']
     # cameras = ['0004', '0028', '0052', '0076', '0076']
-    # novel_pose_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/{id}/Inner/{take}/SMPLX'
+    # novel_pose_path = f'/scratches/kyuban/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
 
 
-    # id = '00188'
-    # take = 'Take1'
-    # frames = ['00021', '00021', '00021', '00021', '00021']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
-    # novel_pose_path = f'/scratch/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
+    id = '00188'
+    take = 'Take1'
+    frames = ['00021', '00021', '00021', '00021', '00021']
+    cameras = ['0004', '0028', '0052', '0076', '0076']
+    novel_pose_path = f'/scratches/kyuban/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
 
 
 
