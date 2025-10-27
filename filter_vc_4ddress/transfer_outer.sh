@@ -1,0 +1,1 @@
+rsync -avz /scratches/kyuban/cq244/datasets/4DDress/_4D-DRESS_Template u5aa.aip2.isambard:/scratch/u5aa/chexuan.u5aa/4DDress/
