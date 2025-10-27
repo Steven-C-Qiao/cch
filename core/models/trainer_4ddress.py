@@ -47,6 +47,7 @@ class CCHTrainer(pl.LightningModule):
         self.image_size = cfg.DATA.IMAGE_SIZE
         self.plot = plot
         self.body_model = cfg.MODEL.BODY_MODEL
+        self.d4dress_probability = cfg.DATA.D4DRESS_PROBABILITY
         self.num_joints = 24 if self.body_model=='smpl' else 55
         self.num_smpl_vertices = 6890 if self.body_model=='smpl' else 10475
         self.freeze_canonical_epochs = getattr(cfg.TRAIN, 'WARMUP_EPOCHS', 0)
@@ -116,7 +117,7 @@ class CCHTrainer(pl.LightningModule):
 
 
         # Route processing by dataset source to avoid mixing logic
-        batch = batch[0] if np.random.rand() < 0.66 else batch[1]
+        batch = batch[0] if np.random.rand() > self.d4dress_probability else batch[1]
         if batch['dataset'][0] == '4DDress':
             batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
         elif batch['dataset'][0] == 'THuman':
@@ -124,7 +125,7 @@ class CCHTrainer(pl.LightningModule):
 
         preds = self(batch)
 
-        loss, loss_dict = self.criterion(preds, batch)
+        loss, loss_dict = self.criterion(preds, batch, dataset_name=batch['dataset'][0])
 
         metrics = self.metrics(preds, batch)
 

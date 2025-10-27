@@ -20,15 +20,15 @@ class CCHLoss(pl.LightningModule):
         self.posed_chamfer_loss = MaskedUncertaintyChamferLoss()
         self.canonical_chamfer_loss = MaskedUncertaintyChamferLoss()
 
-        # self.vc_pm_loss = MaskedUncertaintyL2Loss()
-        self.vc_pm_loss = ASAPLoss()
+        self.vc_pm_l2_loss = MaskedUncertaintyL2Loss()
+        self.vc_pm_asap_loss = ASAPLoss()
 
         self.skinning_weight_loss = MaskedUncertaintyL2Loss()
         self.dvc_loss = MaskedUncertaintyL2Loss()
 
 
 
-    def forward(self, predictions, batch):
+    def forward(self, predictions, batch, dataset_name=None):
         loss_dict = {}
         total_loss = 0
 
@@ -61,6 +61,11 @@ class CCHLoss(pl.LightningModule):
 
 
         if "vc_init" in predictions and "vc_maps" in batch:
+            if dataset_name == 'THuman':
+                loss_fn = self.vc_pm_asap_loss
+            elif dataset_name == '4DDress':
+                loss_fn = self.vc_pm_l2_loss
+                
             pred_vc = predictions['vc_init']
             gt_vc_smpl_pm = batch['vc_maps'][:, :N]
             
@@ -71,7 +76,7 @@ class CCHLoss(pl.LightningModule):
             
             confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
             
-            vc_pm_loss = self.vc_pm_loss(
+            vc_pm_loss = loss_fn(
                 pred_vc,
                 gt_vc_smpl_pm,
                 mask,
