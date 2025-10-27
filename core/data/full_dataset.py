@@ -85,7 +85,7 @@ class FullDataModule(pl.LightningDataModule):
 
     def train_dataloader(self):
         thuman_loader = DataLoader(
-            self.val_d4dress,
+            self.train_thuman,
             batch_size=self.cfg.TRAIN.BATCH_SIZE,
             shuffle=True,
             drop_last=True,
@@ -95,7 +95,7 @@ class FullDataModule(pl.LightningDataModule):
         )
 
         d4dress_loader = DataLoader(
-            self.val_d4dress,
+            self.train_d4dress,
             batch_size=self.cfg.TRAIN.BATCH_SIZE,
             shuffle=True,
             drop_last=True,

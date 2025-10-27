@@ -151,18 +151,18 @@ class CCHTrainer(pl.LightningModule):
         for key in list(metrics.keys()):
             metrics[f'{split}_{key}'] = metrics.pop(key)
         
-        self.log(f'{split}_loss', loss, prog_bar=True)
+        self.log(f'{split}_loss', loss, prog_bar=True, sync_dist=True)
         if f'{split}_vc_cfd' in metrics:
             self.log(f'{split}_vc_cfd', metrics.pop(f'{split}_vc_cfd'), 
-                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, batch_size=self.B)
+                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, sync_dist=True, batch_size=self.B)
         if f'{split}_vp_init_cfd' in metrics:
             self.log(f'{split}_vp_init_cfd', metrics.pop(f'{split}_vp_init_cfd'), 
-                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, batch_size=self.B)
+                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, sync_dist=True, batch_size=self.B)
         if f'{split}_vp_cfd' in metrics:
             self.log(f'{split}_vp_cfd', metrics.pop(f'{split}_vp_cfd'), 
-                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, batch_size=self.B)
-        self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, batch_size=self.B)
-        self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, batch_size=self.B)
+                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, sync_dist=True, batch_size=self.B)
+        self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
+        self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
 
         # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
         #     self.visualiser.visualise(preds, batch) 
@@ -639,7 +639,7 @@ class CCHTrainer(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
         preds = self(batch)
-        loss, loss_dict = self.criterion(preds, batch)
+        loss, loss_dict = self.criterion(preds, batch, dataset_name='4DDress')
         metrics = self.metrics(preds, batch)
         self._log_metrics_and_visualise(loss, loss_dict, metrics, 'val', preds, batch, self.global_step)
         # with torch.no_grad():

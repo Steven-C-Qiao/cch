@@ -83,16 +83,20 @@ class D4DressDataset(Dataset):
         self.num_joints = 24 if self.body_model == 'smpl' else 55
 
         self.ids = ids 
-        self.layer = 'Inner'
+        self.layer = ['Inner', 'Outer']
         self.camera_ids = ['0004', '0028', '0052', '0076']
 
         self.takes = defaultdict(list)
         self.num_of_takes = defaultdict(int)
         for id in self.ids:
-            takes = os.listdir(os.path.join(PATH_TO_DATASET, id, self.layer))
-            takes = [take for take in takes if take.startswith('Take')]
-            self.takes[id] = takes
-            self.num_of_takes[id] = len(takes)
+            
+            inner_takes = os.listdir(os.path.join(PATH_TO_DATASET, id, self.layer[0]))
+            inner_takes = [(take, 'Inner') for take in inner_takes if take.startswith('Take')]
+            outer_takes = os.listdir(os.path.join(PATH_TO_DATASET, id, self.layer[1]))
+            outer_takes = [(take, 'Outer') for take in outer_takes if take.startswith('Take')]
+
+            self.takes[id] = inner_takes + outer_takes
+            self.num_of_takes[id] = len(inner_takes + outer_takes)
 
 
         self.transform = transforms.Compose([
@@ -121,11 +125,14 @@ class D4DressDataset(Dataset):
         ret['dataset'] = '4DDress'
 
         id = self.ids[index // self.lengthen_by]
-        layer = self.layer
+        
+            
 
         num_of_takes = self.num_of_takes[id]
         sampled_take = self.takes[id][torch.randint(0, num_of_takes, (1,)).item()]
-        take_dir = os.path.join(PATH_TO_DATASET, id, layer, sampled_take)
+        take_dir = os.path.join(PATH_TO_DATASET, id, sampled_take[1], sampled_take[0])
+        
+        suffix = '_w_outer' if sampled_take[1] == 'Outer' else ''
 
         ret['take_dir'] = take_dir
         ret['scan_ids'] = id   
@@ -146,18 +153,9 @@ class D4DressDataset(Dataset):
 
         # ---- template mesh ----
         template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', id)
-            
-        upper_mesh = trimesh.load(os.path.join(template_dir, 'upper.ply'))
-        body_mesh = trimesh.load(os.path.join(template_dir, 'body.ply'))
-        if os.path.exists(os.path.join(template_dir, 'lower.ply')):
-            lower_mesh = trimesh.load(os.path.join(template_dir, 'lower.ply'))
-            clothing_mesh = trimesh.util.concatenate([lower_mesh, upper_mesh])
-        else:
-            clothing_mesh = upper_mesh
-        # full_mesh = trimesh.util.concatenate([body_mesh, clothing_mesh])
 
 
-        full_filtered_mesh = trimesh.load(os.path.join(template_dir, 'filtered.ply'))
+        full_filtered_mesh = trimesh.load(os.path.join(template_dir, f'filtered{suffix}.ply'))
         full_filtered_vertices = full_filtered_mesh.vertices
         full_filtered_faces = full_filtered_mesh.faces
 
@@ -169,8 +167,8 @@ class D4DressDataset(Dataset):
         ret['template_mesh_faces'] = torch.tensor(full_filtered_faces, dtype=torch.long)
         # ret['template_mesh_lbs_weights'] = torch.tensor(template_mesh_lbs_weights, dtype=torch.float32)
 
-        template_full_mesh = trimesh.load(os.path.join(template_dir, 'full_mesh.ply'))
-        template_full_lbs_weights = np.load(os.path.join(template_dir, 'full_lbs_weights.npy'))
+        template_full_mesh = trimesh.load(os.path.join(template_dir, f'full_mesh{suffix}.ply'))
+        template_full_lbs_weights = np.load(os.path.join(template_dir, f'full_lbs_weights{suffix}.npy'))
         ret['template_full_mesh'] = template_full_mesh
         ret['template_full_lbs_weights'] = torch.tensor(template_full_lbs_weights, dtype=torch.float32)
 
