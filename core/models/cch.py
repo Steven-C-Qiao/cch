@@ -259,7 +259,7 @@ class CCH(nn.Module):
         N = 4 
 
         pose = batch['pose']
-        joints = batch['smpl_T_joints'].repeat(1, K, 1, 1)
+        joints = batch['smpl_T_joints']# .repeat(1, K, 1, 1)
         w_smpl = batch['smpl_w_maps']
         mask = batch['masks']
         
@@ -332,7 +332,7 @@ class CCH(nn.Module):
         N = 4 
 
         pose = batch['pose']
-        joints = batch['smpl_T_joints'].repeat(1, K, 1, 1)
+        joints = batch['smpl_T_joints']# .repeat(1, K, 1, 1)
         mask = batch['masks']
 
         vc_init = preds['vc_init']
@@ -383,11 +383,11 @@ class CCH(nn.Module):
                         [
                             pbs_tokens, 
                             agg_tokens.repeat_interleave(K, dim=0),
-                            sapiens_tokens.repeat_interleave(K, dim=0)
+                            # sapiens_tokens.repeat_interleave(K, dim=0)
                         ],
                         dim=-1
                     ) 
-                    for pbs_tokens, agg_tokens, sapiens_tokens in zip(pbs_tokens_list, canonical_tokens_list, sapiens_tokens_list)
+                    for pbs_tokens, agg_tokens in zip(pbs_tokens_list, canonical_tokens_list)
                 ]
             else:
                 full_tokens_list = [

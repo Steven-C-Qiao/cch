@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 from pytorch_lightning.utilities.combined_loader import CombinedLoader
 from core.data.thuman_dataset import THumanDataset
 from core.data.d4dress_dataset import D4DressDataset
+from core.data.thuman_metadata import THuman_metadata   
 
 
 def custom_collate_fn(batch):
@@ -53,12 +54,16 @@ class FullDataModule(pl.LightningDataModule):
 
         # 4DDress splits (reuse those used in the standalone datamodule)
         self.d4dress_train_ids = [
-            '00122', '00123', '00127', '00129', '00134', '00135', '00136', '00137',
-            '00140', '00147', '00148', '00149', '00151', '00152', '00154', '00156',
+            '00122', '00123', '00127', '00129', '00135', '00136', '00137',
+            '00140', '00147', '00149', '00151', '00152', '00154', '00156',
             '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175',
-            '00176', '00179', '00180', '00185', '00187', '00190'
+            '00176', '00179', '00180', '00185', '00187', '00188', '00190', '00191'
         ]
-        self.d4dress_val_ids = ['00188', '00191']
+        # self.d4dress_val_ids = ['00188', '00191']
+        self.d4dress_val_ids = ['00134', '00148']
+
+        self.thuman_train_ids = sorted(THuman_metadata.keys())[:-50]
+        self.thuman_val_ids = sorted(THuman_metadata.keys())[-50:]
 
         self.train_thuman = None
         self.train_d4dress = None
@@ -66,7 +71,8 @@ class FullDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         # THuman used for training
-        self.train_thuman = THumanDataset(self.cfg)
+        self.train_thuman = THumanDataset(self.cfg, ids=self.thuman_train_ids)
+        self.val_thuman = THumanDataset(self.cfg, ids=self.thuman_val_ids)
         # 4DDress train/val
         self.train_d4dress = D4DressDataset(cfg=self.cfg, ids=self.d4dress_train_ids)
         self.val_d4dress = D4DressDataset(cfg=self.cfg, ids=self.d4dress_val_ids)
@@ -79,7 +85,7 @@ class FullDataModule(pl.LightningDataModule):
 
     def train_dataloader(self):
         thuman_loader = DataLoader(
-            self.train_thuman,
+            self.val_d4dress,
             batch_size=self.cfg.TRAIN.BATCH_SIZE,
             shuffle=True,
             drop_last=True,
@@ -89,7 +95,7 @@ class FullDataModule(pl.LightningDataModule):
         )
 
         d4dress_loader = DataLoader(
-            self.train_d4dress,
+            self.val_d4dress,
             batch_size=self.cfg.TRAIN.BATCH_SIZE,
             shuffle=True,
             drop_last=True,
@@ -106,7 +112,16 @@ class FullDataModule(pl.LightningDataModule):
         return [thuman_loader, d4dress_loader]
 
     def val_dataloader(self):
-        return DataLoader(
+        # thuman_val_loader = DataLoader(
+        #     self.val_thuman,
+        #     batch_size=self.cfg.TRAIN.BATCH_SIZE,
+        #     shuffle=False,
+        #     drop_last=True,
+        #     num_workers=self.cfg.TRAIN.NUM_WORKERS,
+        #     pin_memory=self.cfg.TRAIN.PIN_MEMORY,
+        #     collate_fn=custom_collate_fn,
+        # )
+        d4dress_val_loader = DataLoader(
             self.val_d4dress,
             batch_size=self.cfg.TRAIN.BATCH_SIZE,
             shuffle=False,
@@ -115,6 +130,8 @@ class FullDataModule(pl.LightningDataModule):
             pin_memory=self.cfg.TRAIN.PIN_MEMORY,
             collate_fn=custom_collate_fn,
         )
+
+        return d4dress_val_loader
 
     def test_dataloader(self):
         return self.val_dataloader()

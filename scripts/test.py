@@ -6,6 +6,7 @@ from loguru import logger
 
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning import seed_everything
 
 import sys
@@ -13,19 +14,24 @@ sys.path.append('.')
 
 from core.configs.cch_cfg import get_cch_cfg_defaults
 from core.models.trainer_4ddress import CCHTrainer
-from core.data.d4dress_datamodule import CCHDataModule
+from core.data.full_dataset import FullDataModule
 
 
-def run_test(exp_dir, dev=False, resume_path=None, load_path=None):
+def run_test(exp_dir, dev=False, resume_path=None, load_path=None, plot=False):
     seed_everything(42)
     
     # Get config
     cfg = get_cch_cfg_defaults()
 
+    vis_save_dir = os.path.join(exp_dir, 'vis')
+    if not os.path.exists(vis_save_dir):
+        os.makedirs(vis_save_dir)
+
     model = CCHTrainer(
         cfg=cfg,
         dev=dev,
-        vis_save_dir=None
+        vis_save_dir=vis_save_dir,
+        plot=plot
     )
 
     if load_path is not None:
@@ -50,17 +56,44 @@ def run_test(exp_dir, dev=False, resume_path=None, load_path=None):
         # logger.log_hyperparams(ckpt['hyper_parameters'])
     model.eval()
 
-    datamodule = CCHDataModule(cfg)
+    datamodule = FullDataModule(cfg)
 
 
     tensorboard_logger = TensorBoardLogger(exp_dir, name='lightning_logs')
 
+
+
+
+    # Callbacks
+    checkpoint_callbacks = [
+        ModelCheckpoint(
+            monitor='val_loss',
+            mode='min'
+        ),
+        ModelCheckpoint( # this is the vc_init cfd 
+            monitor='train_vc_cfd',
+            mode='min'
+        ),
+        ModelCheckpoint(
+            monitor='val_vc_cfd',
+            mode='min'
+        ),
+        ModelCheckpoint( # this is the vp_cfd
+            monitor='train_vp_cfd',
+            mode='min'
+        ),
+        ModelCheckpoint( # this is the vp_cfd
+            monitor='val_vp_cfd',
+            mode='min'
+        )
+    ]
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator=cfg.SPEEDUP.ACCELERATOR,
         num_nodes=1,
         devices="auto", 
         strategy="auto",
+        callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
     )
 
@@ -99,6 +132,10 @@ if __name__ == '__main__':
         "--dev", 
         action="store_true"
     )  
+    parser.add_argument(
+        "--plot", 
+        action="store_true"
+    ) 
     args = parser.parse_args()
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -112,5 +149,6 @@ if __name__ == '__main__':
         exp_dir=args.experiment_dir,
         dev=args.dev,
         resume_path=args.resume_training_states,
-        load_path=args.load_from_ckpt
+        load_path=args.load_from_ckpt,
+        plot=args.plot
     )

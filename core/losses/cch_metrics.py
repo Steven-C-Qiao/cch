@@ -23,8 +23,14 @@ class CCHMetrics(pl.LightningModule):
         K = 5
 
         if "vc_init_conf" in predictions:
-            confidence = predictions['vc_init_conf']
-            confidence = confidence > self.threshold
+            confidence_raw = predictions['vc_init_conf']
+            batch_mask = batch['masks'][:, :N]  # Original mask for valid pixels
+            
+            # Create confidence mask by filtering out bottom 5% of confidence values
+            # Only consider pixels that are inside the batch mask (not background)
+            # confidence = self._create_confidence_mask(confidence_raw, batch_mask, percentile=5.0)
+            
+            confidence = confidence_raw > self.threshold
         else:
             confidence = torch.ones_like(predictions['vc_init'])[..., 0].bool()
 
@@ -135,4 +141,55 @@ class CCHMetrics(pl.LightningModule):
 
 
         return (cfd_pred2gt+cfd_gt2pred) / 2, cfd_pred2gt, cfd_gt2pred
+    
+    # def _create_confidence_mask(self, confidence_raw, batch_mask, percentile=5.0):
+    #     """
+    #     Create confidence mask by filtering out the bottom percentile of confidence values.
+    #     Only considers pixels that are inside the batch_mask (not background).
+        
+    #     Args:
+    #         confidence_raw: Raw confidence values (B, N, H, W)
+    #         batch_mask: Boolean mask for valid pixels (B, N, H, W)
+    #         percentile: Percentage of lowest confidence values to filter out (default: 5.0)
+            
+    #     Returns:
+    #         Boolean confidence mask (B, N, H, W)
+    #     """
+    #     B, N, H, W = confidence_raw.shape
+    #     batch_mask = batch_mask.squeeze(-1).bool()
+    #     confidence_mask = torch.zeros_like(batch_mask, dtype=torch.bool)
+        
+    #     for b in range(B):
+    #         for n in range(N):
+    #             # Get confidence values and mask for this batch and view
+    #             conf_vals = confidence_raw[b, n]  # (H, W)
+    #             valid_mask = batch_mask[b, n]     # (H, W)
+                
+    #             # Only consider pixels that are valid (not background)
+    #             if valid_mask.sum() == 0:
+    #                 # No valid pixels, keep all as False
+    #                 confidence_mask[b, n] = False
+    #                 continue
+                
+    #             # Get confidence values only for valid pixels
+    #             valid_conf = conf_vals[valid_mask]  # (num_valid_pixels,)
+                
+    #             if valid_conf.numel() == 0:
+    #                 confidence_mask[b, n] = False
+    #                 continue
+                
+    #             # Calculate threshold for bottom percentile
+    #             threshold_idx = int(valid_conf.numel() * percentile / 100.0)
+    #             threshold_idx = max(0, threshold_idx)  # Ensure at least 0
+                
+    #             # Get threshold value (bottom percentile)
+    #             sorted_conf, _ = torch.sort(valid_conf)
+    #             threshold_value = sorted_conf[threshold_idx]
+                
+    #             # Create mask: keep pixels with confidence >= threshold
+    #             # But only for pixels that are already valid
+    #             conf_mask = (conf_vals >= threshold_value) & valid_mask
+    #             confidence_mask[b, n] = conf_mask
+        
+    #     return confidence_mask
     

@@ -113,16 +113,16 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
             verbose=True,
             monitor='val_loss',
             mode='min'
-        ),
-        ModelCheckpoint( # this is the vc_init cfd 
-            dirpath=model_save_dir,
-            filename='train_vc_cfd_{epoch:03d}',
-            save_top_k=1,
-            save_last=False,
-            verbose=True,
-            monitor='train_vc_cfd',
-            mode='min'
-        ),
+        ),  
+        # ModelCheckpoint( # this is the vc_init cfd 
+        #     dirpath=model_save_dir,
+        #     filename='train_vc_cfd_{epoch:03d}',
+        #     save_top_k=1,
+        #     save_last=False,
+        #     verbose=True,
+        #     monitor='train_vc_cfd',
+        #     mode='min'
+        # ),
         ModelCheckpoint(
             dirpath=model_save_dir,
             filename='val_vc_cfd_{epoch:03d}',
@@ -140,7 +140,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
                 save_last=False,
                 verbose=True,
                 monitor='train_vp_cfd',
-                mode='min'
+                mode='min'  
             ),
             ModelCheckpoint( # this is the vp_cfd
                 dirpath=model_save_dir,
@@ -150,12 +150,17 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
                 verbose=True,
                 monitor='val_vp_cfd',
                 mode='min'
-            )
+            ),
         ]),
     ]
 
 
     tensorboard_logger = TensorBoardLogger(exp_dir, name='lightning_logs')
+
+    if plot:
+        num_sanity_val_steps = 0
+    else:
+        num_sanity_val_steps = 2    
 
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
@@ -169,7 +174,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         # gradient_clip_val=1.0,
         # log_every_n_steps=10,
         # enable_progress_bar=False,
-        num_sanity_val_steps=0
+        num_sanity_val_steps=num_sanity_val_steps,
     )
 
 

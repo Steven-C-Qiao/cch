@@ -76,7 +76,7 @@ class D4DressDataset(Dataset):
     def __init__(self, cfg, ids):
         self.cfg = cfg
         self.num_frames_pp = 4
-        self.lengthen_by = 400
+        self.lengthen_by = cfg.DATA.LENGHTHEN_D4DRESS
 
         self.img_size = cfg.DATA.IMAGE_SIZE
         self.body_model = cfg.MODEL.BODY_MODEL
@@ -114,7 +114,7 @@ class D4DressDataset(Dataset):
         
 
     def __len__(self):
-        return len(self.ids) * self.lengthen_by
+        return int(len(self.ids) * self.lengthen_by)
 
     def __getitem__(self, index):
         ret = defaultdict(list)

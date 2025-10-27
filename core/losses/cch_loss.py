@@ -20,7 +20,8 @@ class CCHLoss(pl.LightningModule):
         self.posed_chamfer_loss = MaskedUncertaintyChamferLoss()
         self.canonical_chamfer_loss = MaskedUncertaintyChamferLoss()
 
-        self.vc_pm_loss = MaskedUncertaintyL2Loss()
+        # self.vc_pm_loss = MaskedUncertaintyL2Loss()
+        self.vc_pm_loss = ASAPLoss()
 
         self.skinning_weight_loss = MaskedUncertaintyL2Loss()
         self.dvc_loss = MaskedUncertaintyL2Loss()
@@ -176,7 +177,7 @@ class CCHLoss(pl.LightningModule):
                 gt_vp,
                 pred_vp, 
                 mask,
-                confidence
+                # confidence
             ) 
             vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_chamfer_loss', ids=batch['scan_ids'])
             vp_loss *= self.cfg.LOSS.VP_CHAMFER_LOSS_WEIGHT
@@ -277,6 +278,39 @@ class MaskedUncertaintyL2Loss(nn.Module):
 
         return loss.sum() / mask.sum()
     
+
+class ASAPLoss(nn.Module):
+    """
+    As SMPL as possible loss
+    """
+    def __init__(self, alpha=1.0):
+        super().__init__()
+        self.alpha = alpha
+
+    def get_conf_log(self, x):
+        return x, torch.log(x)
+
+    def forward(self, x, y, mask=None, uncertainty=None):
+        threshold = 0.02
+
+        norm = torch.norm(x - y, dim=-1)
+        norm_mask = norm > threshold
+        loss = torch.where(norm_mask, norm, torch.zeros_like(norm))
+        
+
+        if uncertainty is not None:
+            conf, log_conf = self.get_conf_log(uncertainty)
+            loss = loss * conf - self.alpha * log_conf
+
+        if mask is not None:
+            full_mask = norm_mask * mask
+        else:
+            full_mask = norm_mask
+
+        loss = loss * full_mask
+        
+        return loss.sum() / full_mask.sum()
+
 
 
 class MaskedUncertaintyExpL2Loss(nn.Module):

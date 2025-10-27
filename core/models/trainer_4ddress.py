@@ -53,7 +53,7 @@ class CCHTrainer(pl.LightningModule):
 
 
         self.feature_renderer = FeatureRenderer(image_size=(256, 192))#(512, 384))#image_size=(256, 192)) 
-        self.thuman_renderer = FeatureRenderer(image_size=(512, 512))
+        self.thuman_renderer = FeatureRenderer(image_size=(256, 256))
 
         self.smpl_male = smplx.create(
             model_type=self.body_model,
@@ -90,6 +90,7 @@ class CCHTrainer(pl.LightningModule):
             smpl_male=self.smpl_male,
             smpl_female=self.smpl_female,
         )
+        # self._freeze_canonical_modules()
 
         self.criterion = CCHLoss(cfg)
         self.metrics = CCHMetrics(cfg)
@@ -110,12 +111,12 @@ class CCHTrainer(pl.LightningModule):
     def training_step(self, batch, batch_idx, split='train'):
         if self.first_batch is None:
             self.first_batch = batch
-        # if self.dev:
-        #     batch = self.first_batch
+        if self.dev:
+            batch = self.first_batch
 
 
         # Route processing by dataset source to avoid mixing logic
-        batch = batch[0] if np.random.rand() < 0.8 else batch[1]
+        batch = batch[0] if np.random.rand() < 0.66 else batch[1]
         if batch['dataset'][0] == '4DDress':
             batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
         elif batch['dataset'][0] == 'THuman':
@@ -131,10 +132,11 @@ class CCHTrainer(pl.LightningModule):
 
         # for k, v in loss_dict.items():
         #     print(f"{k}: {v.item():.2f}", end='; ')
-        # print('')
+        # print(''),
         # import ipdb; ipdb.set_trace()
         
         return loss 
+
 
 
     def _log_metrics_and_visualise(self, loss, loss_dict, metrics, split, preds, batch, global_step):
@@ -151,15 +153,15 @@ class CCHTrainer(pl.LightningModule):
         self.log(f'{split}_loss', loss, prog_bar=True)
         if f'{split}_vc_cfd' in metrics:
             self.log(f'{split}_vc_cfd', metrics.pop(f'{split}_vc_cfd'), 
-                     on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True, batch_size=self.B)
+                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, batch_size=self.B)
         if f'{split}_vp_init_cfd' in metrics:
             self.log(f'{split}_vp_init_cfd', metrics.pop(f'{split}_vp_init_cfd'), 
-                     on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True, batch_size=self.B)
+                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, batch_size=self.B)
         if f'{split}_vp_cfd' in metrics:
             self.log(f'{split}_vp_cfd', metrics.pop(f'{split}_vp_cfd'), 
-                     on_step=on_step, on_epoch=True, prog_bar=True, sync_dist=True, rank_zero_only=True, batch_size=self.B)
-        self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True, batch_size=self.B)
-        self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, sync_dist=True, rank_zero_only=True, batch_size=self.B)
+                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, batch_size=self.B)
+        self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, batch_size=self.B)
+        self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, batch_size=self.B)
 
         # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
         #     self.visualiser.visualise(preds, batch) 
@@ -172,7 +174,6 @@ class CCHTrainer(pl.LightningModule):
                 print('')
                 # import ipdb; ipdb.set_trace()
     
-
     @torch.no_grad()
     def process_4ddress(self, batch, batch_idx, normalise=False):
         with torch.autocast(enabled=False, device_type='cuda'):
@@ -254,13 +255,8 @@ class CCHTrainer(pl.LightningModule):
             smpl_skinning_weights = torch.stack(smpl_skinning_weights_list, dim=0)[:, None].repeat(1, K, 1, 1)
             smpl_full_pose = torch.stack(smpl_full_pose_list, dim=0)
 
-            smpl_faces = torch.tensor(self.smpl_male.faces, dtype=torch.int32, device=self.device)
-
-            batch['smpl_T_joints'] = smpl_T_joints
             batch['pose'] = smpl_full_pose
-
-
-
+            batch['smpl_T_joints'] = smpl_T_joints
 
             # ----------------------- Scan Mesh -----------------------
             scan_meshes = batch['scan_mesh']
@@ -320,9 +316,6 @@ class CCHTrainer(pl.LightningModule):
             w_maps = rearrange(w_maps, '(b k) j h w -> b k h w j', b=B, k=K)
             
             batch['smpl_w_maps'] = w_maps
-
-
-
 
 
             template_mesh = batch['template_mesh']
@@ -400,6 +393,18 @@ class CCHTrainer(pl.LightningModule):
             template_mesh_faces = [torch.tensor(mesh.faces, device=self.device, dtype=torch.long) for mesh in template_mesh]
 
 
+            # -----------------Normalise after render -----------------
+            if self.cfg.DATA.NORMALISE:
+                normalise_to_height = 1.7 
+                smpl_T_height = (smpl_T_vertices[..., 1].max(dim=-1).values - smpl_T_vertices[..., 1].min(dim=-1).values) # b * k
+                smpl_T_joints = smpl_T_joints[:, :self.num_joints] * (normalise_to_height / smpl_T_height)[:, :, None, None] # b k j 3 * b k 1 1
+                smpl_T_height = smpl_T_height.flatten()
+                scan_mesh_verts_centered = [verts * (normalise_to_height / smpl_T_height[i]) for i, verts in enumerate(scan_mesh_verts_centered)]
+                template_mesh_verts = [verts * (normalise_to_height / smpl_T_height[i]) for i, verts in enumerate(template_mesh_verts)]
+
+            batch['smpl_T_joints'] = smpl_T_joints
+
+
 
             # ----------------------- Sampling -----------------------
             # Sample from Vp
@@ -420,6 +425,11 @@ class CCHTrainer(pl.LightningModule):
             )
 
             batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, 24000)
+
+
+            # del pytorch3d_mesh, template_mesh_pytorch3d, scan_mesh_centered
+            # del template_full_mesh_verts_posed_list, template_full_mesh_faces_expanded_list, template_full_mesh_verts_expanded_list
+            # del template_full_posed_pytorch3d_mesh
 
 
 
@@ -456,26 +466,21 @@ class CCHTrainer(pl.LightningModule):
 
             smpl_output = smpl_model(return_full_pose=True, **smplx_params)
             smpl_T_output = smpl_model(return_full_pose=True, **smplx_T_params)
-            
-            batch['smpl_T_joints'] = rearrange(smpl_T_output.joints[:, :self.num_joints], '(b k) j c -> b k j c', b=B, k=K)
-            batch['pose'] = rearrange(smpl_output.full_pose, '(b k) c -> b k c', b=B, k=K)    
+
 
             scan_verts = [verts for sublist in batch['scan_verts'] for verts in sublist]
             scan_faces = [faces for sublist in batch['scan_faces'] for faces in sublist]
 
+            # normalise smpl joints, scan vertices, and smpl vertices
+            if self.cfg.DATA.NORMALISE:
+                normalise_to_height = 1.7 
+                smpl_T_height = smpl_T_output.vertices[:, :, 1].max(dim=-1).values - smpl_T_output.vertices[:, :, 1].min(dim=-1).values
+                smpl_T_joints = smpl_T_output.joints[:, :self.num_joints] * (normalise_to_height / smpl_T_height)[:, None, None]
+                scan_verts = [verts * (normalise_to_height / smpl_T_height[i]) for i, verts in enumerate(scan_verts)]
+            
+            batch['smpl_T_joints'] = rearrange(smpl_T_joints, '(b k) j c -> b k j c', b=B, k=K)
+            batch['pose'] = rearrange(smpl_output.full_pose, '(b k) c -> b k c', b=B, k=K)    
 
-
-            dists, idx = self.knn_ptcld(
-                Pointclouds(points=scan_verts), 
-                smpl_output.vertices.view(-1, smpl_output.vertices.shape[-2], 3), 
-                K=1
-            )
-
-            smpl_weights_flat = smpl_skinning_weights.expand(B*K, -1, -1)
-            idx_expanded = idx.repeat(1, 1, self.num_joints)
-            scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
-            scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
-            batch['scan_skinning_weights'] = scan_w
 
 
             scan_mesh_pytorch3d = Meshes(
@@ -489,94 +494,87 @@ class CCHTrainer(pl.LightningModule):
 
 
             # ----------------------- Render -----------------------
-            cam_R, cam_T = batch['cam_R'], batch['cam_T']
-
-            cameras = PerspectiveCameras(
-                R=cam_R.flatten(0, 1), 
-                T=cam_T.flatten(0, 1), 
-                # K=cam_K.flatten(0, 1),
-                focal_length=724.0773,
-                principal_point=[(256, 256),],
-                image_size=[(512, 512),],
-                device=self.device,
-                in_ndc=False
-            )
-            self.thuman_renderer._set_cameras(cameras)
+            batch['smpl_w_maps'] = rearrange(batch['smpl_w_maps'], 'b k c h w -> b k h w c')
+            batch['vc_smpl_maps'] = rearrange(batch['vc_smpl_maps'], 'b k c h w -> b k h w c')
 
 
-            if 'smpl_w_maps' in batch and len(batch['smpl_w_maps']) == B:
-                batch['smpl_w_maps'] = rearrange(batch['smpl_w_maps'], 'b k c h w -> b k h w c')
-            else:
-                # Render skinning weight pointmaps
-                pytorch3d_mesh = Meshes(
-                    verts=scan_verts,
-                    faces=scan_faces,
-                    textures=TexturesVertex(verts_features=scan_w)
-                )
+            # del scan_mesh_pytorch3d, vp, vp_ptcld
 
-                renderer_output = self.thuman_renderer(pytorch3d_mesh)
-                w_maps = renderer_output['maps']
+            # cam_R, cam_T = batch['cam_R'], batch['cam_T']
 
-                _, H, W, _ = w_maps.shape
-                target_size = W 
-                crop_amount = (H - target_size) // 2  
-                w_maps = w_maps[:, crop_amount:H-crop_amount, :, :]
-                w_maps = torch.nn.functional.interpolate(
-                    w_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
-                )
-                w_maps = rearrange(w_maps, '(b k) j h w -> b k h w j', b=B, k=K)
-                
-                batch['smpl_w_maps'] = w_maps
+            # cameras = PerspectiveCameras(
+            #     R=cam_R.flatten(0, 1), 
+            #     T=cam_T.flatten(0, 1), 
+            #     focal_length=724.0773/2,
+            #     principal_point=[(128, 128),],
+            #     image_size=[(256, 256),],
+            #     device=self.device,
+            #     in_ndc=False
+            # )
+            # self.thuman_renderer._set_cameras(cameras)
+
+            # dists, idx = self.knn_ptcld(
+            #     Pointclouds(points=scan_verts), 
+            #     smpl_output.vertices.view(-1, smpl_output.vertices.shape[-2], 3), 
+            #     K=1
+            # )
+            # smpl_weights_flat = smpl_skinning_weights.expand(B*K, -1, -1)
+            # idx_expanded = idx.repeat(1, 1, self.num_joints)
+            # scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
+            # scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
+            # batch['scan_skinning_weights'] = scan_w
+
+            # if 'smpl_w_maps' in batch and len(batch['smpl_w_maps']) == B:
+            # else:
+            # # Render skinning weight pointmaps
+            # pytorch3d_mesh = Meshes(
+            #     verts=scan_verts,
+            #     faces=scan_faces,
+            #     textures=TexturesVertex(verts_features=scan_w)
+            # )
+
+            # renderer_output = self.thuman_renderer(pytorch3d_mesh)
+            # w_maps = renderer_output['maps']
+
+            # _, H, W, _ = w_maps.shape
+            # target_size = W 
+            # crop_amount = (H - target_size) // 2  
+            # w_maps = w_maps[:, crop_amount:H-crop_amount, :, :]
+            # w_maps = torch.nn.functional.interpolate(
+            #     w_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            # )
+            # w_maps = rearrange(w_maps, '(b k) j h w -> b k h w j', b=B, k=K)
+            
+            # batch['smpl_w_maps'] = w_maps
             
 
-            if 'vc_smpl_maps' in batch and len(batch['vc_smpl_maps']) == B:
-                batch['vc_smpl_maps'] = rearrange(batch['vc_smpl_maps'], 'b k c h w -> b k h w c')
-            else:
-                pytorch3d_smpl_mesh = Meshes(
-                    verts=smpl_output.vertices,
-                    faces=torch.tensor(smpl_model.faces, device=self.device).expand(B*K, -1, -1),
-                    textures=TexturesVertex(verts_features=smpl_T_output.vertices)
-                )
+            # if 'vc_smpl_maps' in batch and len(batch['vc_smpl_maps']) == B:
+            
+            # else:
+            # pytorch3d_smpl_mesh = Meshes(
+            #     verts=smpl_output.vertices,
+            #     faces=torch.tensor(smpl_model.faces, device=self.device).expand(B*K, -1, -1),
+            #     textures=TexturesVertex(verts_features=smpl_T_output.vertices)
+            # )
 
-                renderer_output = self.thuman_renderer(pytorch3d_smpl_mesh)
-                vc_maps = renderer_output['maps']
-                vc_mask = renderer_output['mask'].unsqueeze(-1)
+            # renderer_output = self.thuman_renderer(pytorch3d_smpl_mesh)
+            # vc_maps = renderer_output['maps']
+            # vc_mask = renderer_output['mask'].unsqueeze(-1)
+            # vc_maps = torch.nn.functional.interpolate(
+            #     vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            # )
+            # vc_maps = rearrange(vc_maps, '(b k) j h w -> b k h w j', b=B, k=K)
 
-                _, H, W, _ = vc_maps.shape
-                target_size = W 
-                crop_amount = (H - target_size) // 2  
-                vc_maps = vc_maps[:, crop_amount:H-crop_amount, :, :]
-                vc_maps = torch.nn.functional.interpolate(
-                    vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
-                )
-                vc_maps = rearrange(vc_maps, '(b k) j h w -> b k h w j', b=B, k=K)
-
-                vc_mask = vc_mask[:, crop_amount:H-crop_amount, :, :]
-                vc_mask = torch.nn.functional.interpolate(
-                    vc_mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
-                )
-                vc_mask = rearrange(vc_mask, '(b k) c h w -> b k h w c', b=B, k=K)
-                batch['smpl_mask'] = vc_mask.squeeze(-1)
-                
-                batch['vc_smpl_maps'] = vc_maps
+            # vc_mask = torch.nn.functional.interpolate(
+            #     vc_mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
+            # )
+            # vc_mask = rearrange(vc_mask, '(b k) c h w -> b k h w c', b=B, k=K)
+            # batch['smpl_mask'] = vc_mask.squeeze(-1)
+            # batch['vc_smpl_maps'] = vc_maps
 
         return batch
 
 
-
-    def validation_step(self, batch, batch_idx):
-        batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
-        preds = self(batch)
-        loss, loss_dict = self.criterion(preds, batch)
-        metrics = self.metrics(preds, batch)
-        self._log_metrics_and_visualise(loss, loss_dict, metrics, 'val', preds, batch, self.global_step)
-        # with torch.no_grad():
-        #     loss = self.training_step(batch, batch_idx, split='val')
-        return loss
-
-    def test_step(self, batch, batch_idx):
-        return self.validation_step(batch, batch_idx)
-    
     
 
     def configure_optimizers(self):
@@ -636,6 +634,22 @@ class CCHTrainer(pl.LightningModule):
             return optimizer
 
 
+
+    def validation_step(self, batch, batch_idx):
+        batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
+        preds = self(batch)
+        loss, loss_dict = self.criterion(preds, batch)
+        metrics = self.metrics(preds, batch)
+        self._log_metrics_and_visualise(loss, loss_dict, metrics, 'val', preds, batch, self.global_step)
+        # with torch.no_grad():
+        #     loss = self.training_step(batch, batch_idx, split='val')
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        return self.validation_step(batch, batch_idx)
+    
+
+
     @torch.no_grad()
     def forward_and_visualise(self, batch, batch_idx):
 
@@ -673,6 +687,25 @@ class CCHTrainer(pl.LightningModule):
             dist, idx, _ = x_nn
             return dist, idx
    
+
+
+
+
+    def _freeze_canonical_modules(self):
+        """Freeze canonical stage modules (aggregator, canonical_head, skinning_head)."""
+        # Freeze aggregator
+        for param in self.model.aggregator.parameters():
+            param.requires_grad = False
+        
+        # Freeze canonical head
+        for param in self.model.canonical_head.parameters():
+            param.requires_grad = False
+            
+        # Freeze skinning head if it exists
+        if hasattr(self.model, 'skinning_head'):
+            for param in self.model.skinning_head.parameters():
+                param.requires_grad = False
+    
 
     def _test_smpl_scan_alignment(self, smpl_vertices, scan_mesh_verts):
         # Create scatter plot of SMPL and scan vertices

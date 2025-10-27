@@ -102,6 +102,11 @@ def render_single(PATH, scan_id, renderer, smpl_model):
         smpl_output = smpl_model(**smplx_param, return_full_pose=True)
         smpl_T_output = smpl_model(**smplx_T_param, return_full_pose=True)
 
+        smpl_T_height = smpl_T_output.vertices[:, :, 1].max(dim=-1).values - smpl_T_output.vertices[:, :, 1].min(dim=-1).values
+
+        smpl_T_verts = smpl_T_output.vertices / smpl_T_height[:, None, None] * 1.7
+
+
 
         scan_fname = os.path.join(PATH, 'cleaned', f'{scan_id}.pkl')
         scan = load_pickle(scan_fname)
@@ -145,38 +150,38 @@ def render_single(PATH, scan_id, renderer, smpl_model):
         renderer._set_cameras(cameras)
 
 
-        dists, idx = knn_ptcld(
-            Pointclouds(points=scan_verts[None]), 
-            smpl_output.vertices,
-            K=1
-        )
-        smpl_weights_flat = smpl_model.lbs_weights[None]
-        idx_expanded = idx.repeat(1, 1, 55)
-        scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
-        # scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
-        scan_w = scan_w_tensor
+        # dists, idx = knn_ptcld(
+        #     Pointclouds(points=scan_verts[None]), 
+        #     smpl_output.vertices,
+        #     K=1
+        # )
+        # smpl_weights_flat = smpl_model.lbs_weights[None]
+        # idx_expanded = idx.repeat(1, 1, 55)
+        # scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
+        # # scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
+        # scan_w = scan_w_tensor
 
-        # Render skinning weight pointmaps
-        pytorch3d_mesh = Meshes(
-            verts=scan_verts[None].repeat(len(camera_ids), 1, 1),
-            faces=scan_faces[None].repeat(len(camera_ids), 1, 1),
-            textures=TexturesVertex(verts_features=scan_w.repeat(len(camera_ids), 1, 1))
-        )
+        # # Render skinning weight pointmaps
+        # pytorch3d_mesh = Meshes(
+        #     verts=scan_verts[None].repeat(len(camera_ids), 1, 1),
+        #     faces=scan_faces[None].repeat(len(camera_ids), 1, 1),
+        #     textures=TexturesVertex(verts_features=scan_w.repeat(len(camera_ids), 1, 1))
+        # )
 
-        renderer_output = renderer(pytorch3d_mesh)
-        w_maps = renderer_output['maps']
+        # renderer_output = renderer(pytorch3d_mesh)
+        # w_maps = renderer_output['maps']
 
 
         pytorch3d_smpl_mesh = Meshes(
             verts=smpl_output.vertices.repeat(len(camera_ids), 1, 1),
             faces=torch.tensor(smpl_model.faces, device=device)[None].repeat(len(camera_ids), 1, 1),
-            textures=TexturesVertex(verts_features=smpl_T_output.vertices.repeat(len(camera_ids), 1, 1))
+            textures=TexturesVertex(verts_features=smpl_T_verts.repeat(len(camera_ids), 1, 1))
         )
 
         renderer_output = renderer(pytorch3d_smpl_mesh)
         vc_maps = renderer_output['maps']
 
-    return w_maps, vc_maps
+    return None, vc_maps
 
 
 
@@ -197,7 +202,7 @@ if __name__ == "__main__":
     failed_ids = []
     
     for scan_id in sorted(scan_ids):
-        if scan_id > '1957':
+        if scan_id >= '1200':
             try:
                 print(f"Processing scan_id: {scan_id}")
                 w_maps, vc_maps = render_single(PATH, scan_id, renderer, smpl_model)
@@ -205,11 +210,11 @@ if __name__ == "__main__":
                 save_path = os.path.join(PATH, 'render_persp/thuman2_36views', scan_id)
                 
                 # Save w_maps as 36 separate sparse matrices using camera_ids as filenames
-                sparse_dir = save_w_maps_sparse(w_maps, scan_id, save_path, camera_ids)
+                # sparse_dir = save_w_maps_sparse(w_maps, scan_id, save_path, camera_ids)
                 
                 # Still save the original dense format for vc_maps
                 np.save(
-                    os.path.join(save_path, f'{scan_id}_vc_maps'),
+                    os.path.join(save_path, f'{scan_id}_vc_maps_normalised_170cm'),
                     vc_maps.detach().cpu().numpy()
                 )
 

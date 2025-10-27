@@ -5,6 +5,8 @@ import argparse
 import trimesh
 import numpy as np
 import matplotlib.pyplot as plt
+from typing import Sequence 
+
 
 
 from tqdm import tqdm
@@ -14,13 +16,15 @@ from collections import defaultdict
 from pytorch_lightning import seed_everything
 from einops import rearrange
 from torch.utils.data import DataLoader
+import torchvision.transforms as transforms
 
 import sys
 sys.path.append('.')
 
 from core.configs.cch_cfg import get_cch_cfg_defaults
 from core.models.trainer_4ddress import CCHTrainer
-from core.data.d4dress_dataset import D4DressDataset, d4dress_collate_fn
+from core.data.d4dress_dataset import D4DressDataset
+from core.data.full_dataset import custom_collate_fn as d4dress_collate_fn
 from core.configs.paths import DATA_PATH as PATH_TO_DATASET
 from core.data.d4dress_utils import load_pickle, load_image, d4dress_cameras_to_pytorch3d_cameras
 
@@ -36,6 +40,31 @@ def _move_to_device(sample, device):
     if isinstance(sample, tuple):
         return tuple(_move_to_device(v, device) for v in sample)
     return sample
+
+
+# Use timm's names
+IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
+
+
+def make_normalize_transform(
+    mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
+    std: Sequence[float] = IMAGENET_DEFAULT_STD,
+) -> transforms.Normalize:
+    return transforms.Normalize(mean=mean, std=std)
+
+def sapiens_transform(
+    image: torch.tensor
+) -> torch.tensor:
+    transform = transforms.Compose([
+        transforms.CenterCrop((940, 940)),
+        transforms.Resize((1024, 1024)),
+        transforms.ToTensor(),
+        make_normalize_transform()
+    ])
+    image = transform(image)
+
+    return image
 
 class AdHocDataset(D4DressDataset):
     def __init__(self, cfg, ids=[], layer='Inner', takes=['Take3'],
@@ -175,9 +204,9 @@ class AdHocDataset(D4DressDataset):
             img_transformed = self.transform(img_pil)
             mask_transformed = self.mask_transform(mask_pil).squeeze()
 
-            # sapiens_image = sapiens_transform(img_pil)
+            sapiens_image = sapiens_transform(img_pil)
 
-            # ret['sapiens_images'].append(sapiens_image)
+            ret['sapiens_images'].append(sapiens_image)
             ret['imgs'].append(img_transformed)
             ret['masks'].append(mask_transformed)
 
@@ -200,7 +229,7 @@ class AdHocDataset(D4DressDataset):
         ret['transl'] = torch.tensor(np.stack(ret['transl']))
         ret['betas'] = torch.tensor(np.stack(ret['betas']))
         ret['scan_rotation'] = torch.tensor(np.stack(ret['scan_rotation']))
-        # ret['sapiens_images'] = torch.tensor(np.stack(ret['sapiens_images']))
+        ret['sapiens_images'] = torch.tensor(np.stack(ret['sapiens_images']))
         # ret['smpl_w_maps'] = torch.stack(ret['smpl_w_maps'])
         if self.body_model == 'smplx':
             ret['left_hand_pose'] = torch.tensor(np.stack(ret['left_hand_pose']))
@@ -542,12 +571,11 @@ if __name__ == '__main__':
 
     assert (args.load_from_ckpt is not None), 'Specify load_from_ckpt'
 
-    # id = '00134'
-    # take = 'Take3'
-    # frames = ['00006', '00006', '00006', '00006', '00006']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
-    # novel_pose_path = f'/scratch/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
-
+    id = '00134'
+    take = 'Take3'
+    frames = ['00006', '00006', '00006', '00006', '00006']
+    cameras = ['0004', '0028', '0052', '0076', '0076']
+    novel_pose_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/{id}/Inner/{take}/SMPLX'
 
     # id = '00147'
     # take = 'Take6'
@@ -556,11 +584,11 @@ if __name__ == '__main__':
     # novel_pose_path = f'/scratch/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
 
 
-    id = '00148'
-    take = 'Take1'
-    frames = ['00021', '00021', '00021', '00021', '00021']
-    cameras = ['0004', '0028', '0052', '0076', '0076']
-    novel_pose_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/{id}/Inner/{take}/SMPLX'
+    # id = '00148'
+    # take = 'Take1'
+    # frames = ['00021', '00021', '00021', '00021', '00021']
+    # cameras = ['0004', '0028', '0052', '0076', '0076']
+    # novel_pose_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/{id}/Inner/{take}/SMPLX'
 
 
     # id = '00188'

@@ -39,12 +39,15 @@ def load_w_maps_sparse(w_maps_fname):
 
 
 class THumanDataset(Dataset):
-    def __init__(self, cfg):
+    def __init__(self, cfg, ids=None):
         self.cfg = cfg
-        self.lengthen_by = 20
+        self.lengthen_by = cfg.DATA.LENGHTHEN_THUMAN
         self.metadata = THuman_metadata
 
-        self.ids = list(self.metadata.keys())
+        if ids is None:
+            self.ids = list(self.metadata.keys())
+        else:
+            self.ids = ids 
 
         self.camera_ids = [
             '000', '010', '020', '030', '040', '050', '060', '070', '080', 
@@ -54,7 +57,6 @@ class THumanDataset(Dataset):
         ]
 
         self.num_frames_pp = 4
-        self.lengthen_by = 20
 
         self.img_size = cfg.DATA.IMAGE_SIZE
         self.body_model = cfg.MODEL.BODY_MODEL
@@ -81,9 +83,15 @@ class THumanDataset(Dataset):
                 transforms.Resize(self.img_size, interpolation=Image.NEAREST),
             ]
         )
+        self.sapiens_transform  = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Resize(1024),
+            ]
+        )
 
     def __len__(self):
-        return len(self.ids) * self.lengthen_by
+        return int(len(self.ids) * self.lengthen_by)
     
     def __getitem__(self, index):
         ret = defaultdict(list)
@@ -122,13 +130,16 @@ class THumanDataset(Dataset):
             mask = rgba.split()[-1]
             img = rgba.convert('RGB')
 
+            sapiens_img_transformed = self.sapiens_transform(img)
             img_transformed = self.transform(img)
             mask_transformed = self.mask_transform(mask).squeeze(-3)
+
             
             # img_transformed = img_transformed * mask_transformed
             
             ret['imgs'].append(img_transformed)
             ret['masks'].append(mask_transformed)
+            ret['sapiens_images'].append(sapiens_img_transformed)
 
             
 
@@ -171,39 +182,28 @@ class THumanDataset(Dataset):
             ret['cam_K'].append(intrinsic)
 
 
-            try:
-                vc_maps_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id,  f'{scan_id}_vc_maps.npy')
-                vc_map = np.load(vc_maps_fname)  # (36, 512, 512, 3)
+            vc_maps_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id,  f'{scan_id}_vc_maps_normalised_170cm.npy')
+            vc_map = np.load(vc_maps_fname)  # (36, 512, 512, 3)
 
-                # Convert camera ID to index (e.g. '000' -> 0, '010' -> 1, etc)
-                camera_idx = int(sampled_cameras[i]) // 10
-                # Index into vc_map using camera index
-                vc_map = vc_map[camera_idx]  # (512, 512, 3)
-                # Create binary mask where pixels are non-zero (not background)
-                vc_mask = (vc_map != 0).any(axis=-1).astype(np.float32)
+            # Convert camera ID to index (e.g. '000' -> 0, '010' -> 1, etc)
+            camera_idx = int(sampled_cameras[i]) // 10
+            # Index into vc_map using camera index
+            vc_map = vc_map[camera_idx]  # (512, 512, 3)
+            # Create binary mask where pixels are non-zero (not background)
+            vc_mask = (vc_map != 0).any(axis=-1).astype(np.float32)
 
-                vc_map = self.crop_transform(vc_map)
-                assert vc_map.shape == (3, self.img_size, self.img_size)
-                vc_mask = self.mask_transform(vc_mask).squeeze()
+            vc_map = self.crop_transform(vc_map)
+            # assert vc_map.shape == (3, self.img_size, self.img_size)
+            vc_mask = self.mask_transform(vc_mask).squeeze()
 
-                w_maps_dir_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, f'{scan_id}_w_maps_sparse', f'{sampled_cameras[i]}.npz')
-                w_map = load_w_maps_sparse(w_maps_dir_fname)  # Shape: (512, 512, 55)
-                assert w_map.shape == (512, 512, 55)
-                w_map = self.crop_transform(w_map)
-                ret['vc_smpl_maps'].append(vc_map)
-                ret['smpl_mask'].append(vc_mask)
-                ret['smpl_w_maps'].append(w_map)
-            except:
-                pass
+            w_maps_dir_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, f'{scan_id}_w_maps_sparse', f'{sampled_cameras[i]}.npz')
+            w_map = load_w_maps_sparse(w_maps_dir_fname)  # Shape: (512, 512, 55)
+            # assert w_map.shape == (512, 512, 55)
+            w_map = self.crop_transform(w_map)
+            ret['vc_smpl_maps'].append(vc_map)
+            ret['smpl_mask'].append(vc_mask)
+            ret['smpl_w_maps'].append(w_map)
 
-        try:
-            assert len(ret['vc_smpl_maps']) == K
-            assert len(ret['smpl_mask']) == K
-            assert len(ret['smpl_w_maps']) == K
-        except:
-            ret.pop('vc_smpl_maps', None)
-            ret.pop('smpl_mask', None)
-            ret.pop('smpl_w_maps', None)
 
         # Attempt to stack each value in ret, keep as is if not stackable
         for key in list(ret.keys()):
@@ -212,6 +212,8 @@ class THumanDataset(Dataset):
                     ret[key] = torch.stack([t if torch.is_tensor(t) else torch.tensor(t) for t in ret[key]])
                 except:
                         pass
+
+        del vc_map, vc_mask, w_map
 
         return ret
     
