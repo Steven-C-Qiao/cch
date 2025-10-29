@@ -148,11 +148,14 @@ class D4DressDataset(Dataset):
             transforms.CenterCrop((940, 940)),
             transforms.Resize((self.img_size, self.img_size), interpolation=Image.NEAREST),
             transforms.ToTensor(),
-            # make_normalize_transform()
+            # no normalise since done in cch_aggregator
         ])
-        self.normalise = make_normalize_transform()
-
-        self.sapiens_transform = sapiens_transform
+        self.sapiens_transform = transforms.Compose([
+            transforms.CenterCrop((940, 940)),
+            transforms.Resize((1024, 1024)),
+            transforms.ToTensor(),
+            transforms.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD),
+        ])
 
         
 
@@ -275,7 +278,7 @@ class D4DressDataset(Dataset):
             img_transformed = self.transform(img_pil)
             mask_transformed = self.mask_transform(mask_pil).squeeze()
 
-            sapiens_image = sapiens_transform(masked_img_pil)
+            sapiens_image = self.sapiens_transform(masked_img_pil)
 
             ret['sapiens_images'].append(sapiens_image)
             ret['imgs'].append(img_transformed)

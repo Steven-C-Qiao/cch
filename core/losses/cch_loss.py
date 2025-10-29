@@ -252,7 +252,7 @@ class MaskedUncertaintyChamferLoss(nn.Module):
             conf = torch.cat(conf_list, dim=0)
             log_conf = torch.cat(log_conf_list, dim=0)
             loss_pred2gt = loss_pred2gt * conf - self.alpha * log_conf
-            loss_gt2pred *= 5000.
+            # loss_gt2pred *= 100.
 
         loss_pred2gt = filter_by_quantile(loss_pred2gt, 0.98)
 
@@ -299,7 +299,7 @@ class ASAPLoss(nn.Module):
         return x, torch.log(x)
 
     def forward(self, x, y, mask=None, uncertainty=None):
-        threshold = 0.02
+        threshold = 0.03
 
         norm = torch.norm(x - y, dim=-1)
         norm_mask = norm > threshold
@@ -321,30 +321,30 @@ class ASAPLoss(nn.Module):
 
 
 
-class MaskedUncertaintyExpL2Loss(nn.Module):
-    def __init__(self, alpha=1.0):
-        """
-        Loss for finetuning Vc_pm, penalise only the large deviations from SMPL 
-        """
-        super().__init__()
-        self.alpha = alpha
+# class MaskedUncertaintyExpL2Loss(nn.Module):
+#     def __init__(self, alpha=1.0):
+#         """
+#         Loss for finetuning Vc_pm, penalise only the large deviations from SMPL 
+#         """
+#         super().__init__()
+#         self.alpha = alpha
 
-    def get_conf_log(self, x):
-        return x, torch.log(x)
+#     def get_conf_log(self, x):
+#         return x, torch.log(x)
 
-    def forward(self, x, y, mask=None, uncertainty=None):
-        offset = 3
+#     def forward(self, x, y, mask=None, uncertainty=None):
+#         offset = 3
 
-        loss = torch.exp(torch.norm(x - y, dim=-1) - offset) - np.exp( - offset)
+#         loss = torch.exp(torch.norm(x - y, dim=-1) - offset) - np.exp( - offset)
 
-        if uncertainty is not None:
-            conf, log_conf = self.get_conf_log(uncertainty)
-            loss = loss * conf - self.alpha * log_conf
+#         if uncertainty is not None:
+#             conf, log_conf = self.get_conf_log(uncertainty)
+#             loss = loss * conf - self.alpha * log_conf
 
-        if mask is not None:
-            loss = loss * mask
+#         if mask is not None:
+#             loss = loss * mask
 
-        return loss.sum() / mask.sum()
+#         return loss.sum() / mask.sum()
     
 
 # class CanonicalRGBConfLoss(nn.Module):

@@ -103,13 +103,8 @@ class FullDataModule(pl.LightningDataModule):
             pin_memory=self.cfg.TRAIN.PIN_MEMORY,
             collate_fn=custom_collate_fn,
         )
-        # combined_loader = CombinedLoader(
-        #     {"thuman": thuman_loader, "d4dress": d4dress_loader},
-        #     mode="max_size_cycle"
-        # )
-        # return combined_loader
 
-        return [thuman_loader, thuman_loader]
+        return [thuman_loader, d4dress_loader]
 
     def val_dataloader(self):
         # thuman_val_loader = DataLoader(

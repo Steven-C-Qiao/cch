@@ -243,6 +243,42 @@ class AdHocDataset(D4DressDataset):
 
 
 
+def _no_annotations(fig):
+    for ax in fig.axes:
+        ax.grid(False)
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+        ax.xaxis.pane.set_edgecolor('none')
+        ax.yaxis.pane.set_edgecolor('none') 
+        ax.zaxis.pane.set_edgecolor('none')
+        ax.xaxis.line.set_color('none')
+        ax.yaxis.line.set_color('none')
+        ax.zaxis.line.set_color('none')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_zticks([])
+
+
+def _set_scatter_limits(ax, x, elev=10, azim=90):
+    max_range = np.array([
+        x[:, 0].max() - x[:, 0].min(),
+        x[:, 1].max() - x[:, 1].min(),
+        x[:, 2].max() - x[:, 2].min()
+    ]).max() / 2.0 + 0.05
+    mid_x = (x[:, 0].max() + x[:, 0].min()) * 0.5
+    mid_y = (x[:, 1].max() + x[:, 1].min()) * 0.5
+    mid_z = (x[:, 2].max() + x[:, 2].min()) * 0.5
+
+    ax.set_xlim(mid_x - max_range, mid_x + max_range)
+    ax.set_ylim(mid_y - max_range, mid_y + max_range)
+    ax.set_zlim(mid_z - max_range, mid_z + max_range)
+    ax.view_init(elev=elev, azim=azim, vertical_axis='y')
+    ax.set_box_aspect([1, 1, 1])
+    ax.xaxis.set_major_locator(plt.MaxNLocator(5))
+    ax.yaxis.set_major_locator(plt.MaxNLocator(5)) 
+    ax.zaxis.set_major_locator(plt.MaxNLocator(3))
+
 
 class Solver:
     def __init__(self, id, take, frames, cameras, novel_pose_path, load_path):
@@ -285,6 +321,8 @@ class Solver:
             preds[k] = v
     
         novel_poses = self.get_novel_poses(novel_pose_path)
+
+
         
         vp_list = []
         
@@ -434,70 +472,57 @@ class Solver:
 
 
         x = batch['smpl_T_joints'].reshape(-1, 3)
-        def _set_scatter_limits(ax, x, elev=10, azim=90):
-            max_range = np.array([
-                x[:, 0].max() - x[:, 0].min(),
-                x[:, 1].max() - x[:, 1].min(),
-                x[:, 2].max() - x[:, 2].min()
-            ]).max() / 2.0 + 0.05
-            mid_x = (x[:, 0].max() + x[:, 0].min()) * 0.5
-            mid_y = (x[:, 1].max() + x[:, 1].min()) * 0.5
-            mid_z = (x[:, 2].max() + x[:, 2].min()) * 0.5
 
-            ax.set_xlim(mid_x - max_range, mid_x + max_range)
-            ax.set_ylim(mid_y - max_range, mid_y + max_range)
-            ax.set_zlim(mid_z - max_range, mid_z + max_range)
-            ax.view_init(elev=elev, azim=azim, vertical_axis='y')
-            ax.set_box_aspect([1, 1, 1])
-            ax.xaxis.set_major_locator(plt.MaxNLocator(5))
-            ax.yaxis.set_major_locator(plt.MaxNLocator(5)) 
-            ax.zaxis.set_major_locator(plt.MaxNLocator(3))
+        self.x = x
+
+        self.gen_gt_animation(gt_scan_path)
+
 
             
 
 
 
-        # # Save individual subplots for gif
-        # frames = []
-        # temp_fig = plt.figure(figsize=(subfig_size*4, subfig_size))
+        # Save individual subplots for gif
+        frames = []
+        temp_fig = plt.figure(figsize=(subfig_size*4, subfig_size))
         azims = [0, 90, 180, 270]
         
-        # for i in range(num_total_plots):
-        #     verts = predictions['vp_list'][i]['vp'][0, -1, ...].cpu().detach().numpy()
-        #     verts = verts[scatter_mask]
+        for i in range(num_total_plots):
+            verts = predictions['vp_list'][i]['vp'][0, -1, ...].cpu().detach().numpy()
+            verts = verts[scatter_mask]
             
-        #     for j, azim in enumerate(azims):
-        #         ax = temp_fig.add_subplot(1, 4, j+1, projection='3d')
-        #         ax.scatter(
-        #             verts[:, 0], 
-        #             verts[:, 1], 
-        #             verts[:, 2], c=color, s=s, alpha=gt_alpha
-        #         )
-        #         # ax.set_title(f'pred $V^{{{i+1}}}$')
-        #         _set_scatter_limits(ax, x, elev=10, azim=azim)
-        #     _no_annotations(temp_fig)
-        #     plt.tight_layout(pad=0.)
+            for j, azim in enumerate(azims):
+                ax = temp_fig.add_subplot(1, 4, j+1, projection='3d')
+                ax.scatter(
+                    verts[:, 0], 
+                    verts[:, 1], 
+                    verts[:, 2], c=color, s=s, alpha=gt_alpha
+                )
+                # ax.set_title(f'pred $V^{{{i+1}}}$')
+                _set_scatter_limits(ax, x, elev=10, azim=azim)
+            _no_annotations(temp_fig)
+            plt.tight_layout(pad=0.)
             
-        #     # Save frame to memory
-        #     temp_fig.canvas.draw()
-        #     frame = np.frombuffer(temp_fig.canvas.tostring_rgb(), dtype=np.uint8)
-        #     frame = frame.reshape(temp_fig.canvas.get_width_height()[::-1] + (3,))
-        #     frames.append(Image.fromarray(frame))
+            # Save frame to memory
+            temp_fig.canvas.draw()
+            frame = np.frombuffer(temp_fig.canvas.tostring_rgb(), dtype=np.uint8)
+            frame = frame.reshape(temp_fig.canvas.get_width_height()[::-1] + (3,))
+            frames.append(Image.fromarray(frame))
             
-        #     # Clear figure for next frame
-        #     plt.clf()
+            # Clear figure for next frame
+            plt.clf()
         
-        # plt.close(temp_fig)
+        plt.close(temp_fig)
         
-        # # Save as gif
-        # frames[0].save(
-        #     f'{self.id}_{self.take}_animation.gif',
-        #     save_all=True,
-        #     append_images=frames[1:],
-        #     duration=100, # 500ms per frame
-        #     loop=0,
-        #     dpi=(200, 200) # Higher DPI for better quality
-        # )
+        # Save as gif
+        frames[0].save(
+            f'{self.id}_{self.take}_animation.gif',
+            save_all=True,
+            append_images=frames[1:],
+            duration=100, # 500ms per frame
+            loop=0,
+            dpi=(200, 200) # Higher DPI for better quality
+        )
 
         # Create GIF for vp_init if available
         vp_init_frames = []
@@ -561,24 +586,57 @@ class Solver:
         # plt.close()
 
 
-def _no_annotations(fig):
-    for ax in fig.axes:
-        ax.grid(False)
-        ax.xaxis.pane.fill = False
-        ax.yaxis.pane.fill = False
-        ax.zaxis.pane.fill = False
-        ax.xaxis.pane.set_edgecolor('none')
-        ax.yaxis.pane.set_edgecolor('none') 
-        ax.zaxis.pane.set_edgecolor('none')
-        ax.xaxis.line.set_color('none')
-        ax.yaxis.line.set_color('none')
-        ax.zaxis.line.set_color('none')
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_zticks([])
+    def gen_gt_animation(self, path):
 
+        subfig_size = 8
+        s = 0.05 # scatter point size
+        gt_alpha = 0.5
+        gt_frames = []
+        azims = [0, 90, 180, 270]
+        gt_fig = plt.figure(figsize=(4*4, 4))
 
+        mesh_fnames = sorted(f for f in os.listdir(path) if (f.endswith('.pkl') and f.startswith('mesh-f')))
+        x = None
+        for mesh_fname in mesh_fnames[::self.stride]:
+            mesh = load_pickle(os.path.join(path, mesh_fname))
 
+            gt_verts = mesh['vertices']
+
+            if x is None:
+                x = gt_verts
+            gt_color = mesh['colors']
+
+            for j, azim in enumerate(azims):
+                ax = gt_fig.add_subplot(1, 4, j+1, projection='3d')
+                ax.scatter(
+                    gt_verts[:, 0], 
+                    gt_verts[:, 1], 
+                    gt_verts[:, 2], s=s, alpha=gt_alpha#, c=gt_color
+                )
+                _set_scatter_limits(ax, x, elev=10, azim=azim)
+            _no_annotations(gt_fig)
+            plt.tight_layout(pad=0.)
+
+            # Save frame to memory
+            gt_fig.canvas.draw()
+            frame = np.frombuffer(gt_fig.canvas.tostring_rgb(), dtype=np.uint8)
+            frame = frame.reshape(gt_fig.canvas.get_width_height()[::-1] + (3,))
+            gt_frames.append(Image.fromarray(frame))
+            
+            # Clear figure for next frame
+            plt.clf()
+
+        plt.close(gt_fig)
+
+        gt_frames[0].save(
+            f'{self.id}_{self.take}_gt_animation.gif',
+            save_all=True,
+            append_images=gt_frames[1:],
+            duration=100, # 500ms per frame
+            loop=0,
+            dpi=(200, 200) # Higher DPI for better quality
+        )
+        return gt_frames
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -612,33 +670,39 @@ if __name__ == '__main__':
 
     assert (args.load_from_ckpt is not None), 'Specify load_from_ckpt'
 
+
+    id = '00147'
+    take = 'Take6'
+    frames = ['00021', '00021', '00021', '00021', '00021']
+    cameras = ['0004', '0028', '0052', '0076', '0076']
+
+
+
+    # id = '00188'
+    # take = 'Take1'
+    # frames = ['00021', '00021', '00021', '00021', '00021']
+    # cameras = ['0004', '0028', '0052', '0076', '0076']
+
+
     # id = '00134'
     # take = 'Take3'
     # frames = ['00006', '00006', '00006', '00006', '00006']
     # cameras = ['0004', '0028', '0052', '0076', '0076']
-    # novel_pose_path = f'/scratches/kyuban/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
-
-
-    # id = '00147'
-    # take = 'Take6'
-    # frames = ['00021', '00021', '00021', '00021', '00021']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
-    # novel_pose_path = f'/scratch/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
 
 
     # id = '00148'
     # take = 'Take1'
     # frames = ['00021', '00021', '00021', '00021', '00021']
     # cameras = ['0004', '0028', '0052', '0076', '0076']
-    # novel_pose_path = f'/scratches/kyuban/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
 
-
-    id = '00188'
+    id = '00187'
     take = 'Take1'
-    frames = ['00021', '00021', '00021', '00021', '00021']
+    frames = ['00011', '00011', '00011', '00011', '00011']
     cameras = ['0004', '0028', '0052', '0076', '0076']
-    novel_pose_path = f'/scratches/kyuban/cq244/datasets/4DDress/{id}/Inner/{take}/SMPLX'
 
+
+    novel_pose_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/{id}/Inner/{take}/SMPLX'
+    gt_scan_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/{id}/Inner/{take}/Meshes_pkl'
 
 
     solver = Solver(id, take, frames, cameras, novel_pose_path, args.load_from_ckpt)

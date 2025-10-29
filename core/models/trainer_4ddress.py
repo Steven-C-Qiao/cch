@@ -123,6 +123,8 @@ class CCHTrainer(pl.LightningModule):
         elif batch['dataset'][0] == 'THuman':
             batch = self.process_thuman(batch)
 
+
+
         preds = self(batch)
 
         loss, loss_dict = self.criterion(preds, batch, dataset_name=batch['dataset'][0])
@@ -359,6 +361,13 @@ class CCHTrainer(pl.LightningModule):
                 verts[k] for verts in template_full_mesh_verts_expanded_list 
                 for k in range(K) 
             ]
+
+            if self.cfg.DATA.NORMALISE:
+                normalise_to_height = 1.7 
+                smpl_T_height = (smpl_T_vertices[..., 1].max(dim=-1).values - smpl_T_vertices[..., 1].min(dim=-1).values).flatten() # b * k
+                template_full_mesh_verts_expanded_list = [
+                    verts * (normalise_to_height / smpl_T_height[i]) for i, verts in enumerate(template_full_mesh_verts_expanded_list)
+                ]
 
 
             template_full_posed_pytorch3d_mesh = Meshes(
