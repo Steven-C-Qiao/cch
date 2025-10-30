@@ -2,11 +2,11 @@ import os
 import torch
 import numpy as np
 import torchvision.transforms as transforms
+from torchvision.transforms import InterpolationMode
 from scipy.sparse import load_npz
 
 from PIL import Image
 from collections import defaultdict
-from typing import Sequence
 from torch.utils.data import Dataset
 
 from pytorch3d.transforms import axis_angle_to_matrix, matrix_to_euler_angles, euler_angles_to_matrix, matrix_to_axis_angle
@@ -16,6 +16,8 @@ from core.data.thuman_metadata import THuman_metadata
 from core.data.d4dress_utils import load_pickle
 from core.utils.camera_utils import uv_to_pixel_space, custom_opengl2pytorch3d
 
+IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 
 def load_w_maps_sparse(w_maps_fname):
     """
@@ -37,31 +39,6 @@ def load_w_maps_sparse(w_maps_fname):
     w_map = dense_data.reshape(512, 512, 55)
     
     return w_map
-
-
-
-# Use timm's names
-IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
-IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
-
-# def make_normalize_transform(
-#     mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
-#     std: Sequence[float] = IMAGENET_DEFAULT_STD,
-# ) -> transforms.Normalize:
-#     return transforms.Normalize(mean=mean, std=std)
-
-
-# def sapiens_transform(
-#     image: torch.tensor
-# ) -> torch.tensor:
-#     transform = transforms.Compose([
-#         transforms.Resize((1024, 1024)),
-#         transforms.ToTensor(),
-#         make_normalize_transform()
-#     ])
-#     image = transform(image)
-
-#     return image
 
 
 class THumanDataset(Dataset):
@@ -88,38 +65,32 @@ class THumanDataset(Dataset):
         self.body_model = cfg.MODEL.BODY_MODEL
         self.num_joints = 24 if self.body_model == 'smpl' else 55
         
-
-        self.crop_transform = transforms.Compose(
+        # PIL to tensor
+        self.transform = transforms.Compose(
             [
                 transforms.Resize(self.img_size),
                 transforms.ToTensor(),
-                # no normalise since done in cch_aggregator
+                # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            ]
+        )
+
+        self.crop_transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Resize(self.img_size),
             ]
         )
         self.mask_transform = transforms.Compose(
             [
-                transforms.Resize(self.img_size, interpolation=Image.NEAREST),
                 transforms.ToTensor(),
+                transforms.Resize(self.img_size, interpolation=InterpolationMode.NEAREST),
             ]
         )
         self.sapiens_transform  = transforms.Compose(
             [
+                transforms.ToTensor(),
                 transforms.Resize(1024),
-                transforms.ToTensor(),
                 transforms.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD),
-            ]
-        )
-
-        self.vc_map_transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Resize(self.img_size),
-            ]
-        )
-        self.vc_mask_transform = transforms.Compose(
-            [
-                transforms.ToTensor(),
-                transforms.Resize(self.img_size, interpolation=Image.NEAREST),
             ]
         )
 
@@ -159,27 +130,22 @@ class THumanDataset(Dataset):
             img_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, 'render', f'{sampled_cameras[i]}.png')
             rgba = Image.open(img_fname).convert('RGBA')
             
-            # Previous implementation:
-            # mask = np.array(rgba.split()[-1])
-            # New: Extract mask from alpha channel and binarize (>127)
-            alpha = np.array(rgba.split()[-1])
-            mask = (alpha > 127).astype(np.uint8) * 255
+            # Extract mask from alpha channel
+            mask = rgba.split()[-1]
+            img = rgba.convert('RGB')
 
-            # ret['raw_masks'].append(mask)
-            img = np.array(rgba.convert('RGB'))
+            sapiens_img_transformed = self.sapiens_transform(img)
+            img_transformed = self.transform(img)
+            mask_transformed = self.mask_transform(mask).squeeze(-3)
 
-            img_pil = Image.fromarray(img)
-            mask_pil = Image.fromarray(mask)
-
-            sapiens_img_transformed = self.sapiens_transform(img_pil)
-            img_transformed = self.crop_transform(img_pil)
-            mask_transformed = self.mask_transform(mask_pil).squeeze(-3)
-
+            
+            # img_transformed = img_transformed * mask_transformed
             
             ret['imgs'].append(img_transformed)
             ret['masks'].append(mask_transformed)
             ret['sapiens_images'].append(sapiens_img_transformed)
 
+            
 
             smplx_fname = os.path.join(THUMAN_PATH, 'smplx', scan_id, f'smplx_param.pkl')
             smplx_param = np.load(smplx_fname, allow_pickle=True)
@@ -227,20 +193,18 @@ class THumanDataset(Dataset):
             camera_idx = int(sampled_cameras[i]) // 10
             # Index into vc_map using camera index
             vc_map = vc_map[camera_idx]  # (512, 512, 3)
-            # Create binary mask where none of the elements are 1 across axis=-1
-            vc_mask = (vc_map != 1).all(axis=-1).astype(np.float32)
+            # Create binary mask where pixels are non-zero (not background)
+            vc_mask = (vc_map != 0).any(axis=-1).astype(np.float32)
+            
 
-            vc_map = self.vc_map_transform(vc_map)
-            assert vc_map.shape == (3, self.img_size, self.img_size)
-            vc_mask = self.vc_mask_transform(vc_mask).squeeze()
+            vc_map = self.crop_transform(vc_map)
+            # assert vc_map.shape == (3, self.img_size, self.img_size)
+            vc_mask = self.mask_transform(vc_mask).squeeze()
 
-            # w_maps_dir_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, f'{scan_id}_w_maps_sparse', f'{sampled_cameras[i]}.pt') #.npz')
-            # w_map = torch.load(w_maps_dir_fname, map_location='cpu')
-            # w_map = w_map.to_dense() 
             w_maps_dir_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, f'{scan_id}_w_maps_sparse', f'{sampled_cameras[i]}.npz')
             w_map = load_w_maps_sparse(w_maps_dir_fname)  # Shape: (512, 512, 55)
-            assert w_map.shape == (512, 512, 55)
-            w_map = self.vc_map_transform(w_map)
+            # assert w_map.shape == (512, 512, 55)
+            w_map = self.crop_transform(w_map)
             ret['vc_smpl_maps'].append(vc_map)
             ret['smpl_mask'].append(vc_mask)
             ret['smpl_w_maps'].append(w_map)

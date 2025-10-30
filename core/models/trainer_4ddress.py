@@ -130,6 +130,7 @@ class CCHTrainer(pl.LightningModule):
             batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
         elif batch['dataset'][0] == 'THuman':
             batch = self.process_thuman(batch)
+            # import ipdb; ipdb.set_trace()
 
         preds = self(batch)
 

@@ -54,7 +54,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            vc_loss = check_and_fix_inf_nan(vc_loss, 'vc_loss', ids=batch['scan_ids'])
+            # vc_loss = check_and_fix_inf_nan(vc_loss, 'vc_loss', ids=batch['scan_ids'])
             vc_loss *= self.cfg.LOSS.VC_CHAMFER_LOSS_WEIGHT
             loss_dict['vc_chamfer_loss'] = vc_loss
             total_loss = total_loss + vc_loss
@@ -82,7 +82,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            vc_pm_loss = check_and_fix_inf_nan(vc_pm_loss, 'vc_pm_loss')
+            # vc_pm_loss = check_and_fix_inf_nan(vc_pm_loss, 'vc_pm_loss')
 
             vc_pm_loss *= self.cfg.LOSS.VC_PM_LOSS_WEIGHT
             loss_dict['vc_pm_loss'] = vc_pm_loss
@@ -90,8 +90,8 @@ class CCHLoss(pl.LightningModule):
 
         if "vc_init" in predictions and "vc_smpl_maps" in batch:
             assert dataset_name == 'THuman'
-            # loss_fn = self.vc_pm_asap_loss
-            loss_fn = self.vc_pm_l2_loss
+            loss_fn = self.vc_pm_asap_loss
+            # loss_fn = self.vc_pm_l2_loss
             
             pred_vc = predictions['vc_init']
             gt_vc_smpl_pm = batch['vc_smpl_maps'][:, :N]
@@ -109,7 +109,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            vc_pm_loss = check_and_fix_inf_nan(vc_pm_loss, 'vc_pm_loss')
+            # vc_pm_loss = check_and_fix_inf_nan(vc_pm_loss, 'vc_pm_loss')
 
             vc_pm_loss *= self.cfg.LOSS.VC_PM_LOSS_WEIGHT
             loss_dict['vc_pm_loss'] = vc_pm_loss
@@ -128,7 +128,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            w_loss = check_and_fix_inf_nan(w_loss, 'w_loss')
+            # w_loss = check_and_fix_inf_nan(w_loss, 'w_loss')
 
             w_loss *= self.cfg.LOSS.W_REGULARISER_WEIGHT
             loss_dict['w_loss'] = w_loss
@@ -136,7 +136,7 @@ class CCHLoss(pl.LightningModule):
 
         if "vp_init" in predictions and "vp" in batch:
             gt_vp = batch['vp']
-            gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp', ids=batch['scan_ids'])
+            # gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp', ids=batch['scan_ids'])
             # print(gt_vp.shape)
 
             pred_vp = predictions['vp_init']
@@ -156,14 +156,14 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             ) 
-            vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_init_chamfer_loss', ids=batch['scan_ids'])
+            # vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_init_chamfer_loss', ids=batch['scan_ids'])
             vp_loss *= self.cfg.LOSS.VP_INIT_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_init_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
 
         if "vp" in predictions and "vp" in batch:
             gt_vp = batch['vp']
-            gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp')
+            # gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp')
 
             pred_vp = predictions['vp']
             mask = batch['masks']
@@ -188,7 +188,7 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 # confidence
             ) 
-            vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_chamfer_loss', ids=batch['scan_ids'])
+            # vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_chamfer_loss', ids=batch['scan_ids'])
             vp_loss *= self.cfg.LOSS.VP_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
@@ -262,11 +262,11 @@ class MaskedUncertaintyChamferLoss(nn.Module):
 
         loss_pred2gt = filter_by_quantile(loss_pred2gt, 0.98)
 
-        loss_pred2gt = check_and_fix_inf_nan(loss_pred2gt, 'loss_pred2gt')
-        loss_gt2pred = check_and_fix_inf_nan(loss_gt2pred, 'loss_gt2pred')
+        # loss_pred2gt = check_and_fix_inf_nan(loss_pred2gt, 'loss_pred2gt')
+        # loss_gt2pred = check_and_fix_inf_nan(loss_gt2pred, 'loss_gt2pred')
 
         final_loss = loss_pred2gt.mean() + loss_gt2pred.mean()
-        final_loss = check_and_fix_inf_nan(final_loss, 'final_loss')
+        # final_loss = check_and_fix_inf_nan(final_loss, 'final_loss')
         return final_loss 
     
 
@@ -293,15 +293,15 @@ class MaskedUncertaintyL2Loss(nn.Module):
         if mask is not None:
             loss = loss * mask
 
-        loss = check_and_fix_inf_nan(loss, 'l2_loss')
+        # loss = check_and_fix_inf_nan(loss, 'l2_loss')
 
         if mask.sum() == 0:
             print("Mask is all zeros, returning 0 loss")
             return torch.tensor(0.0, device=loss.device, dtype=torch.float32)
 
-        final_loss = loss.sum() / mask.sum()
+        final_loss = loss.sum() / (mask.sum() + 1e-3)
 
-        final_loss = check_and_fix_inf_nan(final_loss, 'final_loss')
+        # final_loss = check_and_fix_inf_nan(final_loss, 'final_loss')
 
         return final_loss
     
@@ -336,12 +336,12 @@ class ASAPLoss(nn.Module):
 
         loss = loss * full_mask
 
-        loss = check_and_fix_inf_nan(loss, 'asap_loss')
+        # loss = check_and_fix_inf_nan(loss, 'asap_loss')
         if full_mask.sum() == 0:
             print("Full mask is all zeros, returning 0 loss")
             return torch.tensor(0.0, device=loss.device, dtype=torch.float32)
 
-        return loss.sum() / full_mask.sum()
+        return loss.sum() / (full_mask.sum() + 1e-3)
 
 
 

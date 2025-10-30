@@ -171,7 +171,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
         precision=cfg.SPEEDUP.MIXED_PRECISION,
-        gradient_clip_val=1.0,
+        # gradient_clip_val=1.0,
         # log_every_n_steps=10,
         # enable_progress_bar=False,
         num_sanity_val_steps=num_sanity_val_steps,
@@ -255,7 +255,7 @@ if __name__ == '__main__':
 
     if args.plot:
         os.environ["CUDA_VISIBLE_DEVICES"] = '0'    
-    # os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+    # os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
     # device_ids = list(map(int, args.gpus.split(",")))
     # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")
