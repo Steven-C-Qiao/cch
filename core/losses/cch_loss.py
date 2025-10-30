@@ -21,7 +21,7 @@ class CCHLoss(pl.LightningModule):
         self.canonical_chamfer_loss = MaskedUncertaintyChamferLoss()
 
         self.vc_pm_l2_loss = MaskedUncertaintyL2Loss()
-        self.vc_pm_asap_loss = ASAPLoss()
+        # self.vc_pm_asap_loss = ASAPLoss()
 
         self.skinning_weight_loss = MaskedUncertaintyL2Loss()
         self.dvc_loss = MaskedUncertaintyL2Loss()
@@ -90,7 +90,8 @@ class CCHLoss(pl.LightningModule):
 
         if "vc_init" in predictions and "vc_smpl_maps" in batch:
             assert dataset_name == 'THuman'
-            loss_fn = self.vc_pm_asap_loss
+            # loss_fn = self.vc_pm_asap_loss
+            loss_fn = self.vc_pm_l2_loss
             
             pred_vc = predictions['vc_init']
             gt_vc_smpl_pm = batch['vc_smpl_maps'][:, :N]
@@ -223,6 +224,11 @@ class MaskedUncertaintyChamferLoss(nn.Module):
         assert x_pred.shape[:2] == mask.shape[:2]
 
         mask = mask.squeeze(-1).bool()  # (B, V2)
+        # If any batch element has zero valid points after masking, return zero loss to avoid NaNs
+        # from empty reductions in downstream operations.
+        if (mask.sum(dim=1) == 0).any():
+            print("Zero valid points after masking, returning 0 loss")
+            return torch.tensor(0.0, device=x_pred.device, dtype=x_pred.dtype)
         
         x_pred_list = [x_pred[b][mask[b]] for b in range(x_pred.shape[0])]
         conf_list = [confidence[b][mask[b]] for b in range(x_pred.shape[0])] if confidence is not None else None
@@ -252,13 +258,16 @@ class MaskedUncertaintyChamferLoss(nn.Module):
             conf = torch.cat(conf_list, dim=0)
             log_conf = torch.cat(log_conf_list, dim=0)
             loss_pred2gt = loss_pred2gt * conf - self.alpha * log_conf
-            # loss_gt2pred *= 100.
+            loss_gt2pred *= 5000.
 
         loss_pred2gt = filter_by_quantile(loss_pred2gt, 0.98)
 
-        # print(loss_pred2gt.mean(), loss_gt2pred.mean())
+        loss_pred2gt = check_and_fix_inf_nan(loss_pred2gt, 'loss_pred2gt')
+        loss_gt2pred = check_and_fix_inf_nan(loss_gt2pred, 'loss_gt2pred')
 
-        return loss_pred2gt.mean() + loss_gt2pred.mean() 
+        final_loss = loss_pred2gt.mean() + loss_gt2pred.mean()
+        final_loss = check_and_fix_inf_nan(final_loss, 'final_loss')
+        return final_loss 
     
 
 
@@ -284,7 +293,17 @@ class MaskedUncertaintyL2Loss(nn.Module):
         if mask is not None:
             loss = loss * mask
 
-        return loss.sum() / mask.sum()
+        loss = check_and_fix_inf_nan(loss, 'l2_loss')
+
+        if mask.sum() == 0:
+            print("Mask is all zeros, returning 0 loss")
+            return torch.tensor(0.0, device=loss.device, dtype=torch.float32)
+
+        final_loss = loss.sum() / mask.sum()
+
+        final_loss = check_and_fix_inf_nan(final_loss, 'final_loss')
+
+        return final_loss
     
 
 class ASAPLoss(nn.Module):
@@ -316,7 +335,12 @@ class ASAPLoss(nn.Module):
             full_mask = norm_mask
 
         loss = loss * full_mask
-        
+
+        loss = check_and_fix_inf_nan(loss, 'asap_loss')
+        if full_mask.sum() == 0:
+            print("Full mask is all zeros, returning 0 loss")
+            return torch.tensor(0.0, device=loss.device, dtype=torch.float32)
+
         return loss.sum() / full_mask.sum()
 
 

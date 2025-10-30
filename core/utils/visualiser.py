@@ -159,7 +159,7 @@ class Visualiser(pl.LightningModule):
             if 'vc_maps' in batch:
                 num_rows += 1
                 vc_init_err = np.linalg.norm(predictions['vc_init'] - batch['vc_maps'][:, :N], axis=-1) * batch['smpl_mask'][:, :N]
-                vc_init_err[vc_init_err >= 0.2] = 0.0
+                # vc_init_err[vc_init_err >= 0.2] = 0.0
 
 
             vc_init[~mask_N.astype(bool)] = 0
