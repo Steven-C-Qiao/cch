@@ -40,6 +40,7 @@ class CCHTrainer(pl.LightningModule):
         self.save_scenepic = True 
         self.dev = dev
         self.cfg = cfg
+        self.num_samples = cfg.DATA.NUM_SAMPLES
         self.B = cfg.TRAIN.BATCH_SIZE
         self.use_sapiens = cfg.MODEL.USE_SAPIENS
         self.normalise = cfg.DATA.NORMALISE
@@ -53,8 +54,8 @@ class CCHTrainer(pl.LightningModule):
         self.freeze_canonical_epochs = getattr(cfg.TRAIN, 'WARMUP_EPOCHS', 0)
 
 
-        self.feature_renderer = FeatureRenderer(image_size=(256, 192))#(512, 384))#image_size=(256, 192)) 
-        self.thuman_renderer = FeatureRenderer(image_size=(256, 256))
+        self.feature_renderer = FeatureRenderer(image_size=(512, 384))#(512, 384))#image_size=(256, 192)) 
+        # self.thuman_renderer = FeatureRenderer(image_size=(256, 256))
 
         self.smpl_male = smplx.create(
             model_type=self.body_model,
@@ -108,15 +109,15 @@ class CCHTrainer(pl.LightningModule):
     def on_train_epoch_start(self):
         self.visualiser.set_global_rank(self.global_rank)
         
-        # Alternate between canonical and PBS training based on epoch
-        current_epoch = self.current_epoch
-        if current_epoch % 2 == 1:  # Odd epochs: train canonical only
-            self._set_train_vc()
-        else:  # Odd epochs: train PBS only
-            self._set_train_vp()
+        # # Alternate between canonical and PBS training based on epoch
+        # current_epoch = self.current_epoch
+        # if current_epoch % 2 == 1:  # Odd epochs: train canonical only
+        #     self._set_train_vc()
+        # else:  # Odd epochs: train PBS only
+        #     self._set_train_vp()
         
-        # Update optimizer parameters after changing requires_grad status
-        self._update_optimizer_parameters()
+        # # Update optimizer parameters after changing requires_grad status
+        # self._update_optimizer_parameters()
 
 
     def training_step(self, batch, batch_idx, split='train'):
@@ -138,18 +139,18 @@ class CCHTrainer(pl.LightningModule):
 
         metrics = self.metrics(preds, batch)
 
-        self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, self.global_step)
+        self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, batch_idx)
 
-        # for k, v in loss_dict.items():
-        #     print(f"{k}: {v.item():.2f}", end='; ')
-        # print('')
+        for k, v in loss_dict.items():
+            print(f"{k}: {v.item():.2f}", end='; ')
+        print('')
         # import ipdb; ipdb.set_trace()
         
         return loss 
 
 
 
-    def _log_metrics_and_visualise(self, loss, loss_dict, metrics, split, preds, batch, global_step):
+    def _log_metrics_and_visualise(self, loss, loss_dict, metrics, split, preds, batch, batch_idx=None):
         if split == 'train' or split == 'test':
             on_step = True
         else:
@@ -173,16 +174,25 @@ class CCHTrainer(pl.LightningModule):
         self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
         self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
 
-        # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
-        #     self.visualiser.visualise(preds, batch) 
+        # if self.dev or self.plot:
+        #     self.visualiser.visualise(preds, batch)
+        #     if self.dev:
+        #         for k, v in loss_dict.items():
+        #             print(f"{k}: {v.item():.2f}", end='; ')
+        #         print('')
+        #         # import ipdb; ipdb.set_trace()
 
-        if self.dev or self.plot:
-            self.visualiser.visualise(preds, batch)
-            if self.dev:
-                for k, v in loss_dict.items():
-                    print(f"{k}: {v.item():.2f}", end='; ')
-                print('')
-                # import ipdb; ipdb.set_trace()
+        # else:
+        #     should_vis = False
+        #     global_step = self.global_step
+        #     if split in ('train', 'test'):
+        #         should_vis = ((global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1))
+        #     elif split == 'val':
+        #         # Visualise every N validation batches based on vis_frequency
+        #         should_vis = (batch_idx is not None and (batch_idx % self.vis_frequency == 0))
+
+        #     if should_vis:
+        #         self.visualiser.visualise(preds, batch, split=split) 
 
 
     def validation_step(self, batch, batch_idx):
@@ -190,7 +200,7 @@ class CCHTrainer(pl.LightningModule):
         preds = self(batch)
         loss, loss_dict = self.criterion(preds, batch, dataset_name='4DDress')
         metrics = self.metrics(preds, batch)
-        self._log_metrics_and_visualise(loss, loss_dict, metrics, 'val', preds, batch, self.global_step)
+        self._log_metrics_and_visualise(loss, loss_dict, metrics, 'val', preds, batch, batch_idx)
         # with torch.no_grad():
         #     loss = self.training_step(batch, batch_idx, split='val')
         return loss
@@ -445,7 +455,7 @@ class CCHTrainer(pl.LightningModule):
                 verts=scan_mesh_verts_centered,
                 faces=scan_mesh_faces,
             )
-            vp = sample_points_from_meshes(scan_mesh_centered, 24000)
+            vp = sample_points_from_meshes(scan_mesh_centered, self.num_samples)
             vp_ptcld = Pointclouds(points=vp)
             batch['vp_ptcld'] = vp_ptcld
             batch['vp'] = vp
@@ -457,7 +467,7 @@ class CCHTrainer(pl.LightningModule):
                 faces=template_mesh_faces
             )
 
-            batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, 24000)
+            batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, self.num_samples)
 
 
             # del pytorch3d_mesh, template_mesh_pytorch3d, scan_mesh_centered

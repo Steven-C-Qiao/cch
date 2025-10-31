@@ -23,6 +23,7 @@ class Visualiser(pl.LightningModule):
         self.rank = rank
         self.cfg = cfg
         self.threshold = cfg.LOSS.CONFIDENCE_THRESHOLD if cfg is not None else 100
+        self._suffix = ''
 
         # self.threshold = 50
 
@@ -34,7 +35,8 @@ class Visualiser(pl.LightningModule):
         self, 
         predictions,
         batch,
-        batch_idx=None
+        batch_idx=None,
+        split=None
     ):
         """
         Args:
@@ -60,6 +62,9 @@ class Visualiser(pl.LightningModule):
         if self.rank != 0:
             return None 
         
+        # set suffix for this visualisation pass
+        self._suffix = f"_{split}" if split else ''
+
         if batch_idx is not None:
             self.counter = batch_idx
         else:
@@ -125,7 +130,7 @@ class Visualiser(pl.LightningModule):
             
             # Save figure
             plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_images.png'))
+            plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_images{self._suffix}.png'))
             plt.close()
       
 
@@ -269,7 +274,7 @@ class Visualiser(pl.LightningModule):
 
 
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_pms.png'))
+        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_pms{self._suffix}.png'))
         plt.close()
 
 
@@ -358,7 +363,7 @@ class Visualiser(pl.LightningModule):
 
 
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_pbs_pms.png'))
+        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_pbs_pms{self._suffix}.png'))
         plt.close()
 
 
@@ -621,7 +626,7 @@ class Visualiser(pl.LightningModule):
 
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}.png'), dpi=200)
+        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}{self._suffix}.png'), dpi=200)
 
         plt.close()
 
@@ -773,7 +778,7 @@ class Visualiser(pl.LightningModule):
         # self._no_annotations(fig)
 
         plt.tight_layout(h_pad=4)
-        plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_vp_vc.png'), dpi=300)
+        plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_vp_vc{self._suffix}.png'), dpi=300)
 
         plt.close()
 

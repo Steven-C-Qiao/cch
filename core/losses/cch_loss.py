@@ -21,7 +21,7 @@ class CCHLoss(pl.LightningModule):
         self.canonical_chamfer_loss = MaskedUncertaintyChamferLoss()
 
         self.vc_pm_l2_loss = MaskedUncertaintyL2Loss()
-        # self.vc_pm_asap_loss = ASAPLoss()
+        self.vc_pm_asap_loss = ASAPLoss()
 
         self.skinning_weight_loss = MaskedUncertaintyL2Loss()
         self.dvc_loss = MaskedUncertaintyL2Loss()
@@ -63,7 +63,8 @@ class CCHLoss(pl.LightningModule):
         if "vc_init" in predictions and "vc_maps" in batch:
             
             assert dataset_name == '4DDress'
-            loss_fn = self.vc_pm_l2_loss
+            # loss_fn = self.vc_pm_l2_loss
+            loss_fn = self.vc_pm_asap_loss
 
                 
             pred_vc = predictions['vc_init']
@@ -299,7 +300,7 @@ class MaskedUncertaintyL2Loss(nn.Module):
             print("Mask is all zeros, returning 0 loss")
             return torch.tensor(0.0, device=loss.device, dtype=torch.float32)
 
-        final_loss = loss.sum() / (mask.sum() + 1e-3)
+        final_loss = loss.sum() / (mask.sum() + 1e-6)
 
         # final_loss = check_and_fix_inf_nan(final_loss, 'final_loss')
 
@@ -341,7 +342,7 @@ class ASAPLoss(nn.Module):
             print("Full mask is all zeros, returning 0 loss")
             return torch.tensor(0.0, device=loss.device, dtype=torch.float32)
 
-        return loss.sum() / (full_mask.sum() + 1e-3)
+        return loss.sum() / (full_mask.sum() + 1e-6)
 
 
 

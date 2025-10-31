@@ -80,6 +80,31 @@ class FullDataModule(pl.LightningDataModule):
         print(f"THuman train samples: {len(self.train_thuman)}")
         print(f"4DDress train samples: {len(self.train_d4dress)}")
         print(f"4DDress val samples: {len(self.val_d4dress)}")
+
+
+    # def train_dataloader(self):
+    #     thuman_loader = DataLoader(
+    #         self.val_d4dress,
+    #         batch_size=self.cfg.TRAIN.BATCH_SIZE,
+    #         shuffle=True,
+    #         drop_last=True,
+    #         num_workers=self.cfg.TRAIN.NUM_WORKERS,
+    #         pin_memory=self.cfg.TRAIN.PIN_MEMORY,
+    #         collate_fn=custom_collate_fn,
+    #     )
+
+    #     d4dress_loader = DataLoader(
+    #         self.val_d4dress,
+    #         batch_size=self.cfg.TRAIN.BATCH_SIZE,
+    #         shuffle=True,
+    #         drop_last=True,
+    #         num_workers=self.cfg.TRAIN.NUM_WORKERS,
+    #         pin_memory=self.cfg.TRAIN.PIN_MEMORY,
+    #         collate_fn=custom_collate_fn,
+    #     )
+
+    #     return [thuman_loader, d4dress_loader]
+
         
 
 
@@ -105,6 +130,8 @@ class FullDataModule(pl.LightningDataModule):
         )
 
         return [thuman_loader, d4dress_loader]
+
+
 
     def val_dataloader(self):
         # thuman_val_loader = DataLoader(

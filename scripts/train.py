@@ -162,12 +162,18 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     else:
         num_sanity_val_steps = 2    
 
+    if plot:
+        num_nodes = 1
+    else:
+        num_nodes = 4
+
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator=cfg.SPEEDUP.ACCELERATOR,
-        num_nodes=2,
+        num_nodes=num_nodes,
         devices="auto", 
-        strategy=DDPStrategy(find_unused_parameters=True),
+        # strategy=DDPStrategy(find_unused_parameters=True),
+        strategy='auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
         precision=cfg.SPEEDUP.MIXED_PRECISION,
