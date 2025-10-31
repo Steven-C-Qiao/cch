@@ -36,7 +36,8 @@ class Visualiser(pl.LightningModule):
         predictions,
         batch,
         batch_idx=None,
-        split=None
+        split=None,
+        epoch=None
     ):
         """
         Args:
@@ -63,7 +64,7 @@ class Visualiser(pl.LightningModule):
             return None 
         
         # set suffix for this visualisation pass
-        self._suffix = f"_{split}" if split else ''
+        self._suffix = f"_{epoch}_{split}" if epoch is not None and split else ''
 
         if batch_idx is not None:
             self.counter = batch_idx
@@ -164,7 +165,7 @@ class Visualiser(pl.LightningModule):
             if 'vc_maps' in batch:
                 num_rows += 1
                 vc_init_err = np.linalg.norm(predictions['vc_init'] - batch['vc_maps'][:, :N], axis=-1) * batch['smpl_mask'][:, :N]
-                # vc_init_err[vc_init_err >= 0.2] = 0.0
+                vc_init_err[vc_init_err >= 0.2] = 0.0
 
 
             vc_init[~mask_N.astype(bool)] = 0

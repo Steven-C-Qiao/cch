@@ -678,10 +678,10 @@ if __name__ == '__main__':
 
 
 
-    # id = '00187'
-    # take = 'Take1'
-    # frames = ['00011', '00011', '00011', '00011', '00011']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
+    id = '00187'
+    take = 'Take1'
+    frames = ['00011', '00011', '00011', '00011', '00011']
+    cameras = ['0004', '0028', '0052', '0076', '0076']
 
     # id = '00188'
     # take = 'Take1'
@@ -689,10 +689,10 @@ if __name__ == '__main__':
     # cameras = ['0004', '0028', '0052', '0076', '0076']
 
 
-    id = '00134'
-    take = 'Take3'
-    frames = ['00006', '00006', '00006', '00006', '00006']
-    cameras = ['0004', '0028', '0052', '0076', '0076']
+    # id = '00134'
+    # take = 'Take3'
+    # frames = ['00006', '00006', '00006', '00006', '00006']
+    # cameras = ['0004', '0028', '0052', '0076', '0076']
 
 
     # id = '00148'
@@ -701,8 +701,9 @@ if __name__ == '__main__':
     # cameras = ['0004', '0028', '0052', '0076', '0076']
 
 
-    novel_pose_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/{id}/Inner/{take}/SMPLX'
-    gt_scan_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/{id}/Inner/{take}/Meshes_pkl'
+    
+    novel_pose_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/00147/Inner/Take6/SMPLX'
+    gt_scan_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/00147/Inner/Take6/Meshes_pkl'
 
 
     solver = Solver(id, take, frames, cameras, novel_pose_path, args.load_from_ckpt)

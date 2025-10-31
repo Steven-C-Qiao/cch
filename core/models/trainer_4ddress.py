@@ -141,9 +141,9 @@ class CCHTrainer(pl.LightningModule):
 
         self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, batch_idx)
 
-        for k, v in loss_dict.items():
-            print(f"{k}: {v.item():.2f}", end='; ')
-        print('')
+        # for k, v in loss_dict.items():
+        #     print(f"{k}: {v.item():.2f}", end='; ')
+        # print('')
         # import ipdb; ipdb.set_trace()
         
         return loss 
@@ -174,25 +174,25 @@ class CCHTrainer(pl.LightningModule):
         self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
         self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
 
-        # if self.dev or self.plot:
-        #     self.visualiser.visualise(preds, batch)
-        #     if self.dev:
-        #         for k, v in loss_dict.items():
-        #             print(f"{k}: {v.item():.2f}", end='; ')
-        #         print('')
-        #         # import ipdb; ipdb.set_trace()
+        if self.dev or self.plot:
+            self.visualiser.visualise(preds, batch)
+            if self.dev:
+                for k, v in loss_dict.items():
+                    print(f"{k}: {v.item():.2f}", end='; ')
+                print('')
+                # import ipdb; ipdb.set_trace()
 
-        # else:
-        #     should_vis = False
-        #     global_step = self.global_step
-        #     if split in ('train', 'test'):
-        #         should_vis = ((global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1))
-        #     elif split == 'val':
-        #         # Visualise every N validation batches based on vis_frequency
-        #         should_vis = (batch_idx is not None and (batch_idx % self.vis_frequency == 0))
+        else:
+            should_vis = False
+            global_step = self.global_step
+            if split in ('train', 'test'):
+                should_vis = ((global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1))
+            elif split == 'val':
+                # Visualise every N validation batches based on vis_frequency
+                should_vis = (batch_idx == 4)
 
-        #     if should_vis:
-        #         self.visualiser.visualise(preds, batch, split=split) 
+            if should_vis:
+                self.visualiser.visualise(preds, batch, split=split, epoch=self.current_epoch) 
 
 
     def validation_step(self, batch, batch_idx):
