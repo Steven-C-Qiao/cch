@@ -19,18 +19,37 @@ class SapiensWrapper(nn.Module):
     def __init__(
         self,
         project_dim=512,
-        interpolate_size=(16, 16)
+        interpolate_size=(16, 16),
+        downsample_method='interpolate'  # 'interpolate', 'adaptive_avg', 'learnable'
     ):
         super().__init__()
         self.model = self._build_sapiens()
 
         self.project_dim = project_dim
         self.interpolate_size = interpolate_size
+        self.downsample_method = downsample_method
 
         self._freeze()
         
         self.project = nn.Conv2d(1024, project_dim, kernel_size=1, stride=1, padding=0)
-        # self.interpolate = F.interpolate(size=interpolate_size, mode='bilinear', align_corners=False)
+        
+        # Setup downsampling method
+        if downsample_method == 'adaptive_avg':
+            self.downsample = nn.AdaptiveAvgPool2d(interpolate_size)
+        elif downsample_method == 'learnable':
+            # Learnable downsampling using strided convolutions
+            # Compute approximate stride needed to reach target size
+            # This will be adaptive - we'll use AdaptiveAvgPool2d as fallback
+            # But can also use learnable strided convs
+            self.downsample = nn.Sequential(
+                nn.Conv2d(project_dim, project_dim, kernel_size=3, stride=2, padding=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(project_dim, project_dim, kernel_size=3, stride=2, padding=1),
+                nn.ReLU(inplace=True),
+                nn.AdaptiveAvgPool2d(interpolate_size)  # Final adaptive pool to ensure exact size
+            )
+        else:  # 'interpolate' (default)
+            self.downsample = None  # Will use F.interpolate in forward
 
 
     @staticmethod
@@ -53,7 +72,15 @@ class SapiensWrapper(nn.Module):
             (out_local,) = self.model(image)
 
         out_local = self.project(out_local)
-        out_local = F.interpolate(out_local, size=self.interpolate_size, mode='bilinear', align_corners=False).flatten(-2, -1)
+        
+        # Apply downsampling based on selected method
+        if self.downsample_method == 'interpolate':
+            out_local = F.interpolate(out_local, size=self.interpolate_size, mode='bilinear', align_corners=False)
+        else:
+            # Use the configured downsampling layer (adaptive_avg or learnable)
+            out_local = self.downsample(out_local)
+        
+        out_local = out_local.flatten(-2, -1)
 
         # Prepend some zero tokens for camera and register 
         out_local = torch.cat([torch.zeros_like(out_local[:, :, :5]), out_local], dim=-1)

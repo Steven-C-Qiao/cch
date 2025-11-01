@@ -25,6 +25,7 @@ class CCH(nn.Module):
         self.body_model = cfg.MODEL.BODY_MODEL
         self.image_size = cfg.DATA.IMAGE_SIZE
         self.use_sapiens = cfg.MODEL.USE_SAPIENS
+        self.sapiens_downsample_method = cfg.MODEL.SAPIENS_DOWNSAMPLE_METHOD
 
         s1_cfg = MODEL_CONFIGS[cfg.MODEL.CANONICAL_STAGE_SIZE]
         s2_cfg = MODEL_CONFIGS[cfg.MODEL.PBS_STAGE_SIZE]
@@ -35,7 +36,12 @@ class CCH(nn.Module):
         if self.use_sapiens:
             sapiens_embed_dim = 512
             interpolation_size = self.image_size // s1_cfg['patch_size']
-            self.sapiens = SapiensWrapper(project_dim=sapiens_embed_dim, interpolate_size=(interpolation_size, interpolation_size))
+            # Get downsample method from config, default to 'interpolate' for backward compatibility
+            self.sapiens = SapiensWrapper(
+                project_dim=sapiens_embed_dim, 
+                interpolate_size=(interpolation_size, interpolation_size),
+                downsample_method=self.sapiens_downsample_method
+            )
         else:
             sapiens_embed_dim = 0
 

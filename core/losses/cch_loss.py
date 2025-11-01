@@ -90,7 +90,7 @@ class CCHLoss(pl.LightningModule):
         if "vc_init" in predictions and "vc_smpl_maps" in batch:
             assert dataset_name == 'THuman'
             # loss_fn = self.vc_pm_asap_loss
-            loss_fn = self.vc_pm_l2_loss
+            loss_fn = self.vc_pm_asap_loss 
             
             pred_vc = predictions['vc_init']
             gt_vc_smpl_pm = batch['vc_smpl_maps'][:, :N]
@@ -239,7 +239,7 @@ class MaskedUncertaintyChamferLoss(nn.Module):
             conf = torch.cat(conf_list, dim=0)
             log_conf = torch.cat(log_conf_list, dim=0)
             loss_pred2gt = loss_pred2gt * conf - self.alpha * log_conf
-            loss_gt2pred *= 10000.        
+            # loss_gt2pred *= 10000.        
 
         loss_pred2gt = filter_by_quantile(loss_pred2gt, 0.98)
 

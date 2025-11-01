@@ -14,6 +14,12 @@ import matplotlib.colors
 from einops import rearrange
 from collections import defaultdict
 
+try:
+    from loguru import logger
+except ImportError:
+    import logging
+    logger = logging.getLogger(__name__)
+
 
 try:
     import pyvista as pv
@@ -82,6 +88,10 @@ class Visualiser(pl.LightningModule):
         if self.rank != 0:
             return None 
         
+        # Synchronize CUDA operations before visualization to avoid DDP issues
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        
         # set suffix for this visualisation pass
         self._suffix = f"_{epoch}_{split}" if epoch is not None and split else ''
         # Store epoch and split separately for file naming
@@ -108,15 +118,19 @@ class Visualiser(pl.LightningModule):
             batch
         )
 
-        self.visualise_pbs_pms(
-            predictions,
-            batch
-        )
+        # self.visualise_pbs_pms(
+        #     predictions,
+        #     batch
+        # )
 
         self.visualise_full_pyvista(
             predictions,
             batch
         )
+        
+        # Synchronize CUDA operations after visualization to ensure DDP processes stay in sync
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         # self.visualise_full(
         #     predictions,
@@ -514,13 +528,20 @@ class Visualiser(pl.LightningModule):
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
         scatter_mask = scatter_mask * confidence[0].astype(bool)
         
+        # If scatter_mask is empty (all confidence below threshold), fall back to image masks only
+        if not np.any(scatter_mask):
+            scatter_mask = image_masks_N[0].astype(bool)
+        
         # Color for predicted scatters 
         color = rearrange(batch['imgs'][0, :N], 'n c h w -> n h w c')
         color = color[scatter_mask]
         color = color.astype(np.float32)
         # Ensure colors are in [0, 1] range for PyVista
-        if color.max() > 1.0:
+        if len(color) > 0 and color.max() > 1.0:
             color = color / 255.0
+        elif len(color) == 0:
+            # Fallback empty color array if needed
+            color = np.zeros((0, 3), dtype=np.float32)
 
         def _normalise_to_rgb_range(x, mask):
             x_min, x_max = x.min(), x.max()
@@ -816,11 +837,20 @@ class Visualiser(pl.LightningModule):
         else:
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
         scatter_mask = scatter_mask * confidence[0].astype(bool)
+        
+        # If scatter_mask is empty (all confidence below threshold), fall back to image masks only
+        if not np.any(scatter_mask):
+            scatter_mask = mask_N[0].astype(bool)
+        
         # Color for predicted scatters 
         color = rearrange(batch['imgs'][0, :N], 'n c h w -> n h w c')
         color = color[scatter_mask]
         # color = (color * IMAGENET_DEFAULT_STD) + IMAGENET_DEFAULT_MEAN
-        color = color.astype(np.float32)
+        if len(color) > 0:
+            color = color.astype(np.float32)
+        else:
+            # Fallback empty color array if needed
+            color = np.zeros((0, 3), dtype=np.float32)
         
 
 
