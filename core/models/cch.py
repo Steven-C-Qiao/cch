@@ -220,7 +220,9 @@ class CCH(nn.Module):
                     for pbs_tokens, agg_tokens in zip(pbs_tokens_list, canonical_tokens_list)
                 ]
 
-            dvc, dvc_conf = self.pbs_head(full_tokens_list, rearrange(images.unsqueeze(2).repeat_interleave(N, dim=2), 'b k n c h w -> (b k) n c h w'), patch_start_idx=patch_start_idx)
+            dvc, dvc_conf = self.pbs_head(
+                full_tokens_list, rearrange(images.unsqueeze(2).repeat_interleave(N, dim=2), 'b k n c h w -> (b k) n c h w'), patch_start_idx=patch_start_idx
+            )
             dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
             dvc = rearrange(dvc, '(b k) n h w c -> b k n h w c', b=B, k=K)
             dvc_conf = rearrange(dvc_conf, '(b k) n h w -> b k n h w', b=B, k=K)

@@ -12,9 +12,10 @@ DP_UV_PROCESSED_FILE = 'model_files/UV_Processed.mat'
 # THUMAN_PATH = '/scratches/kyuban/cq244/datasets/THuman'
 
 
-# DATA_PATH = '/scratch/u5au/chexuan.u5au/4DDress'
-# BASE_PATH = '/scratch/u5au/chexuan.u5au/cch/'
+DATA_PATH = '/scratch/u5au/chexuan.u5au/4DDress'
+BASE_PATH = '/scratch/u5au/chexuan.u5au/cch/'
+THUMAN_PATH = '/scratch/u5au/chexuan.u5au/datasets_u5aa/THuman'
 
-DATA_PATH = '/scratch/u5aa/chexuan.u5aa/4DDress'
-BASE_PATH = '/scratch/u5aa/chexuan.u5aa/cch/'
-THUMAN_PATH = '/scratch/u5aa/chexuan.u5aa/datasets/THuman'
+# DATA_PATH = '/scratch/u5aa/chexuan.u5aa/4DDress'
+# BASE_PATH = '/scratch/u5aa/chexuan.u5aa/cch/'
+# THUMAN_PATH = '/scratch/u5aa/chexuan.u5aa/datasets/THuman'

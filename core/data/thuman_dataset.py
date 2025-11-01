@@ -252,7 +252,7 @@ class THumanDataset(Dataset):
                 try:
                     ret[key] = torch.stack([t if torch.is_tensor(t) else torch.tensor(t) for t in ret[key]])
                 except:
-                        pass
+                    pass
 
         # del vc_map, vc_mask, w_map
 

@@ -54,17 +54,15 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            # vc_loss = check_and_fix_inf_nan(vc_loss, 'vc_loss', ids=batch['scan_ids'])
             vc_loss *= self.cfg.LOSS.VC_CHAMFER_LOSS_WEIGHT
             loss_dict['vc_chamfer_loss'] = vc_loss
             total_loss = total_loss + vc_loss
 
 
         if "vc_init" in predictions and "vc_maps" in batch:
-            
             assert dataset_name == '4DDress'
-            # loss_fn = self.vc_pm_l2_loss
-            loss_fn = self.vc_pm_asap_loss
+            loss_fn = self.vc_pm_l2_loss
+            # loss_fn = self.vc_pm_asap_loss
 
                 
             pred_vc = predictions['vc_init']
@@ -83,16 +81,16 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            # vc_pm_loss = check_and_fix_inf_nan(vc_pm_loss, 'vc_pm_loss')
 
             vc_pm_loss *= self.cfg.LOSS.VC_PM_LOSS_WEIGHT
             loss_dict['vc_pm_loss'] = vc_pm_loss
             total_loss = total_loss + vc_pm_loss
 
+
         if "vc_init" in predictions and "vc_smpl_maps" in batch:
             assert dataset_name == 'THuman'
-            loss_fn = self.vc_pm_asap_loss
-            # loss_fn = self.vc_pm_l2_loss
+            # loss_fn = self.vc_pm_asap_loss
+            loss_fn = self.vc_pm_l2_loss
             
             pred_vc = predictions['vc_init']
             gt_vc_smpl_pm = batch['vc_smpl_maps'][:, :N]
@@ -110,7 +108,6 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            # vc_pm_loss = check_and_fix_inf_nan(vc_pm_loss, 'vc_pm_loss')
 
             vc_pm_loss *= self.cfg.LOSS.VC_PM_LOSS_WEIGHT
             loss_dict['vc_pm_loss'] = vc_pm_loss
@@ -129,7 +126,6 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             )
-            # w_loss = check_and_fix_inf_nan(w_loss, 'w_loss')
 
             w_loss *= self.cfg.LOSS.W_REGULARISER_WEIGHT
             loss_dict['w_loss'] = w_loss
@@ -137,14 +133,10 @@ class CCHLoss(pl.LightningModule):
 
         if "vp_init" in predictions and "vp" in batch:
             gt_vp = batch['vp']
-            # gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp', ids=batch['scan_ids'])
-            # print(gt_vp.shape)
-
             pred_vp = predictions['vp_init']
             mask = batch['masks']
             confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
 
-            # mask = rearrange(mask[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             if confidence is not None:
                 confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
@@ -157,25 +149,20 @@ class CCHLoss(pl.LightningModule):
                 mask,
                 confidence
             ) 
-            # vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_init_chamfer_loss', ids=batch['scan_ids'])
             vp_loss *= self.cfg.LOSS.VP_INIT_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_init_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
 
+
         if "vp" in predictions and "vp" in batch:
             gt_vp = batch['vp']
-            # gt_vp = check_and_fix_inf_nan(gt_vp, 'gt_vp')
-
             pred_vp = predictions['vp']
             mask = batch['masks']
 
             # confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
-
             # mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             # if confidence is not None:
             #     confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
-
-
             confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
             mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
             if confidence is not None:
@@ -187,9 +174,8 @@ class CCHLoss(pl.LightningModule):
                 gt_vp,
                 pred_vp, 
                 mask,
-                # confidence
+                confidence
             ) 
-            # vp_loss = check_and_fix_inf_nan(vp_loss, 'vp_chamfer_loss', ids=batch['scan_ids'])
             vp_loss *= self.cfg.LOSS.VP_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
@@ -225,8 +211,6 @@ class MaskedUncertaintyChamferLoss(nn.Module):
         assert x_pred.shape[:2] == mask.shape[:2]
 
         mask = mask.squeeze(-1).bool()  # (B, V2)
-        # If any batch element has zero valid points after masking, return zero loss to avoid NaNs
-        # from empty reductions in downstream operations.
         if (mask.sum(dim=1) == 0).any():
             print("Zero valid points after masking, returning 0 loss")
             return torch.tensor(0.0, device=x_pred.device, dtype=x_pred.dtype)
@@ -243,31 +227,24 @@ class MaskedUncertaintyChamferLoss(nn.Module):
             batch_reduction=None, 
             point_reduction=None
         )
-
-
         loss_pred2gt = loss[0]
         loss_gt2pred = loss[1]
 
-        
         loss_pred2gt_list = []
         for b in range(x_pred.shape[0]):
             loss_pred2gt_list.append(loss_pred2gt[b][:mask[b].sum()])
-
         loss_pred2gt = torch.cat(loss_pred2gt_list, dim=0)
 
         if confidence is not None:
             conf = torch.cat(conf_list, dim=0)
             log_conf = torch.cat(log_conf_list, dim=0)
             loss_pred2gt = loss_pred2gt * conf - self.alpha * log_conf
-            loss_gt2pred *= 5000.
+            loss_gt2pred *= 10000.        
 
         loss_pred2gt = filter_by_quantile(loss_pred2gt, 0.98)
 
-        # loss_pred2gt = check_and_fix_inf_nan(loss_pred2gt, 'loss_pred2gt')
-        # loss_gt2pred = check_and_fix_inf_nan(loss_gt2pred, 'loss_gt2pred')
-
         final_loss = loss_pred2gt.mean() + loss_gt2pred.mean()
-        # final_loss = check_and_fix_inf_nan(final_loss, 'final_loss')
+
         return final_loss 
     
 
@@ -294,16 +271,11 @@ class MaskedUncertaintyL2Loss(nn.Module):
         if mask is not None:
             loss = loss * mask
 
-        # loss = check_and_fix_inf_nan(loss, 'l2_loss')
-
         if mask.sum() == 0:
             print("Mask is all zeros, returning 0 loss")
             return torch.tensor(0.0, device=loss.device, dtype=torch.float32)
 
         final_loss = loss.sum() / (mask.sum() + 1e-6)
-
-        # final_loss = check_and_fix_inf_nan(final_loss, 'final_loss')
-
         return final_loss
     
 
@@ -344,119 +316,6 @@ class ASAPLoss(nn.Module):
 
         return loss.sum() / (full_mask.sum() + 1e-6)
 
-
-
-# class MaskedUncertaintyExpL2Loss(nn.Module):
-#     def __init__(self, alpha=1.0):
-#         """
-#         Loss for finetuning Vc_pm, penalise only the large deviations from SMPL 
-#         """
-#         super().__init__()
-#         self.alpha = alpha
-
-#     def get_conf_log(self, x):
-#         return x, torch.log(x)
-
-#     def forward(self, x, y, mask=None, uncertainty=None):
-#         offset = 3
-
-#         loss = torch.exp(torch.norm(x - y, dim=-1) - offset) - np.exp( - offset)
-
-#         if uncertainty is not None:
-#             conf, log_conf = self.get_conf_log(uncertainty)
-#             loss = loss * conf - self.alpha * log_conf
-
-#         if mask is not None:
-#             loss = loss * mask
-
-#         return loss.sum() / mask.sum()
-    
-
-# class CanonicalRGBConfLoss(nn.Module):
-#     """
-#     Masked L2 loss for canonical color maps
-    
-#     vc: (B, N, H, W, 3)
-#     vc_pred: (B, N, H, W, 3)
-#     conf: (B, N, H, W) in [0, 1]
-#     mask: (B, N, H, W)
-#     """
-#     def __init__(self, cfg):
-#         self.alpha = cfg.LOSS.ALPHA
-#         super().__init__()
-
-#     def get_conf_log(self, x):
-#         return x, torch.log(x)
-
-#     def forward(self, vc, vc_pred, conf=None, mask=None):
-
-#         conf, log_conf = self.get_conf_log(conf)
-        
-#         loss = torch.norm(vc - vc_pred, dim=-1) 
-
-#         conf_loss = loss * conf - self.alpha * log_conf
-
-#         if mask is not None:
-#             conf_loss = conf_loss * mask.squeeze()
-
-
-#         return conf_loss.mean()
-
-# class PosedPointmapChamferLoss(nn.Module):
-#     """
-#     Masked chamfer loss for posed points
-
-#     v_gt: (B, V1, 3)
-#     v_pred: (B, V2, 3)
-#     mask: (B, V2)
-#     """
-#     def __init__(self, cfg):
-#         super().__init__()
-#         self.single_directional = cfg.LOSS.CHAMFER_SINGLE_DIRECTIONAL
-    
-#     def forward(self, v_gt, v_pred, mask=None):
-#         loss, loss_normals = chamfer_distance(
-#             v_pred, v_gt, 
-#             single_directional=self.single_directional, 
-#             batch_reduction=None, 
-#             point_reduction=None
-#         )
-
-#         loss_vpp2vp = loss[0]
-#         loss_vp2vpp = loss[1]
-
-#         loss_vpp2vp = torch.clamp(loss_vpp2vp, max=100)
-#         loss_vp2vpp = torch.clamp(loss_vp2vpp, max=100)
-        
-#         if mask is not None:
-#             masked_loss_vpp2vp = loss_vpp2vp * mask
-#             masked_loss_vpp2vp = masked_loss_vpp2vp.mean()
-#         else:
-#             masked_loss_vpp2vp = loss_vpp2vp.mean()
-
-#         loss = masked_loss_vpp2vp + loss_vp2vpp.mean()
-
-#         return loss
-    
-
-        
-
-# class SkinningWeightLoss(nn.Module):
-#     """
-#     Loss for skinning weights
-#     """
-#     def __init__(self):
-#         super().__init__()
-
-#     def forward(self, w_smpl, w_pred, mask=None):
-#         loss = torch.nn.functional.mse_loss(w_pred, w_smpl, reduction='none')
-
-#         # if mask is not None:
-#             # loss = loss * mask[..., None]
-            
-#         return loss.mean()
-        
-        
 
 
 

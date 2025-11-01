@@ -165,7 +165,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     if plot:
         num_nodes = 1
     else:
-        num_nodes = 4
+        num_nodes = 1
 
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,

@@ -4,6 +4,8 @@ import os
 import matplotlib
 matplotlib.use('Agg')  # Set the backend to Agg before importing pyplot
 import matplotlib.pyplot as plt
+from matplotlib.colors import LogNorm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import numpy as np
 import pytorch_lightning as pl 
@@ -12,9 +14,19 @@ import matplotlib.colors
 from einops import rearrange
 from collections import defaultdict
 
+
+try:
+    import pyvista as pv
+    PV_AVAILABLE = True
+    # Set PyVista to use offscreen rendering
+    pv.OFF_SCREEN = True
+except ImportError:
+    PV_AVAILABLE = False
+
+
+
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
-
 
 class Visualiser(pl.LightningModule):
     def __init__(self, save_dir, cfg=None, rank=0):
@@ -29,6 +41,13 @@ class Visualiser(pl.LightningModule):
 
     def set_global_rank(self, global_rank):
         self.rank = global_rank
+
+    def _get_filename(self, suffix=''):
+        """
+        Generate filename with format: {counter:06d}_{epoch:03d}_{split}{suffix}.png
+        """
+        split_part = f'_{self._split}' if self._split else ''
+        return f'{self.counter:06d}_{self._epoch:03d}{split_part}{suffix}.png'
 
 
     def visualise(
@@ -65,6 +84,9 @@ class Visualiser(pl.LightningModule):
         
         # set suffix for this visualisation pass
         self._suffix = f"_{epoch}_{split}" if epoch is not None and split else ''
+        # Store epoch and split separately for file naming
+        self._epoch = epoch if epoch is not None else 0
+        self._split = split if split else ''
 
         if batch_idx is not None:
             self.counter = batch_idx
@@ -91,10 +113,15 @@ class Visualiser(pl.LightningModule):
             batch
         )
 
-        self.visualise_full(
+        self.visualise_full_pyvista(
             predictions,
             batch
         )
+
+        # self.visualise_full(
+        #     predictions,
+        #     batch
+        # )
 
         # self.visualise_vp_vc(
         #     predictions,
@@ -131,7 +158,7 @@ class Visualiser(pl.LightningModule):
             
             # Save figure
             plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_images{self._suffix}.png'))
+            plt.savefig(os.path.join(self.save_dir, self._get_filename('_images')))
             plt.close()
       
 
@@ -141,9 +168,17 @@ class Visualiser(pl.LightningModule):
         batch
     ):
         B, N, H, W, C = predictions['vc_init'].shape
-        mask = batch['masks']
+        image_masks = batch['masks']
 
-        mask_N = mask[:, :N]
+        image_masks_N = image_masks[:, :N]
+
+        smpl_masks = batch['smpl_mask']
+        smpl_masks_N = smpl_masks[:, :N]
+
+        mask_intersection = image_masks_N * smpl_masks_N
+        mask_union = image_masks_N + smpl_masks_N - mask_intersection
+        mask_union = mask_union.astype(bool)
+
 
         B = 1
         N = min(N, 4)
@@ -162,50 +197,44 @@ class Visualiser(pl.LightningModule):
             num_rows += 1
             vc_init = predictions['vc_init']
 
-            if 'vc_maps' in batch:
+            if 'vc_maps' in batch: # 4DDress
                 num_rows += 1
-                vc_init_err = np.linalg.norm(predictions['vc_init'] - batch['vc_maps'][:, :N], axis=-1) * batch['smpl_mask'][:, :N]
-                vc_init_err[vc_init_err >= 0.2] = 0.0
+                vc_init_err = np.linalg.norm(predictions['vc_init'] - batch['vc_maps'][:, :N], axis=-1)
+                vc_init_err = vc_init_err * mask_intersection
 
+            if 'vc_smpl_maps' in batch: # THuman
+                num_rows += 1
+                vc_init_err = np.linalg.norm(predictions['vc_init'] - batch['vc_smpl_maps'][:, :N], axis=-1)
+                vc_init_err = vc_init_err * mask_intersection
 
-            vc_init[~mask_N.astype(bool)] = 0
+            vc_init[~mask_union.astype(bool)] = 0
 
             norm_min, norm_max = vc_init.min(), vc_init.max()
             vc_init = (vc_init - norm_min) / (norm_max - norm_min) 
-            vc_init[~mask_N.astype(bool)] = 1
+            vc_init[~mask_union.astype(bool)] = 1
         
         if 'vc_init_conf' in predictions:
             num_rows += 1
             vc_init_conf = predictions['vc_init_conf']
-            vc_init_conf = vc_init_conf * mask_N 
+            vc_init_conf = vc_init_conf * mask_union 
 
+        # 4DDress ground truth VC maps
         if 'vc_maps' in batch:
             num_rows += 1
             vc_maps = batch['vc_maps']
-            if 'smpl_mask' in batch:
-                smpl_mask = batch['smpl_mask']
-            elif 'mask' in batch:
-                smpl_mask = batch['mask'][:, :N]
-            else:
-                raise ValueError("smpl_mask or mask not found in batch")
-            vc_maps[~smpl_mask.astype(bool)] = 0
+            temp_mask = batch['smpl_mask']
+            vc_maps[~temp_mask.astype(bool)] = 0
             vc_maps = (vc_maps - vc_maps.min()) / (vc_maps.max() - vc_maps.min())
-            vc_maps[~smpl_mask.astype(bool)] = 1
+            vc_maps[~temp_mask.astype(bool)] = 1
         
+        # THuman ground truth VC maps
         if 'vc_smpl_maps' in batch:
             num_rows += 1
             vc_maps = batch['vc_smpl_maps']
-            if 'smpl_mask' in batch:
-                smpl_mask = batch['smpl_mask']
-            elif 'mask' in batch:
-                smpl_mask = batch['mask'][:, :N]
-            else:
-                raise ValueError("smpl_mask or mask not found in batch")
-            vc_maps[~smpl_mask.astype(bool)] = 0
+            temp_mask = batch['smpl_mask']
+            vc_maps[~temp_mask.astype(bool)] = 0
             vc_maps = (vc_maps - vc_maps.min()) / (vc_maps.max() - vc_maps.min())
-            vc_maps[~smpl_mask.astype(bool)] = 1
-        
-        
+            vc_maps[~temp_mask.astype(bool)] = 1
 
 
         if 'smpl_w_maps' in batch:
@@ -216,7 +245,7 @@ class Visualiser(pl.LightningModule):
             num_rows += 1
             w = predictions['w']
             w = np.argmax(w, axis=-1)
-            w = w * mask_N 
+            w = w * image_masks_N 
 
     
         fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
@@ -232,50 +261,90 @@ class Visualiser(pl.LightningModule):
             if 'vc_maps' in batch or 'vc_smpl_maps' in batch:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 plt.imshow(vc_maps[0, n])
-                plt.title(f'$V_c$ maps {n}')
+                plt.title(f'gt $V_{n+1}^c$')
                 row += 1
                 
             if 'vc_init' in predictions:
                 plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                 plt.imshow(vc_init[0, n])
-                plt.title(f'$V_c$ init {n}')
+                plt.title(f'Pred init $V_{n+1}^c$')
                 row += 1
 
-            if 'vc_maps' in batch:
+            if 'vc_maps' in batch or 'vc_smpl_maps' in batch:
                 ax = plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-                im = plt.imshow(vc_init_err[0, n], cmap='viridis')
-                plt.colorbar(im, ax=ax)
+                # Apply log scale to error visualization
+                err_vis = vc_init_err[0, n].copy()
+                # Mask zero errors to be white by setting them to NaN
+                zero_mask = (err_vis == 0.0)
+                err_vis[zero_mask] = np.nan
+                # Use LogNorm so colorbar shows original values but visualization uses log scale
+                # Find valid (non-NaN) error range for normalization
+                valid_errors = err_vis[~np.isnan(err_vis)]
+                if len(valid_errors) > 0:
+                    vmin = np.min(valid_errors[valid_errors > 0])  # Smallest non-zero error
+                    vmax = np.max(valid_errors)  # Largest error
+                    # Use LogNorm with a small offset to handle very small values
+                    norm = LogNorm(vmin=max(vmin, 1e-6), vmax=max(vmax, 1e-6))
+                    im = plt.imshow(err_vis, cmap='RdYlGn_r', norm=norm)
+                else:
+                    # Fallback if no valid errors
+                    im = plt.imshow(err_vis, cmap='RdYlGn_r')
+                plt.title(f'Error $V_{n+1}^c$')
+                divider = make_axes_locatable(ax)
+                cax = divider.append_axes("right", size="5%", pad=0.05)
+                plt.colorbar(im, cax=cax)
                 row += 1
 
             if 'vc_init_conf' in predictions:
-                plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-                plt.imshow(vc_init_conf[0, n])
-                plt.title(f'$V_c$ conf {n}')
-                if n == 3:
-                    plt.colorbar()
+                ax = plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                # Apply log scale to confidence visualization
+                conf_vis = vc_init_conf[0, n].copy()
+                # Mask zero confidence to be white by setting them to NaN
+                zero_mask = (conf_vis == 0.0)
+                conf_vis[zero_mask] = np.nan
+                # Use LogNorm so colorbar shows original values but visualization uses log scale
+                # Find valid (non-NaN) confidence range for normalization
+                valid_conf = conf_vis[~np.isnan(conf_vis)]
+                if len(valid_conf) > 0:
+                    vmin = np.min(valid_conf[valid_conf > 0])  # Smallest non-zero confidence
+                    vmax = np.max(valid_conf)  # Largest confidence
+                    # Use LogNorm with a small offset to handle very small values
+                    norm = LogNorm(vmin=max(vmin, 1e-6), vmax=max(vmax, 1e-6))
+                    im = plt.imshow(conf_vis, cmap='viridis', norm=norm)
+                else:
+                    # Fallback if no valid confidence
+                    im = plt.imshow(conf_vis, cmap='viridis')
+                plt.title(f'Conf $V_{n+1}^c$')
+                divider = make_axes_locatable(ax)
+                cax = divider.append_axes("right", size="5%", pad=0.05)
+                plt.colorbar(im, cax=cax)
                 row += 1
 
             if 'smpl_w_maps' in batch:
-                plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-                plt.imshow(smpl_w_maps[0, n])
-                plt.title(f'Smpl $w$ maps {n}')
-                plt.colorbar()
+                ax = plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                im = plt.imshow(smpl_w_maps[0, n])
+                plt.title(f'Smpl $w_{n+1}$')
+                divider = make_axes_locatable(ax)
+                cax = divider.append_axes("right", size="5%", pad=0.05)
+                plt.colorbar(im, cax=cax)
                 row += 1
             
             if "w" in predictions:
-                plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-                plt.imshow(w[0, n])
-                plt.title(f'Pred $w$ maps {n}')
-                plt.colorbar()
+                ax = plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                im = plt.imshow(w[0, n])
+                plt.title(f'Pred $w_{n+1}$')
+                divider = make_axes_locatable(ax)
+                cax = divider.append_axes("right", size="5%", pad=0.05)
+                plt.colorbar(im, cax=cax)
                 row += 1
 
         # for ax in fig.axes:
-            # ax.set_xticks([])
-            # ax.set_yticks([])
+        #     ax.set_xticks([])
+        #     ax.set_yticks([])
 
 
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_pms{self._suffix}.png'))
+        plt.tight_layout(pad = 0.1)
+        plt.savefig(os.path.join(self.save_dir, self._get_filename('_vc')))
         plt.close()
 
 
@@ -285,9 +354,22 @@ class Visualiser(pl.LightningModule):
         predictions,
         batch
     ):
-        
         B, N, H, W, C = predictions['vc_init'].shape
         K = 5 
+        image_masks = batch['masks']
+
+        image_masks_N = image_masks[:, :N]
+
+        smpl_masks = batch['smpl_mask']
+        smpl_masks_N = smpl_masks[:, :N]
+
+        mask_intersection = image_masks_N * smpl_masks_N
+        mask_union = image_masks_N + smpl_masks_N - mask_intersection
+        mask_union = mask_union.astype(bool)
+
+
+        
+        
         mask = np.repeat(batch['masks'][:, :N][:, None], K, axis=1) # B, K, N, H, W
 
         B = 1
@@ -297,30 +379,30 @@ class Visualiser(pl.LightningModule):
 
         num_rows = 0
 
-        if 'vp_init' in predictions:
-            num_rows += K
-            vp_init = predictions['vp_init'] # bknhwc
-            vp_init[~mask.astype(bool)] = 0
-            norm_min, norm_max = vp_init.min(), vp_init.max()
-            vp_init = (vp_init - norm_min) / (norm_max - norm_min) 
-            vp_init[~mask.astype(bool)] = 1
+        # if 'vp_init' in predictions:
+        #     num_rows += K
+        #     vp_init = predictions['vp_init'] # bknhwc
+        #     vp_init[~mask.astype(bool)] = 0
+        #     norm_min, norm_max = vp_init.min(), vp_init.max()
+        #     vp_init = (vp_init - norm_min) / (norm_max - norm_min) 
+        #     vp_init[~mask.astype(bool)] = 1
 
 
-        if 'vc' in predictions:
-            num_rows += K 
-            vc = predictions['vc'] # bknhwc
-            vc[~mask.astype(bool)] = 0
-            norm_min, norm_max = vc.min(), vc.max()
-            vc = (vc - norm_min) / (norm_max - norm_min) 
-            vc[~mask.astype(bool)] = 1
+        # if 'vc' in predictions:
+        #     num_rows += K 
+        #     vc = predictions['vc'] # bknhwc
+        #     vc[~mask.astype(bool)] = 0
+        #     norm_min, norm_max = vc.min(), vc.max()
+        #     vc = (vc - norm_min) / (norm_max - norm_min) 
+        #     vc[~mask.astype(bool)] = 1
 
-        if 'vp' in predictions:
-            num_rows += K 
-            vp = predictions['vp'] # bknhwc
-            vp[~mask.astype(bool)] = 0
-            norm_min, norm_max = vp.min(), vp.max()
-            vp = (vp - norm_min) / (norm_max - norm_min) 
-            vp[~mask.astype(bool)] = 1
+        # if 'vp' in predictions:
+        #     num_rows += K 
+        #     vp = predictions['vp'] # bknhwc
+        #     vp[~mask.astype(bool)] = 0
+        #     norm_min, norm_max = vp.min(), vp.max()
+        #     vp = (vp - norm_min) / (norm_max - norm_min) 
+        #     vp[~mask.astype(bool)] = 1
 
         if 'dvc' in predictions:
             num_rows += K 
@@ -332,39 +414,44 @@ class Visualiser(pl.LightningModule):
         fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
         row = 0
         for k in range(K):
-            if 'vp_init' in predictions:
-                for n in range(4):
-                    plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-                    plt.imshow(vp_init[0, k, n])
-                    plt.title(f'Pred init $V_{n+1}^{k+1}$')
-                row += 1
+            # if 'vp_init' in predictions:
+            #     for n in range(4):
+            #         plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+            #         plt.imshow(vp_init[0, k, n])
+            #         plt.title(f'Pred init $V_{n+1}^{k+1}$')
+            #     row += 1
 
             if 'dvc' in predictions:
                 for n in range(4):
                     ax = plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-                    im = ax.imshow(dvc[0, k, n])
+                    dvc_vis = dvc[0, k, n].copy()
+                    # Mask background to nan
+                    dvc_vis[~mask[0, k, n].astype(bool)] = np.nan
+                    im = ax.imshow(dvc_vis)
                     plt.title(f'Pred $\\Delta V_{n+1}^{{c,{k+1}}}$')
-                    plt.colorbar(im, ax=ax)
+                    divider = make_axes_locatable(ax)
+                    cax = divider.append_axes("right", size="5%", pad=0.05)
+                    plt.colorbar(im, cax=cax)
                 row += 1
 
-            if 'vc' in predictions:
-                for n in range(4):
-                    plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-                    plt.imshow(vc[0, k, n])
-                    plt.title(f'Pred $V_{n+1}^{{c,{k+1}}}$')
-                row += 1
+            # if 'vc' in predictions:
+            #     for n in range(4):
+            #         plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+            #         plt.imshow(vc[0, k, n])
+            #         plt.title(f'Pred $V_{n+1}^{{c,{k+1}}}$')
+            #     row += 1
 
-            if 'vp' in predictions:
-                for n in range(4):
-                    plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-                    plt.imshow(vp[0, k, n])
-                    plt.title(f'Pred final $V_{n+1}^{k+1}$')
-                row += 1
+            # if 'vp' in predictions:
+            #     for n in range(4):
+            #         plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+            #         plt.imshow(vp[0, k, n])
+            #         plt.title(f'Pred final $V_{n+1}^{k+1}$')
+            #     row += 1
             
 
 
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}_pbs_pms{self._suffix}.png'))
+        plt.tight_layout(pad = 0.1)
+        plt.savefig(os.path.join(self.save_dir, self._get_filename('_pbs')))
         plt.close()
 
 
@@ -386,6 +473,321 @@ class Visualiser(pl.LightningModule):
             ax.set_yticks([])
             ax.set_zticks([])
 
+
+
+    def visualise_full_pyvista(
+        self,
+        predictions,
+        batch
+    ):
+        """
+        Fast version of visualise_full using PyVista for point cloud rendering.
+        Alternative to Open3D version.
+        """
+        if not PV_AVAILABLE:
+            print("Warning: PyVista not available, falling back to matplotlib visualise_full")
+            return self.visualise_full(predictions, batch)
+        
+        subfig_size = 4
+        gt_alpha, pred_alpha = 0.5, 0.5
+        point_size = 0.7 # PyVista point size
+
+        B, N, H, W, C = predictions['vc_init'].shape
+        K = 5
+
+        image_masks = batch['masks']
+        image_masks_N = image_masks[:, :N]
+
+        smpl_masks = batch['smpl_mask']
+        smpl_masks_N = smpl_masks[:, :N]
+
+        mask_intersection = image_masks_N * smpl_masks_N
+        mask_union = image_masks_N + smpl_masks_N - mask_intersection
+        mask_union = mask_union.astype(bool)
+
+
+        scatter_mask = image_masks_N[0].astype(bool) # nhw
+        if "vc_init_conf" in predictions:
+            confidence = predictions['vc_init_conf']
+            confidence = confidence > self.threshold
+        else:
+            confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
+        scatter_mask = scatter_mask * confidence[0].astype(bool)
+        
+        # Color for predicted scatters 
+        color = rearrange(batch['imgs'][0, :N], 'n c h w -> n h w c')
+        color = color[scatter_mask]
+        color = color.astype(np.float32)
+        # Ensure colors are in [0, 1] range for PyVista
+        if color.max() > 1.0:
+            color = color / 255.0
+
+        def _normalise_to_rgb_range(x, mask):
+            x_min, x_max = x.min(), x.max()
+            x[~mask.astype(bool)] = 0
+            x = (x - x_min) / (x_max - x_min) 
+            x[~mask.astype(bool)] = 1
+            return x
+
+        x = batch['smpl_T_joints'].reshape(-1, 3)
+        
+        def _get_view_params(x):
+            """Get view parameters with y-axis up, elev=10, azim=20 degrees"""
+            max_range = np.array([
+                x[:, 0].max() - x[:, 0].min(),
+                x[:, 1].max() - x[:, 1].min(),
+                x[:, 2].max() - x[:, 2].min()
+            ]).max() / 2.0 + 0.1
+            mid_x = (x[:, 0].max() + x[:, 0].min()) * 0.5
+            mid_y = (x[:, 1].max() + x[:, 1].min()) * 0.5
+            mid_z = (x[:, 2].max() + x[:, 2].min()) * 0.5
+            center = [mid_x, mid_y, mid_z]
+            
+            # y-axis up coordinate system: x=right, y=up, z=forward/back
+            # elev=10: elevation angle from horizontal (x-z plane)
+            # azim=20: rotation around y-axis
+            elev, azim = 10, 20
+            elev_rad = np.radians(elev)
+            azim_rad = np.radians(azim)
+            distance = max_range * 3.5  # Increased from 2.5 to move camera further away
+            
+            # Calculate camera position (from center, looking towards center)
+            # Direction from center to camera (spherical coordinates with y-up)
+            # x = cos(elev) * sin(azim)
+            # y = sin(elev)
+            # z = cos(elev) * cos(azim)
+            camera_offset = np.array([
+                distance * np.cos(elev_rad) * np.sin(azim_rad),
+                distance * np.sin(elev_rad),
+                distance * np.cos(elev_rad) * np.cos(azim_rad)
+            ])
+            camera_pos = center + camera_offset
+            
+            # Front vector points from camera to center (opposite of camera offset)
+            front_vec = -camera_offset / np.linalg.norm(camera_offset)
+            
+            return center, camera_pos, max_range, front_vec
+        
+        def _render_pointcloud_pyvista(verts, colors=None, center=None, camera_pos=None, max_range=None, front_vec=None):
+            """Render point cloud to image using PyVista with y-axis up, elev=10, azim=20"""
+            if len(verts) == 0:
+                # Return blank image
+                img = np.zeros((400, 400, 3), dtype=np.uint8)
+                return img
+            
+            # Create point cloud
+            pcd = pv.PolyData(verts)
+            
+            # Create plotter with explicit offscreen mode
+            plotter = pv.Plotter(off_screen=True, window_size=[400, 400])
+            
+            # PyVista expects colors as uint8
+            if colors is not None:
+                if colors.max() <= 1.0:
+                    colors_uint8 = (colors * 255).astype(np.uint8)
+                else:
+                    colors_uint8 = colors.astype(np.uint8)
+                pcd['colors'] = colors_uint8
+                plotter.add_mesh(pcd, point_size=point_size, scalars='colors', 
+                                rgb=True, opacity=gt_alpha)
+            else:
+                plotter.add_mesh(pcd, point_size=point_size, color='blue', opacity=gt_alpha)
+            
+            # Set camera with y-axis up, elev=10, azim=20
+            # Don't use reset_camera() to avoid auto-fitting to individual point clouds
+            # This ensures consistent scaling across all renders
+            if center is not None and camera_pos is not None:
+                plotter.camera.position = camera_pos
+                plotter.camera.focal_point = center
+                plotter.camera.up = [0, 1, 0]  # y-axis up
+                # Set camera distance based on max_range to ensure consistent zoom
+                plotter.camera.view_angle = 30.0  # Fixed field of view angle
+            elif center is not None:
+                plotter.camera.focal_point = center
+                plotter.camera.up = [0, 1, 0]  # y-axis up
+                plotter.camera.view_angle = 30.0  # Fixed field of view angle
+            
+            # Render to numpy array
+            img = plotter.screenshot(None, return_img=True)
+            plotter.close()
+            
+            return img
+
+        # ---------------------- Canonical stage ----------------------
+        if 'imgs' in batch:
+            images = rearrange(batch['imgs'][0], 'n c h w -> n h w c')
+            images = images.astype(np.float32)
+
+        if 'vc_init' in predictions: # at inference time, we don't have smpl_masks 
+            vc_init = _normalise_to_rgb_range(predictions['vc_init'], image_masks_N)
+        
+        if 'vc_maps' in batch:
+            vc_maps = _normalise_to_rgb_range(batch['vc_maps'], smpl_masks)
+        elif 'vc_smpl_maps' in batch:
+            vc_maps = _normalise_to_rgb_range(batch['vc_smpl_maps'], smpl_masks)
+
+        # ---------------------- Blendshape stage ----------------------
+        # Collect all point clouds to compute a combined bounding box for consistent scaling
+        all_verts_for_bounds = [x.flatten().reshape(-1, 3)]  # Start with smpl_T_joints
+        
+        # Add V^c canonical point clouds
+        if 'template_mesh_verts' in batch:
+            all_verts_for_bounds.append(batch['template_mesh_verts'][0])
+        if "vc_init" in predictions:
+            vc_init_verts = predictions['vc_init'][0][scatter_mask]
+            if len(vc_init_verts) > 0:
+                all_verts_for_bounds.append(vc_init_verts)
+        if "vc" in predictions:
+            vc_verts = predictions['vc'][0]  # k n h w 3
+            for k in range(K):
+                vc_k_verts = vc_verts[k, scatter_mask]
+                if len(vc_k_verts) > 0:
+                    all_verts_for_bounds.append(vc_k_verts)
+        
+        # Add V^p posed point clouds
+        if 'vp' in batch:
+            vp_list = batch['vp']
+            for k in range(K):
+                if len(vp_list[k]) > 0:
+                    all_verts_for_bounds.append(vp_list[k])
+        if "vp_init" in predictions:
+            vp_init = predictions['vp_init'][0]  # k n h w 3
+            for k in range(K):
+                vp_init_k_verts = vp_init[k, scatter_mask]
+                if len(vp_init_k_verts) > 0:
+                    all_verts_for_bounds.append(vp_init_k_verts)
+        if "vp" in predictions:
+            vp_verts = predictions['vp'][0]  # k n h w 3
+            for k in range(K):
+                vp_k_verts = vp_verts[k, scatter_mask]
+                if len(vp_k_verts) > 0:
+                    all_verts_for_bounds.append(vp_k_verts)
+        
+        # Compute combined bounding box
+        if len(all_verts_for_bounds) > 0:
+            all_verts_combined = np.vstack(all_verts_for_bounds)
+            center, camera_pos, max_range, front_vec = _get_view_params(all_verts_combined)
+        else:
+            center, camera_pos, max_range, front_vec = _get_view_params(x)
+        
+        num_rows = 7
+            
+        fig = plt.figure(figsize=(subfig_size * K, subfig_size * num_rows))
+        r = 0
+
+        # input images
+        if 'imgs' in batch:
+            for k in range(K):
+                ax = fig.add_subplot(num_rows, K, r*K+k+1)
+                ax.imshow(images[k])
+                ax.set_title(f'Input Image {k}')
+                ax.axis('off')
+            r += 1
+
+        # Ground truth vp point clouds
+        if 'vp' in batch:
+            vp_list = batch['vp']
+            for k in range(K):
+                vp = vp_list[k]
+                if len(vp) > 0:
+                    img = _render_pointcloud_pyvista(vp, colors=None, center=center, camera_pos=camera_pos, max_range=max_range, front_vec=front_vec)
+                    ax = fig.add_subplot(num_rows, K, r*K+k+1)
+                    ax.imshow(img)
+                    ax.set_title(f'gt vp $V^{k+1}$')
+                    ax.axis('off')
+                else:
+                    ax = fig.add_subplot(num_rows, K, r*K+k+1)
+                    ax.text(0.5, 0.5, 'No points', ha='center', va='center')
+                    ax.set_title(f'gt vp $V^{k+1}$')
+            r += 1
+
+        # predicted initial V_n^c (2D images)
+        if 'vc_maps' in batch or 'vc_smpl_maps' in batch:
+            for n in range(N):
+                ax = fig.add_subplot(num_rows, K, r*K+n+1)
+                ax.imshow(vc_maps[0, n])
+                ax.set_title(f'gt SMPL $V_{n+1}^c$')
+            # Ground truth canonical scatter - place in last subplot of this row
+            if 'template_mesh_verts' in batch:
+                vc_gt = batch['template_mesh_verts'][0]
+                if len(vc_gt) > 0:
+                    img = _render_pointcloud_pyvista(vc_gt, colors=None, center=center, camera_pos=camera_pos, max_range=max_range, front_vec=front_vec)
+                    ax = fig.add_subplot(num_rows, K, r*K+K)  # Last subplot of this row (K-1+1 = K)
+                    ax.imshow(img)
+                    ax.set_title(f'gt $V^c$')
+                    ax.axis('off')
+            r += 1
+
+        if 'vc_init' in predictions:
+            for n in range(N):
+                ax = fig.add_subplot(num_rows, K, r*K+n+1)
+                ax.imshow(vc_init[0, n])
+                ax.set_title(f'pred init $V_{n+1}^c$')
+            # Predicted initial V^c - place in last subplot of this row
+            vc_init_scatter = predictions['vc_init'][0] # n h w 3 
+            v = vc_init_scatter[scatter_mask]
+            if len(v) > 0:
+                img = _render_pointcloud_pyvista(v, colors=color, center=center, camera_pos=camera_pos, max_range=max_range, front_vec=front_vec)
+                ax = fig.add_subplot(num_rows, K, r*K+K)  # Last subplot of this row (K-1+1 = K)
+                ax.imshow(img)
+                ax.set_title(f'pred init $V^c$')
+                ax.axis('off')
+            r += 1
+
+        # predicted initial V^k scatter
+        if "vp_init" in predictions:
+            vp_init = predictions['vp_init'][0] # k n h w 3
+            for k in range(K):
+                verts = vp_init[k, scatter_mask]
+                if len(verts) > 0:
+                    img = _render_pointcloud_pyvista(verts, colors=color, center=center, camera_pos=camera_pos, max_range=max_range, front_vec=front_vec)
+                    ax = fig.add_subplot(num_rows, K, r*K+k+1)
+                    ax.imshow(img)
+                    ax.set_title(f'pred init $V^{k+1}$')
+                    ax.axis('off')
+                else:
+                    ax = fig.add_subplot(num_rows, K, r*K+k+1)
+                    ax.text(0.5, 0.5, 'No points', ha='center', va='center')
+                    ax.set_title(f'pred init $V^{k+1}$')
+            r += 1
+
+        if "vc" in predictions:
+            vc = predictions['vc'][0] # k n h w 3
+            for k in range(K):
+                verts = vc[k, scatter_mask]
+                if len(verts) > 0:
+                    img = _render_pointcloud_pyvista(verts, colors=color, center=center, camera_pos=camera_pos, max_range=max_range, front_vec=front_vec)
+                    ax = fig.add_subplot(num_rows, K, r*K+k+1)
+                    ax.imshow(img)
+                    ax.set_title(f'pred $V^{{c,{k+1}}}$')
+                    ax.axis('off')
+                else:
+                    ax = fig.add_subplot(num_rows, K, r*K+k+1)
+                    ax.text(0.5, 0.5, 'No points', ha='center', va='center')
+                    ax.set_title(f'pred $V^{{c,{k+1}}}$')
+            r += 1
+
+        if "vp" in predictions:
+            vp = predictions['vp'][0] # k n h w 3
+            for k in range(K):
+                verts = vp[k, scatter_mask]
+                if len(verts) > 0:
+                    img = _render_pointcloud_pyvista(verts, colors=color, center=center, camera_pos=camera_pos, max_range=max_range, front_vec=front_vec)
+                    ax = fig.add_subplot(num_rows, K, r*K+k+1)
+                    ax.imshow(img)
+                    ax.set_title(f'pred final $V^{k+1}$')
+                    ax.axis('off')
+                else:
+                    ax = fig.add_subplot(num_rows, K, r*K+k+1)
+                    ax.text(0.5, 0.5, 'No points', ha='center', va='center')
+                    ax.set_title(f'pred final $V^{k+1}$')
+
+        plt.tight_layout(pad = 0.1)
+        plt.savefig(os.path.join(self.save_dir, self._get_filename('')), dpi=200)
+        plt.close()
+
+            
+            
 
 
 
@@ -627,13 +1029,9 @@ class Visualiser(pl.LightningModule):
 
         
         plt.tight_layout()
-        plt.savefig(os.path.join(self.save_dir, f'{self.counter:06d}{self._suffix}.png'), dpi=200)
+        plt.savefig(os.path.join(self.save_dir, self._get_filename()), dpi=200)
 
         plt.close()
-
-            
-            
-            
             
 
 
@@ -779,7 +1177,7 @@ class Visualiser(pl.LightningModule):
         # self._no_annotations(fig)
 
         plt.tight_layout(h_pad=4)
-        plt.savefig(os.path.join(self.save_dir, f'{self.global_step:06d}_vp_vc{self._suffix}.png'), dpi=300)
+        plt.savefig(os.path.join(self.save_dir, self._get_filename('_vp_vc')), dpi=300)
 
         plt.close()
 

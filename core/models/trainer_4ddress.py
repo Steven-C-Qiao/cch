@@ -131,7 +131,6 @@ class CCHTrainer(pl.LightningModule):
             batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
         elif batch['dataset'][0] == 'THuman':
             batch = self.process_thuman(batch)
-            # import ipdb; ipdb.set_trace()
 
         preds = self(batch)
 
@@ -470,12 +469,6 @@ class CCHTrainer(pl.LightningModule):
             batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, self.num_samples)
 
 
-            # del pytorch3d_mesh, template_mesh_pytorch3d, scan_mesh_centered
-            # del template_full_mesh_verts_posed_list, template_full_mesh_faces_expanded_list, template_full_mesh_verts_expanded_list
-            # del template_full_posed_pytorch3d_mesh
-
-
-
             # self._test_smpl_scan_alignment(smpl_vertices, scan_mesh_verts)
             # self._test_render(vc_maps, masks=mask, name='vc_maps')
             # self._test_render(w_maps, name='w_maps')
@@ -723,6 +716,8 @@ class CCHTrainer(pl.LightningModule):
         if hasattr(self.model, 'skinning_head'):
             for param in self.model.skinning_head.parameters():
                 param.requires_grad = False
+            
+        print("freeze canonical stage")
 
     def _unfreeze_canonical_modules(self):
         for param in self.model.aggregator.parameters():
