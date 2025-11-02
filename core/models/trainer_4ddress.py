@@ -138,8 +138,14 @@ class CCHTrainer(pl.LightningModule):
 
         metrics = self.metrics(preds, batch)
 
+        # self.visualiser.visualise_debug_loss(loss_dict)
+
+        # loss_dict.pop('debug_loss_pred2gt_conf')
+        # loss_dict.pop('debug_loss_pred2gt')
+        # loss_dict.pop('debug_loss_gt2pred')
         self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, batch_idx)
 
+        
         # for k, v in loss_dict.items():
         #     print(f"{k}: {v.item():.2f}", end='; ')
         # print('')
@@ -159,6 +165,8 @@ class CCHTrainer(pl.LightningModule):
             loss_dict[f'{split}_{key}'] = loss_dict.pop(key)
         for key in list(metrics.keys()):
             metrics[f'{split}_{key}'] = metrics.pop(key)
+
+
         
         self.log(f'{split}_loss', loss, prog_bar=True, sync_dist=True)
         if f'{split}_vc_cfd' in metrics:
@@ -748,6 +756,9 @@ class CCHTrainer(pl.LightningModule):
             param.requires_grad = False
         if hasattr(self.model, 'skinning_head'):
             for param in self.model.skinning_head.parameters():
+                param.requires_grad = False
+        if self.use_sapiens:
+            for param in self.model.sapiens.parameters():
                 param.requires_grad = False
             
         print("freeze canonical stage")

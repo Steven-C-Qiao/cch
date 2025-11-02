@@ -56,6 +56,77 @@ class Visualiser(pl.LightningModule):
         return f'{self.counter:06d}_{self._epoch:03d}{split_part}{suffix}.png'
 
 
+    def visualise_debug_loss(self, loss_dict):
+        debug_loss_pred2gt_conf = loss_dict['debug_loss_pred2gt_conf'].cpu().detach().numpy()
+        debug_loss_pred2gt = loss_dict['debug_loss_pred2gt'].cpu().detach().numpy()
+        # debug_loss_gt2pred = loss_dict['debug_loss_gt2pred'].cpu().detach().numpy()
+
+        B, K, N, H, W = debug_loss_pred2gt_conf.shape
+        B = 1
+        N = min(N, 4)
+        sub_fig_size = 4
+        num_cols = N
+        num_rows = 2 * K
+        
+        
+        fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
+        for k in range(K):
+            for n in range(N):
+                row = 2 * k
+                ax = plt.subplot(num_rows, num_cols, row*num_cols + n + 1)
+                # Plot conf in normal scale (can be negative)
+                conf_data = debug_loss_pred2gt_conf[0, k, n].copy()
+                # Mask zero values to be white by setting them to NaN
+                zero_mask = (conf_data == 0.0)
+                conf_data[zero_mask] = np.nan
+                im = ax.imshow(conf_data)
+                ax.set_title(f'Debug Loss Pred2GT Conf {k}, {n}')
+                divider = make_axes_locatable(ax)
+                cax = divider.append_axes("right", size="5%", pad=0.05)
+                plt.colorbar(im, cax=cax)
+
+                row = 2 * k + 1
+                ax = plt.subplot(num_rows, num_cols, row*num_cols + n + 1)
+                # Apply log scale to loss visualization
+                loss_data = debug_loss_pred2gt[0, k, n].copy()
+                # Mask zero values to be white by setting them to NaN
+                zero_mask = (loss_data == 0.0)
+                loss_data[zero_mask] = np.nan
+                # Use LogNorm so colorbar shows original values but visualization uses log scale
+                # Find valid (non-NaN) loss range for normalization
+                valid_loss = loss_data[~np.isnan(loss_data)]
+                if len(valid_loss) > 0:
+                    vmin = np.min(valid_loss[valid_loss > 0])  # Smallest non-zero loss
+                    vmax = np.max(valid_loss)  # Largest loss
+                    # Use LogNorm with a small offset to handle very small values
+                    norm = LogNorm(vmin=max(vmin, 1e-6), vmax=max(vmax, 1e-6))
+                    im = ax.imshow(loss_data, norm=norm)
+                else:
+                    # Fallback if no valid loss
+                    im = ax.imshow(loss_data)
+                ax.set_title(f'Debug Loss Pred2GT log {k}, {n}')
+                divider = make_axes_locatable(ax)
+                cax = divider.append_axes("right", size="5%", pad=0.05)
+                plt.colorbar(im, cax=cax)
+
+                # plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                # plt.imshow(debug_loss_gt2pred[0, k, n])
+                # plt.title(f'Debug Loss GT2Pred {k}, {n}')
+                # plt.colorbar()
+
+        plt.tight_layout(pad = 0.1)
+        # Calculate DPI to ensure all pixels in the images are visualized
+        # After tight_layout, approximate subplot size (accounting for colorbar ~5% width, titles, padding)
+        subplot_width_inches = (num_cols * sub_fig_size * 0.95) / num_cols  # Account for colorbars
+        subplot_height_inches = (num_rows * sub_fig_size * 0.9) / num_rows  # Account for titles/padding
+        # Calculate DPI needed to render all pixels
+        dpi_width = W / subplot_width_inches
+        dpi_height = H / subplot_height_inches
+        dpi = max(dpi_width, dpi_height) * 1.1  # Add 10% margin for safety
+        plt.savefig(os.path.join(self.save_dir, f'debug_loss.png'), 
+                    dpi=int(dpi), bbox_inches='tight', pad_inches=0.1)
+        plt.close()
+
     def visualise(
         self, 
         predictions,
