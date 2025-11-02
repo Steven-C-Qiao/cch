@@ -88,10 +88,6 @@ class Visualiser(pl.LightningModule):
         if self.rank != 0:
             return None 
         
-        # Synchronize CUDA operations before visualization to avoid DDP issues
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        
         # set suffix for this visualisation pass
         self._suffix = f"_{epoch}_{split}" if epoch is not None and split else ''
         # Store epoch and split separately for file naming
@@ -118,19 +114,15 @@ class Visualiser(pl.LightningModule):
             batch
         )
 
-        # self.visualise_pbs_pms(
-        #     predictions,
-        #     batch
-        # )
+        self.visualise_pbs_pms(
+            predictions,
+            batch
+        )
 
         self.visualise_full_pyvista(
             predictions,
             batch
         )
-        
-        # Synchronize CUDA operations after visualization to ensure DDP processes stay in sync
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
 
         # self.visualise_full(
         #     predictions,
@@ -393,30 +385,30 @@ class Visualiser(pl.LightningModule):
 
         num_rows = 0
 
-        # if 'vp_init' in predictions:
-        #     num_rows += K
-        #     vp_init = predictions['vp_init'] # bknhwc
-        #     vp_init[~mask.astype(bool)] = 0
-        #     norm_min, norm_max = vp_init.min(), vp_init.max()
-        #     vp_init = (vp_init - norm_min) / (norm_max - norm_min) 
-        #     vp_init[~mask.astype(bool)] = 1
+        if 'vp_init' in predictions:
+            num_rows += K
+            vp_init = predictions['vp_init'] # bknhwc
+            vp_init[~mask.astype(bool)] = 0
+            norm_min, norm_max = vp_init.min(), vp_init.max()
+            vp_init = (vp_init - norm_min) / (norm_max - norm_min) 
+            vp_init[~mask.astype(bool)] = 1
 
 
-        # if 'vc' in predictions:
-        #     num_rows += K 
-        #     vc = predictions['vc'] # bknhwc
-        #     vc[~mask.astype(bool)] = 0
-        #     norm_min, norm_max = vc.min(), vc.max()
-        #     vc = (vc - norm_min) / (norm_max - norm_min) 
-        #     vc[~mask.astype(bool)] = 1
+        if 'vc' in predictions:
+            num_rows += K 
+            vc = predictions['vc'] # bknhwc
+            vc[~mask.astype(bool)] = 0
+            norm_min, norm_max = vc.min(), vc.max()
+            vc = (vc - norm_min) / (norm_max - norm_min) 
+            vc[~mask.astype(bool)] = 1
 
-        # if 'vp' in predictions:
-        #     num_rows += K 
-        #     vp = predictions['vp'] # bknhwc
-        #     vp[~mask.astype(bool)] = 0
-        #     norm_min, norm_max = vp.min(), vp.max()
-        #     vp = (vp - norm_min) / (norm_max - norm_min) 
-        #     vp[~mask.astype(bool)] = 1
+        if 'vp' in predictions:
+            num_rows += K 
+            vp = predictions['vp'] # bknhwc
+            vp[~mask.astype(bool)] = 0
+            norm_min, norm_max = vp.min(), vp.max()
+            vp = (vp - norm_min) / (norm_max - norm_min) 
+            vp[~mask.astype(bool)] = 1
 
         if 'dvc' in predictions:
             num_rows += K 
@@ -424,20 +416,26 @@ class Visualiser(pl.LightningModule):
             dvc = np.linalg.norm(dvc, axis=-1)
             dvc = dvc * mask
 
+        # Skip visualization if there's nothing to plot
+        if num_rows == 0:
+            return
 
         fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
         row = 0
         for k in range(K):
-            # if 'vp_init' in predictions:
-            #     for n in range(4):
-            #         plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-            #         plt.imshow(vp_init[0, k, n])
-            #         plt.title(f'Pred init $V_{n+1}^{k+1}$')
-            #     row += 1
+            if 'vp_init' in predictions:
+                for n in range(4):
+                    plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                    plt.imshow(vp_init[0, k, n])
+                    plt.title(f'Pred init $V_{n+1}^{k+1}$')
+                row += 1
 
             if 'dvc' in predictions:
-                for n in range(4):
-                    ax = plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                for n in range(N):
+                    subplot_idx = (row)*num_cols + n + 1
+                    if subplot_idx > num_rows * num_cols:
+                        break
+                    ax = plt.subplot(num_rows, num_cols, subplot_idx)
                     dvc_vis = dvc[0, k, n].copy()
                     # Mask background to nan
                     dvc_vis[~mask[0, k, n].astype(bool)] = np.nan
@@ -448,19 +446,19 @@ class Visualiser(pl.LightningModule):
                     plt.colorbar(im, cax=cax)
                 row += 1
 
-            # if 'vc' in predictions:
-            #     for n in range(4):
-            #         plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-            #         plt.imshow(vc[0, k, n])
-            #         plt.title(f'Pred $V_{n+1}^{{c,{k+1}}}$')
-            #     row += 1
+            if 'vc' in predictions:
+                for n in range(4):
+                    plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                    plt.imshow(vc[0, k, n])
+                    plt.title(f'Pred $V_{n+1}^{{c,{k+1}}}$')
+                row += 1
 
-            # if 'vp' in predictions:
-            #     for n in range(4):
-            #         plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
-            #         plt.imshow(vp[0, k, n])
-            #         plt.title(f'Pred final $V_{n+1}^{k+1}$')
-            #     row += 1
+            if 'vp' in predictions:
+                for n in range(4):
+                    plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+                    plt.imshow(vp[0, k, n])
+                    plt.title(f'Pred final $V_{n+1}^{k+1}$')
+                row += 1
             
 
 

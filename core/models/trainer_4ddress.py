@@ -174,7 +174,13 @@ class CCHTrainer(pl.LightningModule):
         self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
 
         if self.dev or self.plot:
-            self.visualiser.visualise(preds, batch)
+            # Synchronize CUDA on ALL ranks before visualization to ensure DDP processes stay in sync
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            self.visualiser.visualise(preds, batch, split=split, epoch=self.current_epoch)
+            # Synchronize CUDA on ALL ranks after visualization to ensure DDP processes stay in sync
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
             if self.dev:
                 for k, v in loss_dict.items():
                     print(f"{k}: {v.item():.2f}", end='; ')
@@ -191,21 +197,48 @@ class CCHTrainer(pl.LightningModule):
                 should_vis = (batch_idx == 4)
 
             if should_vis:
-                self.visualiser.visualise(preds, batch, split=split, epoch=self.current_epoch) 
+                # Synchronize CUDA on ALL ranks before visualization to ensure DDP processes stay in sync
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                self.visualiser.visualise(preds, batch, split=split, epoch=self.current_epoch)
+                # Synchronize CUDA on ALL ranks after visualization to ensure DDP processes stay in sync
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize() 
 
 
-    def validation_step(self, batch, batch_idx):
-        batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
+        # Handle both 4DDress and THuman validation datasets
+        # dataloader_idx: 0 = THuman, 1 = 4DDress (matching order in val_dataloader return)
+        if dataloader_idx == 0:
+            dataset_name = 'THuman'
+            batch = self.process_thuman(batch)
+        elif dataloader_idx == 1:
+            dataset_name = '4DDress'
+            batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
+        else:
+            # Fallback: try to determine from batch structure
+            if isinstance(batch, dict) and 'dataset' in batch:
+                dataset_name = batch['dataset'][0] if isinstance(batch['dataset'], list) else batch['dataset']
+            else:
+                dataset_name = '4DDress' if 'vc_maps' in batch else 'THuman'
+            
+            if dataset_name == '4DDress':
+                batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
+            elif dataset_name == 'THuman':
+                batch = self.process_thuman(batch)
+            else:
+                raise ValueError(f"Unknown dataset: {dataset_name}")
+        
         preds = self(batch)
-        loss, loss_dict = self.criterion(preds, batch, dataset_name='4DDress')
+        loss, loss_dict = self.criterion(preds, batch, dataset_name=dataset_name)
         metrics = self.metrics(preds, batch)
         self._log_metrics_and_visualise(loss, loss_dict, metrics, 'val', preds, batch, batch_idx)
         # with torch.no_grad():
         #     loss = self.training_step(batch, batch_idx, split='val')
         return loss
 
-    def test_step(self, batch, batch_idx):
-        return self.validation_step(batch, batch_idx)
+    def test_step(self, batch, batch_idx, dataloader_idx=0):
+        return self.validation_step(batch, batch_idx, dataloader_idx)
     
 
     
@@ -604,7 +637,7 @@ class CCHTrainer(pl.LightningModule):
                 verts=scan_verts,
                 faces=scan_faces
             )
-            vp = sample_points_from_meshes(scan_mesh_pytorch3d, 24000)
+            vp = sample_points_from_meshes(scan_mesh_pytorch3d, self.num_samples)
             vp_ptcld = Pointclouds(points=vp)
             batch['vp_ptcld'] = vp_ptcld
             batch['vp'] = vp

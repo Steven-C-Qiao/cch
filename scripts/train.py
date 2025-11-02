@@ -111,7 +111,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
             every_n_epochs=5,
             save_last=True,
             verbose=True,
-            monitor='val_loss',
+            monitor='val_loss/dataloader_idx_1',  # Monitor 4DDress validation loss
             mode='min'
         ),  
         # ModelCheckpoint( # this is the vc_init cfd 
@@ -129,7 +129,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
             save_top_k=1,
             save_last=False,
             verbose=True,
-            monitor='val_vc_cfd',
+            monitor='val_vc_cfd/dataloader_idx_1',  # Monitor 4DDress validation vc_cfd
             mode='min'
         ),
         *([] if not cfg.MODEL.POSE_BLENDSHAPES else [
@@ -148,7 +148,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
                 save_top_k=1,
                 save_last=False,
                 verbose=True,
-                monitor='val_vp_cfd',
+                monitor='val_vp_cfd/dataloader_idx_1',  # Monitor 4DDress validation vp_cfd
                 mode='min'
             ),
         ]),
