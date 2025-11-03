@@ -91,6 +91,19 @@ class CCHLoss(pl.LightningModule):
             loss_dict['vc_pm_loss'] = vc_pm_loss
             total_loss = total_loss + vc_pm_loss
 
+            if self.cfg.LOSS.USE_VC_NORMALS:
+                loss_grad = gradient_loss_multi_scale_wrapper(
+                    rearrange(pred_vc, 'b n h w c -> (b n) h w c'),
+                    rearrange(gt_vc_smpl_pm, 'b n h w c -> (b n) h w c'),
+                    rearrange(mask.bool(), 'b n h w -> (b n) h w'),
+                    gradient_loss_fn=normal_loss,
+                    scales=3,
+                    conf=rearrange(confidence, 'b n h w -> (b n) h w'),
+                )
+                loss_grad *= self.cfg.LOSS.VC_NORMAL_LOSS_WEIGHT
+                loss_dict['vc_normal_loss'] = loss_grad
+                total_loss = total_loss + loss_grad
+
 
         if "vc_init" in predictions and "vc_smpl_maps" in batch:
             assert dataset_name == 'THuman'
@@ -99,7 +112,7 @@ class CCHLoss(pl.LightningModule):
             else:
                 loss_fn = self.vc_pm_l2_loss
             
-            pred_vc = predictions['vc_init']
+            pred_vc = predictions['vc_init'] # (B, N, H, W, 3)
             gt_vc_smpl_pm = batch['vc_smpl_maps'][:, :N]
             
             image_mask = batch['masks'][:, :N]
@@ -119,6 +132,20 @@ class CCHLoss(pl.LightningModule):
             vc_pm_loss *= self.cfg.LOSS.VC_PM_LOSS_WEIGHT
             loss_dict['vc_pm_loss'] = vc_pm_loss
             total_loss = total_loss + vc_pm_loss
+
+
+            if self.cfg.LOSS.USE_VC_NORMALS:
+                loss_grad = gradient_loss_multi_scale_wrapper(
+                    rearrange(pred_vc, 'b n h w c -> (b n) h w c'),
+                    rearrange(gt_vc_smpl_pm, 'b n h w c -> (b n) h w c'),
+                    rearrange(mask.bool(), 'b n h w -> (b n) h w'),
+                    gradient_loss_fn=normal_loss,
+                    scales=3,
+                    conf=rearrange(confidence, 'b n h w -> (b n) h w'),
+                )
+                loss_grad *= self.cfg.LOSS.VC_NORMAL_LOSS_WEIGHT
+                loss_dict['vc_normal_loss'] = loss_grad
+                total_loss = total_loss + loss_grad
 
 
         if "w" in predictions and "smpl_w_maps" in batch:
@@ -227,8 +254,8 @@ class CCHLoss(pl.LightningModule):
                 scales=3,
                 conf=confidence,
             )
-            loss_grad *= self.cfg.LOSS.NORMAL_GRADIENT_LOSS_WEIGHT
-            loss_dict['normal_gradient_loss'] = loss_grad
+            loss_grad *= self.cfg.LOSS.VP_NORMAL_LOSS_WEIGHT
+            loss_dict['vp_normal_loss'] = loss_grad
             total_loss = total_loss + loss_grad
 
 

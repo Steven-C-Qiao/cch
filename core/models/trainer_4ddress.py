@@ -512,7 +512,6 @@ class CCHTrainer(pl.LightningModule):
 
 
 
-
             # -----------------Normalise after render -----------------
             if self.cfg.DATA.NORMALISE:
                 normalise_to_height = 1.7 
