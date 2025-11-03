@@ -37,7 +37,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=None, plot=False):
-    set_seed(42)
+    set_seed(39)
     
     # Get config
     cfg = get_cch_cfg_defaults()

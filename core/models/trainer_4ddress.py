@@ -22,6 +22,7 @@ from core.losses.cch_loss import CCHLoss
 from core.losses.cch_metrics import CCHMetrics
 from core.utils.visualiser import Visualiser
 from core.utils.feature_renderer import FeatureRenderer
+from core.utils.normal_renderer import SurfaceNormalRenderer
 from core.models.sapiens_wrapper import SapiensWrapper
 from core.configs.model_size_cfg import MODEL_CONFIGS
 from core.utils.general_lbs import general_lbs
@@ -55,7 +56,9 @@ class CCHTrainer(pl.LightningModule):
 
 
         self.feature_renderer = FeatureRenderer(image_size=(512, 384))#(512, 384))#image_size=(256, 192)) 
-        # self.thuman_renderer = FeatureRenderer(image_size=(256, 256))
+        self.thuman_renderer = FeatureRenderer(image_size=(256, 256))
+        # self.normal_renderer = SurfaceNormalRenderer(image_size=(512, 384))
+        # self.thuman_normal_renderer = SurfaceNormalRenderer(image_size=(256, 256))
 
         self.smpl_male = smplx.create(
             model_type=self.body_model,
@@ -394,6 +397,21 @@ class CCHTrainer(pl.LightningModule):
             batch['smpl_w_maps'] = w_maps
 
 
+            # ----------------------- Render scan pointmaps for normal loss -----------------------
+            pytorch3d_mesh = Meshes(
+                verts=scan_mesh_verts,
+                faces=scan_mesh_faces,
+                textures=TexturesVertex(verts_features=scan_mesh_verts_centered)
+            )
+            renderer_output = self.feature_renderer(pytorch3d_mesh)
+            scan_pointmaps = renderer_output['maps']
+            scan_pointmaps = scan_pointmaps[:, crop_amount:H-crop_amount, :, :]
+            scan_pointmaps = torch.nn.functional.interpolate(
+                scan_pointmaps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            )
+            scan_pointmaps = rearrange(scan_pointmaps, '(b k) c h w -> b k h w c', b=B, k=K)
+            batch['scan_pointmaps'] = scan_pointmaps
+
             template_mesh = batch['template_mesh']
             template_mesh_verts = [torch.tensor(mesh.vertices, device=self.device, dtype=torch.float32) for mesh in template_mesh]
             template_mesh_faces = [torch.tensor(mesh.faces, device=self.device, dtype=torch.long) for mesh in template_mesh]
@@ -470,10 +488,29 @@ class CCHTrainer(pl.LightningModule):
             mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
             batch['smpl_mask'] = mask.squeeze(-1)
 
+
+            # # ----------------------- Render ground truth normals from template full mesh -----------------------
+            # # Compute and render normals from ground truth template FULL mesh for all K views
+            # # Use canonical (unposed) full mesh for normal rendering to match canonical space of vc_init
+            # self.normal_renderer._set_cameras(cameras)
+
+            # # Render normals using SurfaceNormalRenderer (returns normals in [-1, 1] by default)
+            # gt_normal_ret = self.normal_renderer(
+            #     mesh=pytorch3d_mesh,
+            #     return_normalized=True  # Return normals in [0, 1] range
+            # )
+            # gt_normal_maps = gt_normal_ret['normals']  # (B*K, H, W, 3)
+            # gt_normal_maps = gt_normal_maps[:, crop_amount:H-crop_amount, :, :]
+            # gt_normal_maps = torch.nn.functional.interpolate(
+            #     gt_normal_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            # )
+            # gt_normal_maps = rearrange(gt_normal_maps, '(b k) c h w -> b k h w c', b=B, k=K)
             
-            template_mesh = batch['template_mesh']
-            template_mesh_verts = [torch.tensor(mesh.vertices, device=self.device, dtype=torch.float32) for mesh in template_mesh]
-            template_mesh_faces = [torch.tensor(mesh.faces, device=self.device, dtype=torch.long) for mesh in template_mesh]
+            # # Add to batch
+            # batch['gt_normal_maps'] = gt_normal_maps
+
+
+
 
 
             # -----------------Normalise after render -----------------
@@ -510,10 +547,12 @@ class CCHTrainer(pl.LightningModule):
             batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, self.num_samples)
 
 
+
             # self._test_smpl_scan_alignment(smpl_vertices, scan_mesh_verts)
             # self._test_render(vc_maps, masks=mask, name='vc_maps')
             # self._test_render(w_maps, name='w_maps')
             # self._test_sampling(scan_mesh_centered, vp_ptcld)
+            # self._test_render(scan_pointmaps, masks=batch['masks'], name='scan_pointmaps')
 
         return batch 
     
@@ -555,18 +594,45 @@ class CCHTrainer(pl.LightningModule):
             batch['smpl_w_maps'] = rearrange(batch['smpl_w_maps'], 'b k c h w -> b k h w c')
             batch['vc_smpl_maps'] = rearrange(batch['vc_smpl_maps'], 'b k c h w -> b k h w c')
 
-            # cam_R, cam_T = batch['cam_R'], batch['cam_T']
+            cam_R, cam_T = batch['cam_R'], batch['cam_T']
 
-            # cameras = PerspectiveCameras(
-            #     R=cam_R.flatten(0, 1), 
-            #     T=cam_T.flatten(0, 1), 
-            #     focal_length=724.0773/2,
-            #     principal_point=[(128, 128),],
-            #     image_size=[(256, 256),],
-            #     device=self.device,
-            #     in_ndc=False
+            cameras = PerspectiveCameras(
+                R=cam_R.flatten(0, 1), 
+                T=cam_T.flatten(0, 1), 
+                focal_length=724.0773/2,
+                principal_point=[(128, 128),],
+                image_size=[(256, 256),],
+                device=self.device,
+                in_ndc=False
+            )
+            self.thuman_renderer._set_cameras(cameras)
+
+            pytorch3d_mesh = Meshes(
+                verts=scan_verts,
+                faces=scan_faces,
+                textures=TexturesVertex(verts_features=scan_verts)
+            )
+            renderer_output = self.thuman_renderer(pytorch3d_mesh)
+            scan_pointmaps = renderer_output['maps']
+            scan_pointmaps = torch.nn.functional.interpolate(
+                scan_pointmaps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            )
+            scan_pointmaps = rearrange(scan_pointmaps, '(b k) c h w -> b k h w c', b=B, k=K)
+            batch['scan_pointmaps'] = scan_pointmaps
+
+            # renderer_output = self.thuman_normal_renderer(
+            #     pytorch3d_mesh,
+            #     return_normalized=True
             # )
-            # self.thuman_renderer._set_cameras(cameras)
+            # gt_normal_maps = renderer_output['normals']
+            # gt_normal_maps = torch.nn.functional.interpolate(
+            #     gt_normal_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            # )
+            # gt_normal_maps = rearrange(gt_normal_maps, '(b k) c h w -> b k h w c', b=B, k=K)
+            # batch['gt_normal_maps'] = gt_normal_maps
+
+            # self._test_render(scan_pointmaps, masks=batch['masks'], name='scan_pointmaps')
+
 
             # dists, idx = self.knn_ptcld(
             #     Pointclouds(points=scan_verts), 
@@ -854,7 +920,7 @@ class CCHTrainer(pl.LightningModule):
             to_vis = maps.cpu().detach().numpy()
 
         if masks is not None:
-            mask = masks.cpu().detach().numpy().squeeze(-1)
+            mask = masks.cpu().detach().numpy()
             to_vis[~mask.astype(bool)] = 0
             norm_min, norm_max = to_vis.min(), to_vis.max()
             to_vis = (to_vis - norm_min) / (norm_max - norm_min) 
@@ -862,10 +928,10 @@ class CCHTrainer(pl.LightningModule):
 
         import matplotlib.pyplot as plt
         
-        fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+        fig, axes = plt.subplots(2, 5, figsize=(16, 8))
         for i in range(1):
-            for j in range(4):
-                idx = i * 4 + j
+            for j in range(5):
+                idx = i * 5 + j
                 axes[i,j].imshow(to_vis[i, j])
                 # axes[i,j].axis('off')
         

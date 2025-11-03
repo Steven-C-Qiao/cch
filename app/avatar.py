@@ -461,7 +461,7 @@ class Solver:
         scatter_mask = mask_N[0].astype(bool) # nhw
         if "vc_init_conf" in predictions:
             confidence = predictions['vc_init_conf']
-            confidence = confidence > 15.
+            confidence = confidence > 1.
         else:
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
         scatter_mask = scatter_mask * confidence[0].astype(bool)
@@ -678,10 +678,10 @@ if __name__ == '__main__':
 
 
 
-    id = '00187'
-    take = 'Take1'
-    frames = ['00011', '00011', '00011', '00011', '00011']
-    cameras = ['0004', '0028', '0052', '0076', '0076']
+    # id = '00187'
+    # take = 'Take1'
+    # frames = ['00011', '00011', '00011', '00011', '00011']
+    # cameras = ['0004', '0028', '0052', '0076', '0076']
 
     # id = '00188'
     # take = 'Take1'
@@ -689,10 +689,10 @@ if __name__ == '__main__':
     # cameras = ['0004', '0028', '0052', '0076', '0076']
 
 
-    # id = '00134'
-    # take = 'Take3'
-    # frames = ['00006', '00006', '00006', '00006', '00006']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
+    id = '00134'
+    take = 'Take3'
+    frames = ['00006', '00006', '00006', '00006', '00006']
+    cameras = ['0004', '0028', '0052', '0076', '0076']
 
 
     # id = '00148'
@@ -702,8 +702,8 @@ if __name__ == '__main__':
 
 
     
-    novel_pose_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/00147/Inner/Take6/SMPLX'
-    gt_scan_path = f'/scratch/u5aa/chexuan.u5aa/4DDress/00147/Inner/Take6/Meshes_pkl'
+    novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/SMPLX'
+    gt_scan_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/Meshes_pkl'
 
 
     solver = Solver(id, take, frames, cameras, novel_pose_path, args.load_from_ckpt)

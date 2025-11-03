@@ -29,6 +29,8 @@ try:
 except ImportError:
     PV_AVAILABLE = False
 
+# from core.losses.cch_loss import point_map_to_normal
+
 
 
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
@@ -169,6 +171,22 @@ class Visualiser(pl.LightningModule):
             self.counter = batch_idx
         else:
             self.counter = self.global_step
+
+        # if 'gt_normal_maps' in batch:
+        #     B, K, H, W, C = batch['gt_normal_maps'].shape
+        #     batch['gt_normal_maps'] = batch['gt_normal_maps'][:, :N] # b n h w c
+        # if 'vp' in predictions:
+        #     B, K, N, H, W, C = predictions['vp'].shape
+        #     pred = predictions['vp']
+        #     pred = torch.stack([pred[:, i, i] for i in range(4)], dim=1)
+        #     mask = batch['masks'][:, :N]
+        #     pred_normals, pred_valids = point_map_to_normal(pred, mask)
+
+        #     pred_normals = pred_normals[pred_valids]
+
+        #     predictions['vp_normal_maps'] = pred_normals
+        
+
 
         # Convert predictions to numpy if tensor
         for k, v in predictions.items():
@@ -324,6 +342,52 @@ class Visualiser(pl.LightningModule):
             w = np.argmax(w, axis=-1)
             w = w * image_masks_N 
 
+        # # Ground truth normals
+        # gt_normal_maps = None
+        # if 'gt_normal_maps' in batch:
+        #     num_rows += 1
+        #     gt_normal_maps = batch['gt_normal_maps'][:, :N]  # (B, N, H, W, 3)
+        #     # Convert to numpy if torch tensor
+        #     if isinstance(gt_normal_maps, torch.Tensor):
+        #         gt_normal_maps = gt_normal_maps.cpu().numpy()
+        #     # Normalize to [0, 1] if not already
+        #     if gt_normal_maps.max() > 1.0 or gt_normal_maps.min() < 0.0:
+        #         gt_normal_maps = (gt_normal_maps + 1.0) / 2.0
+        #     gt_normal_maps = gt_normal_maps * mask_union[..., None]
+        
+        # # Predicted normals from vc_init
+        # pred_normal_maps = None
+        # if 'vc_init' in predictions:
+        #     num_rows += 1
+        #     # Convert vc_init to torch if numpy
+        #     vc_init_torch = predictions['vc_init']
+        #     if isinstance(vc_init_torch, np.ndarray):
+        #         vc_init_torch = torch.from_numpy(vc_init_torch).float()
+        #     # Convert mask to torch if numpy
+        #     mask_torch = mask_union
+        #     if isinstance(mask_torch, np.ndarray):
+        #         mask_torch = torch.from_numpy(mask_torch.astype(float)).bool()
+            
+        #     # Compute normals for each view
+        #     pred_normal_list = []
+        #     for b in range(B):
+        #         for n in range(N):
+        #             point_map = vc_init_torch[b, n].unsqueeze(0)  # (1, H, W, 3)
+        #             mask_n = mask_torch[b, n].unsqueeze(0)  # (1, H, W)
+        #             # Compute normals using existing function - returns (4, 1, H, W, 3)
+        #             normals, valids = point_map_to_normal(point_map, mask_n)
+        #             # Average over 4 normal directions and squeeze batch dim
+        #             normals_avg = normals.mean(dim=0).squeeze(0)  # (H, W, 3)
+        #             # Convert to numpy
+        #             if isinstance(normals_avg, torch.Tensor):
+        #                 normals_avg = normals_avg.cpu().numpy()
+        #             # Convert from [-1, 1] to [0, 1] for visualization
+        #             normals_avg = (normals_avg + 1.0) / 2.0
+        #             pred_normal_list.append(normals_avg)
+            
+        #     pred_normal_maps = np.stack(pred_normal_list, axis=0).reshape(B, N, H, W, 3)
+        #     pred_normal_maps = pred_normal_maps * mask_union[..., None]
+
     
         fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
         for n in range(num_cols):
@@ -414,6 +478,20 @@ class Visualiser(pl.LightningModule):
                 cax = divider.append_axes("right", size="5%", pad=0.05)
                 plt.colorbar(im, cax=cax)
                 row += 1
+
+            # # Ground truth normals
+            # if gt_normal_maps is not None:
+            #     plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+            #     plt.imshow(gt_normal_maps[0, n])
+            #     plt.title(f'GT Normal $n_{n+1}$')
+            #     row += 1
+            
+            # # Predicted normals from vc_init
+            # if pred_normal_maps is not None:
+            #     plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
+            #     plt.imshow(pred_normal_maps[0, n])
+            #     plt.title(f'Pred Normal $n_{n+1}$')
+            #     row += 1
 
         # for ax in fig.axes:
         #     ax.set_xticks([])

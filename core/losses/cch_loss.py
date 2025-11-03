@@ -204,7 +204,33 @@ class CCHLoss(pl.LightningModule):
             vp_loss *= self.cfg.LOSS.VP_CHAMFER_LOSS_WEIGHT
             loss_dict['vp_chamfer_loss'] = vp_loss
             total_loss = total_loss + vp_loss
-  
+
+
+        if "vp" in predictions and "scan_pointmaps" in batch and self.cfg.LOSS.USE_NORMALS:
+            pred = predictions['vp'] # (B, K, N, H, W, 3)
+            gt = batch['scan_pointmaps'] # (B, K, H, W, 3)
+            mask = batch['masks'].bool()
+            confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None # (B, N, H, W)
+
+            pred = torch.stack([pred[:, i, i] for i in range(4)], dim=1)
+            pred = rearrange(pred, 'b n h w c -> (b n) h w c')
+            gt = rearrange(gt[:, :N], 'b n h w c -> (b n) h w c')
+            mask = rearrange(mask[:, :N], 'b n h w -> (b n) h w')
+            confidence = rearrange(confidence, 'b n h w -> (b n) h w')
+
+
+            loss_grad = gradient_loss_multi_scale_wrapper(
+                pred,
+                gt,
+                mask,
+                gradient_loss_fn=normal_loss,
+                scales=3,
+                conf=confidence,
+            )
+            loss_grad *= self.cfg.LOSS.NORMAL_GRADIENT_LOSS_WEIGHT
+            loss_dict['normal_gradient_loss'] = loss_grad
+            total_loss = total_loss + loss_grad
+
 
         loss_dict['total_loss'] = total_loss
 
@@ -493,6 +519,35 @@ def point_map_to_normal(point_map, mask, eps=1e-6):
         normals = F.normalize(normals, p=2, dim=-1, eps=eps)
 
     return normals, valids
+
+
+
+def gradient_loss_multi_scale_wrapper(prediction, target, mask, scales=4, gradient_loss_fn = None, conf=None):
+    """
+    Multi-scale gradient loss wrapper. Applies gradient loss at multiple scales by subsampling the input.
+    This helps capture both fine and coarse spatial structures.
+    
+    Args:
+        prediction: (B, H, W, C) predicted values
+        target: (B, H, W, C) ground truth values  
+        mask: (B, H, W) valid pixel mask
+        scales: Number of scales to use
+        gradient_loss_fn: Gradient loss function to apply
+        conf: (B, H, W) confidence weights (optional)
+    """
+    total = 0
+    for scale in range(scales):
+        step = pow(2, scale)  # Subsample by 2^scale
+
+        total += gradient_loss_fn(
+            prediction[:, ::step, ::step],
+            target[:, ::step, ::step],
+            mask[:, ::step, ::step],
+            conf=conf[:, ::step, ::step] if conf is not None else None
+        )
+
+    total = total / scales
+    return total
 
 
 if __name__ == '__main__':
