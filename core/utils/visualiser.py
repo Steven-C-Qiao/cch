@@ -79,9 +79,13 @@ class Visualiser(pl.LightningModule):
                 # Plot conf in normal scale (can be negative)
                 conf_data = debug_loss_pred2gt_conf[0, k, n].copy()
                 # Mask zero values to be white by setting them to NaN
-                zero_mask = (conf_data == 0.0)
-                conf_data[zero_mask] = np.nan
-                im = ax.imshow(conf_data)
+                # zero_mask = (conf_data == 0.0)
+                # conf_data[zero_mask] = np.nan
+                # # Also mask very large values to NaN for readability
+                # high_mask = (conf_data > 10)
+                # conf_data[high_mask] = np.nan
+                # Use the same diverging colormap style as error visualisation
+                im = ax.imshow(conf_data, cmap='RdYlGn_r')
                 ax.set_title(f'Debug Loss Pred2GT Conf {k}, {n}')
                 divider = make_axes_locatable(ax)
                 cax = divider.append_axes("right", size="5%", pad=0.05)
@@ -89,23 +93,15 @@ class Visualiser(pl.LightningModule):
 
                 row = 2 * k + 1
                 ax = plt.subplot(num_rows, num_cols, row*num_cols + n + 1)
-                # Apply log scale to loss visualization
+                # Visualize loss with linear color scale
                 loss_data = debug_loss_pred2gt[0, k, n].copy()
                 # Mask zero values to be white by setting them to NaN
                 zero_mask = (loss_data == 0.0)
-                loss_data[zero_mask] = np.nan
-                # Use LogNorm so colorbar shows original values but visualization uses log scale
-                # Find valid (non-NaN) loss range for normalization
-                valid_loss = loss_data[~np.isnan(loss_data)]
-                if len(valid_loss) > 0:
-                    vmin = np.min(valid_loss[valid_loss > 0])  # Smallest non-zero loss
-                    vmax = np.max(valid_loss)  # Largest loss
-                    # Use LogNorm with a small offset to handle very small values
-                    norm = LogNorm(vmin=max(vmin, 1e-6), vmax=max(vmax, 1e-6))
-                    im = ax.imshow(loss_data, norm=norm)
-                else:
-                    # Fallback if no valid loss
-                    im = ax.imshow(loss_data)
+                # loss_data[zero_mask] = np.nan
+                # Also mask very large values to NaN for readability
+                # high_mask = (loss_data > 10)
+                # loss_data[high_mask] = np.nan
+                im = ax.imshow(loss_data, cmap='RdYlGn_r')
                 ax.set_title(f'Debug Loss Pred2GT log {k}, {n}')
                 divider = make_axes_locatable(ax)
                 cax = divider.append_axes("right", size="5%", pad=0.05)
@@ -117,16 +113,57 @@ class Visualiser(pl.LightningModule):
                 # plt.colorbar()
 
         plt.tight_layout(pad = 0.1)
-        # Calculate DPI to ensure all pixels in the images are visualized
-        # After tight_layout, approximate subplot size (accounting for colorbar ~5% width, titles, padding)
-        subplot_width_inches = (num_cols * sub_fig_size * 0.95) / num_cols  # Account for colorbars
-        subplot_height_inches = (num_rows * sub_fig_size * 0.9) / num_rows  # Account for titles/padding
-        # Calculate DPI needed to render all pixels
-        dpi_width = W / subplot_width_inches
-        dpi_height = H / subplot_height_inches
-        dpi = max(dpi_width, dpi_height) * 1.1  # Add 10% margin for safety
         plt.savefig(os.path.join(self.save_dir, f'debug_loss.png'), 
-                    dpi=int(dpi), bbox_inches='tight', pad_inches=0.1)
+                    bbox_inches='tight', pad_inches=0.1)
+        plt.close()
+
+    
+    def visualise_debug_vc_pm_loss(self, loss_dict):
+        debug_vc_pm_loss_conf = loss_dict['debug_vc_pm_loss_conf'].cpu().detach().numpy()
+        debug_vc_pm_loss = loss_dict['debug_vc_pm_loss'].cpu().detach().numpy()
+        
+        B, N, H, W = debug_vc_pm_loss_conf.shape
+        B = 1
+        N = min(N, 4)
+        sub_fig_size = 4
+        num_cols = 4
+        num_rows = 2
+        
+        
+        fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))
+        for n in range(N):
+            row = 0
+            ax = plt.subplot(num_rows, num_cols, row*num_cols + n + 1)
+            # Plot conf in normal scale (can be negative)
+            conf_data = debug_vc_pm_loss_conf[0, n].copy()
+            # Mask zero values to be white by setting them to NaN
+            zero_mask = (conf_data == 0.0)
+            conf_data[zero_mask] = np.nan
+            # Also mask very large values to NaN for readability
+            # Use the same diverging colormap style as error visualisation
+            im = ax.imshow(conf_data, cmap='RdYlGn_r')
+            ax.set_title(f'Debug VC PM Loss Conf {n}')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            plt.colorbar(im, cax=cax)
+
+            row = 1
+            ax = plt.subplot(num_rows, num_cols, row*num_cols + n + 1)
+            # Visualize loss with linear color scale
+            loss_data = debug_vc_pm_loss[0, n].copy()
+            # Mask zero values to be white by setting them to NaN
+            zero_mask = (loss_data == 0.0)
+            # loss_data[zero_mask] = np.nan
+            # Also mask very large values to NaN for readability
+            im = ax.imshow(loss_data, cmap='RdYlGn_r')
+            ax.set_title(f'Debug VC PM Loss {n}')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            plt.colorbar(im, cax=cax)
+
+        plt.tight_layout(pad = 0.1)
+        plt.savefig(os.path.join(self.save_dir, f'debug_vc_pm_loss.png'), dpi=300,
+                    bbox_inches='tight', pad_inches=0.1)
         plt.close()
 
     def visualise(
@@ -341,52 +378,6 @@ class Visualiser(pl.LightningModule):
             w = predictions['w']
             w = np.argmax(w, axis=-1)
             w = w * image_masks_N 
-
-        # # Ground truth normals
-        # gt_normal_maps = None
-        # if 'gt_normal_maps' in batch:
-        #     num_rows += 1
-        #     gt_normal_maps = batch['gt_normal_maps'][:, :N]  # (B, N, H, W, 3)
-        #     # Convert to numpy if torch tensor
-        #     if isinstance(gt_normal_maps, torch.Tensor):
-        #         gt_normal_maps = gt_normal_maps.cpu().numpy()
-        #     # Normalize to [0, 1] if not already
-        #     if gt_normal_maps.max() > 1.0 or gt_normal_maps.min() < 0.0:
-        #         gt_normal_maps = (gt_normal_maps + 1.0) / 2.0
-        #     gt_normal_maps = gt_normal_maps * mask_union[..., None]
-        
-        # # Predicted normals from vc_init
-        # pred_normal_maps = None
-        # if 'vc_init' in predictions:
-        #     num_rows += 1
-        #     # Convert vc_init to torch if numpy
-        #     vc_init_torch = predictions['vc_init']
-        #     if isinstance(vc_init_torch, np.ndarray):
-        #         vc_init_torch = torch.from_numpy(vc_init_torch).float()
-        #     # Convert mask to torch if numpy
-        #     mask_torch = mask_union
-        #     if isinstance(mask_torch, np.ndarray):
-        #         mask_torch = torch.from_numpy(mask_torch.astype(float)).bool()
-            
-        #     # Compute normals for each view
-        #     pred_normal_list = []
-        #     for b in range(B):
-        #         for n in range(N):
-        #             point_map = vc_init_torch[b, n].unsqueeze(0)  # (1, H, W, 3)
-        #             mask_n = mask_torch[b, n].unsqueeze(0)  # (1, H, W)
-        #             # Compute normals using existing function - returns (4, 1, H, W, 3)
-        #             normals, valids = point_map_to_normal(point_map, mask_n)
-        #             # Average over 4 normal directions and squeeze batch dim
-        #             normals_avg = normals.mean(dim=0).squeeze(0)  # (H, W, 3)
-        #             # Convert to numpy
-        #             if isinstance(normals_avg, torch.Tensor):
-        #                 normals_avg = normals_avg.cpu().numpy()
-        #             # Convert from [-1, 1] to [0, 1] for visualization
-        #             normals_avg = (normals_avg + 1.0) / 2.0
-        #             pred_normal_list.append(normals_avg)
-            
-        #     pred_normal_maps = np.stack(pred_normal_list, axis=0).reshape(B, N, H, W, 3)
-        #     pred_normal_maps = pred_normal_maps * mask_union[..., None]
 
     
         fig = plt.figure(figsize=(num_cols*sub_fig_size, num_rows*sub_fig_size))

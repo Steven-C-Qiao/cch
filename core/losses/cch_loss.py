@@ -28,6 +28,7 @@ class CCHLoss(pl.LightningModule):
         self.dvc_loss = MaskedUncertaintyL2Loss()
 
         self.debug_chamfer_loss = DebugChamferLoss()
+        self.debug_l2_loss = DebugL2Loss()
 
 
 
@@ -114,12 +115,12 @@ class CCHLoss(pl.LightningModule):
             
             pred_vc = predictions['vc_init'] # (B, N, H, W, 3)
             gt_vc_smpl_pm = batch['vc_smpl_maps'][:, :N]
-            
+
             image_mask = batch['masks'][:, :N]
             smpl_mask = batch['smpl_mask'][:, :N]
 
             mask = image_mask * smpl_mask # take intersection of masks
-            
+
             confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
             
             vc_pm_loss = loss_fn(
@@ -132,6 +133,18 @@ class CCHLoss(pl.LightningModule):
             vc_pm_loss *= self.cfg.LOSS.VC_PM_LOSS_WEIGHT
             loss_dict['vc_pm_loss'] = vc_pm_loss
             total_loss = total_loss + vc_pm_loss
+
+
+            # debug_vc_loss_value, debug_vc_loss, debug_vc_loss_conf = self.debug_l2_loss(
+            #     pred_vc,
+            #     gt_vc_smpl_pm,
+            #     mask=mask,
+            #     uncertainty=confidence
+            # )
+            
+            # loss_dict['debug_vc_pm_loss'] = debug_vc_loss
+            # loss_dict['debug_vc_pm_loss_conf'] = debug_vc_loss_conf
+            
 
 
             if self.cfg.LOSS.USE_VC_NORMALS:
@@ -205,6 +218,8 @@ class CCHLoss(pl.LightningModule):
             # loss_dict['debug_loss_pred2gt_conf'] = rearrange(debug_loss_pred2gt_conf, '(b k) (n h w) -> b k n h w', b=B, k=K, n=N, h=H, w=W)
             # loss_dict['debug_loss_pred2gt'] = rearrange(debug_loss_pred2gt, '(b k) (n h w) -> b k n h w', b=B, k=K, n=N, h=H, w=W)
             # loss_dict['debug_loss_gt2pred'] = debug_loss_gt2pred
+
+
 
             # confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
             # mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
@@ -306,8 +321,10 @@ class MaskedUncertaintyChamferLoss(nn.Module):
             batch_reduction=None, 
             point_reduction=None
         )
-        loss_pred2gt = torch.sqrt(loss[0]) * 100. # convert to cm^2
-        loss_gt2pred = torch.sqrt(loss[1]) * 100. # convert to cm^2
+        loss_pred2gt_squared = loss[0]
+        loss_gt2pred_squared = loss[1]
+        loss_pred2gt = torch.sqrt(loss_pred2gt_squared) * 1.
+        loss_gt2pred = torch.sqrt(loss_gt2pred_squared) * 1.
 
         loss_pred2gt_list = []
         for b in range(x_pred.shape[0]):
@@ -326,6 +343,67 @@ class MaskedUncertaintyChamferLoss(nn.Module):
 
         return final_loss
     
+
+
+class MaskedUncertaintyL2Loss(nn.Module):
+    """
+    Masked L2 loss weighted by uncertainty 
+    """
+    def __init__(self, alpha=1.0, scale=True):
+        super().__init__()
+        self.alpha = alpha
+        self.scale = scale
+
+    def get_conf_log(self, x):
+        return x, torch.log(x)
+
+    def forward(self, x, y, mask=None, uncertainty=None):
+
+        loss = torch.norm(x - y, dim=-1)
+
+        if uncertainty is not None:
+            conf, log_conf = self.get_conf_log(uncertainty)
+            loss = loss * conf - self.alpha * log_conf
+
+        if mask is not None:
+            loss = loss * mask
+        
+        return loss.sum() / (mask.sum() + 1e-6)
+
+
+class ASAPLoss(nn.Module):
+    """
+    As SMPL as possible loss
+    """
+    def __init__(self, alpha=1.0):
+        super().__init__()
+        self.alpha = alpha
+
+    def get_conf_log(self, x):
+        return x, torch.log(x)
+
+    def forward(self, x, y, mask=None, uncertainty=None):
+        threshold = 0.01
+
+        norm = torch.norm(x - y, dim=-1)
+        norm_mask = norm > threshold
+        loss = torch.where(norm_mask, norm, torch.zeros_like(norm))
+
+        if uncertainty is not None:
+            conf, log_conf = self.get_conf_log(uncertainty)
+            loss = loss * conf - self.alpha * log_conf
+
+        if mask is not None:
+            full_mask = norm_mask * mask
+        else:
+            full_mask = norm_mask
+
+        loss = loss * full_mask
+
+        return loss.sum() / (full_mask.sum() + 1e-6)
+
+
+
 
 
 class DebugChamferLoss(nn.Module):
@@ -355,8 +433,8 @@ class DebugChamferLoss(nn.Module):
             batch_reduction=None, 
             point_reduction=None
         )
-        loss_pred2gt = torch.sqrt(loss[0]) * 100. # convert to cm^2
-        loss_gt2pred = torch.sqrt(loss[1]) * 100. # convert to cm^2
+        loss_pred2gt = torch.sqrt(loss[0]) * 1. # convert to cm^2
+        loss_gt2pred = torch.sqrt(loss[1]) * 1. # convert to cm^2
 
         if confidence is not None:
             loss_pred2gt_conf = loss_pred2gt * confidence - self.alpha * torch.log(confidence)
@@ -369,11 +447,7 @@ class DebugChamferLoss(nn.Module):
         # final_loss = loss_pred2gt.mean() + loss_gt2pred.mean()
         return None, loss_pred2gt_conf, loss_pred2gt, loss_gt2pred
 
-
-class MaskedUncertaintyL2Loss(nn.Module):
-    """
-    Masked L2 loss weighted by uncertainty 
-    """
+class DebugL2Loss(nn.Module):   
     def __init__(self, alpha=1.0, scale=True):
         super().__init__()
         self.alpha = alpha
@@ -385,51 +459,14 @@ class MaskedUncertaintyL2Loss(nn.Module):
     def forward(self, x, y, mask=None, uncertainty=None):
 
         loss = torch.norm(x - y, dim=-1)
-        if self.scale:
-            loss = loss * 100. # convert to cm^2
 
         if uncertainty is not None:
             conf, log_conf = self.get_conf_log(uncertainty)
-            loss = loss * conf - self.alpha * log_conf
+            loss_conf = loss * conf - self.alpha * log_conf
 
-        if mask is not None:
-            loss = loss * mask
+        loss_conf = loss_conf * mask
 
-        return loss.sum() / (mask.sum() + 1e-6)
-    
-
-class ASAPLoss(nn.Module):
-    """
-    As SMPL as possible loss
-    """
-    def __init__(self, alpha=1.0):
-        super().__init__()
-        self.alpha = alpha
-
-    def get_conf_log(self, x):
-        return x, torch.log(x)
-
-    def forward(self, x, y, mask=None, uncertainty=None):
-        threshold = 0.02
-
-        norm = torch.norm(x - y, dim=-1)
-        norm_mask = norm > threshold
-        loss = torch.where(norm_mask, norm, torch.zeros_like(norm))
-
-        loss = loss * 100. # convert to cm^2
-
-        if uncertainty is not None:
-            conf, log_conf = self.get_conf_log(uncertainty)
-            loss = loss * conf - self.alpha * log_conf
-
-        if mask is not None:
-            full_mask = norm_mask * mask
-        else:
-            full_mask = norm_mask
-
-        loss = loss * full_mask
-
-        return loss.sum() / (full_mask.sum() + 1e-6)
+        return loss.sum() / (mask.sum() + 1e-6), loss, loss_conf
 
 
 

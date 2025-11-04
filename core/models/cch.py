@@ -156,9 +156,8 @@ class CCH(nn.Module):
             canonical_sapiens_tokens_list = canonical_tokens_list
 
         vc_init, vc_init_conf = self.canonical_head(canonical_sapiens_tokens_list, images[:, :N], patch_start_idx=patch_start_idx)
-        vc_init = torch.clamp(vc_init, -2, 2)
-
-        vc_init = vc_init * mask.unsqueeze(-1)[:, :N] # Mask background pixels to origin, important for backward chamfer metrics
+        # vc_init = torch.clamp(vc_init, -2, 2)
+        # vc_init = vc_init * mask.unsqueeze(-1)[:, :N] # Mask background pixels to origin, important for backward chamfer metrics
 
         ret['vc_init'] = vc_init
         ret['vc_init_conf'] = vc_init_conf

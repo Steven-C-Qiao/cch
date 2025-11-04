@@ -228,11 +228,11 @@ class THumanDataset(Dataset):
             # Index into vc_map using camera index
             vc_map = vc_map[camera_idx]  # (512, 512, 3)
             # Create binary mask where none of the elements are 1 across axis=-1
-            vc_mask = (vc_map != 1).all(axis=-1).astype(np.float32)
 
             vc_map = self.vc_map_transform(vc_map)
             assert vc_map.shape == (3, self.img_size, self.img_size)
-            vc_mask = self.vc_mask_transform(vc_mask).squeeze()
+            # vc_mask = self.vc_mask_transform(vc_mask).squeeze()
+            vc_mask = (vc_map != 1).all(dim=0)
 
             # w_maps_dir_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, f'{scan_id}_w_maps_sparse', f'{sampled_cameras[i]}.pt') #.npz')
             # w_map = torch.load(w_maps_dir_fname, map_location='cpu')

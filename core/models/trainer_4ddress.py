@@ -142,11 +142,17 @@ class CCHTrainer(pl.LightningModule):
         metrics = self.metrics(preds, batch)
 
         # self.visualiser.visualise_debug_loss(loss_dict)
-
         # loss_dict.pop('debug_loss_pred2gt_conf')
         # loss_dict.pop('debug_loss_pred2gt')
         # loss_dict.pop('debug_loss_gt2pred')
+
+        # self.visualiser.visualise_debug_vc_pm_loss(loss_dict)
+        # loss_dict.pop('debug_vc_pm_loss_conf')
+        # loss_dict.pop('debug_vc_pm_loss')
+
+
         self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, batch_idx)
+
 
         
         # for k, v in loss_dict.items():

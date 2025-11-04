@@ -461,7 +461,7 @@ class Solver:
         scatter_mask = mask_N[0].astype(bool) # nhw
         if "vc_init_conf" in predictions:
             confidence = predictions['vc_init_conf']
-            confidence = confidence > 1.
+            confidence = confidence > 1.25
         else:
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
         scatter_mask = scatter_mask * confidence[0].astype(bool)
@@ -689,16 +689,16 @@ if __name__ == '__main__':
     # cameras = ['0004', '0028', '0052', '0076', '0076']
 
 
-    id = '00134'
-    take = 'Take3'
-    frames = ['00006', '00006', '00006', '00006', '00006']
-    cameras = ['0004', '0028', '0052', '0076', '0076']
-
-
-    # id = '00148'
-    # take = 'Take1'
-    # frames = ['00021', '00021', '00021', '00021', '00021']
+    # id = '00134'
+    # take = 'Take3'
+    # frames = ['00006', '00006', '00006', '00006', '00006']
     # cameras = ['0004', '0028', '0052', '0076', '0076']
+
+
+    id = '00148'
+    take = 'Take1'
+    frames = ['00021', '00021', '00021', '00021', '00021']
+    cameras = ['0004', '0028', '0052', '0076', '0076']
 
 
     
