@@ -9,6 +9,7 @@
 *.ply
 *.blend
 *.zip
+*.obj
 
 __pycache__
 
@@ -20,3 +21,4 @@ demo/
 tinkering/misc/
 4DDress_untar/
 slurm/
+up2you/
