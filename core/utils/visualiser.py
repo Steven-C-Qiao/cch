@@ -46,6 +46,7 @@ class Visualiser(pl.LightningModule):
         self._suffix = ''
 
         # self.threshold = 50
+        # print("Visualiser confidence threshold:", self.threshold)
 
     def set_global_rank(self, global_rank):
         self.rank = global_rank

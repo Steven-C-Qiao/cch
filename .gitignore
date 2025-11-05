@@ -9,6 +9,7 @@
 *.ply
 *.blend
 *.zip
+*.obj
 
 __pycache__
 

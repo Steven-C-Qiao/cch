@@ -3,10 +3,13 @@ import torch
 import pickle
 import argparse
 import trimesh
+import smplx 
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Sequence 
 
+from pytorch3d.loss import chamfer_distance
+from pytorch3d.structures import Pointclouds
 
 
 from tqdm import tqdm
@@ -41,6 +44,54 @@ def _move_to_device(sample, device):
         return tuple(_move_to_device(v, device) for v in sample)
     return sample
 
+# Process novel poses in smaller chunks to avoid OOM, and move results to CPU
+def _move_to_cpu(sample):
+    if isinstance(sample, torch.Tensor):
+        return sample.detach().cpu()
+    if isinstance(sample, dict):
+        return {k: _move_to_cpu(v) for k, v in sample.items()}
+    if isinstance(sample, list):
+        return [_move_to_cpu(v) for v in sample]
+    if isinstance(sample, tuple):
+        return tuple(_move_to_cpu(v) for v in sample)
+    return sample
+
+
+
+def get_novel_poses(pose_dir, smpl_model, device):
+    pose_seq = []
+    global_orient_seq = []
+    for file in sorted(os.listdir(pose_dir)):
+        if file.endswith('.pkl'):
+            smpl_data = load_pickle(os.path.join(pose_dir, file))
+            body_pose = torch.tensor(smpl_data['body_pose'], dtype=torch.float32, device=device)[None]
+            global_orient = torch.tensor(smpl_data['global_orient'], dtype=torch.float32, device=device)[None]
+            betas = torch.tensor(smpl_data['betas'], dtype=torch.float32, device=device)[None]
+            transl = torch.tensor(smpl_data['transl'], dtype=torch.float32, device=device)[None]
+            left_hand_pose = torch.tensor(smpl_data['left_hand_pose'], dtype=torch.float32, device=device)[None]
+            right_hand_pose = torch.tensor(smpl_data['right_hand_pose'], dtype=torch.float32, device=device)[None]
+            jaw_pose = torch.tensor(smpl_data['jaw_pose'], dtype=torch.float32, device=device)[None]
+            leye_pose = torch.tensor(smpl_data['leye_pose'], dtype=torch.float32, device=device)[None]
+            reye_pose = torch.tensor(smpl_data['reye_pose'], dtype=torch.float32, device=device)[None]
+            expression = torch.tensor(smpl_data['expression'], dtype=torch.float32, device=device)[None]
+            smpl_output = smpl_model(
+                betas=betas,
+                global_orient = global_orient,
+                body_pose = body_pose,
+                left_hand_pose = left_hand_pose,
+                right_hand_pose = right_hand_pose,
+                transl = transl,
+                expression = expression,
+                jaw_pose = jaw_pose,
+                leye_pose = leye_pose,
+                reye_pose = reye_pose,
+                return_full_pose=True,
+            )
+            pose_seq.append(smpl_output.full_pose)
+            global_orient_seq.append(global_orient)
+    pose_seq = torch.stack(pose_seq)
+    global_orient_seq = torch.stack(global_orient_seq)
+    return pose_seq, global_orient_seq
 
 # Use timm's names
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
@@ -111,20 +162,15 @@ class AdHocDataset(D4DressDataset):
             clothing_mesh = trimesh.util.concatenate([lower_mesh, upper_mesh])
         else:
             clothing_mesh = upper_mesh
-        # full_mesh = trimesh.util.concatenate([body_mesh, clothing_mesh])
 
 
         full_filtered_mesh = trimesh.load(os.path.join(template_dir, 'filtered.ply'))
         full_filtered_vertices = full_filtered_mesh.vertices
         full_filtered_faces = full_filtered_mesh.faces
 
-        # template_mesh_lbs_weights = np.load(os.path.join(template_dir, 'filtered_lbs_weights.npy'))
-        
         ret['template_mesh'] = full_filtered_mesh
-        # ret['template_body_mesh'] = torch.tensor(body_mesh, dtype=torch.float32)
         ret['template_mesh_verts'] = torch.tensor(full_filtered_vertices, dtype=torch.float32)
         ret['template_mesh_faces'] = torch.tensor(full_filtered_faces, dtype=torch.long)
-        # ret['template_mesh_lbs_weights'] = torch.tensor(template_mesh_lbs_weights, dtype=torch.float32)
 
         template_full_mesh = trimesh.load(os.path.join(template_dir, 'full_mesh.ply'))
         template_full_lbs_weights = np.load(os.path.join(template_dir, 'full_lbs_weights.npy'))
@@ -165,8 +211,6 @@ class AdHocDataset(D4DressDataset):
                      smpl_data['left_hand_pose'], smpl_data['right_hand_pose']], axis=0
                 )
 
-               
-
             elif self.body_model == 'smpl':
                 pose = np.concatenate([global_orient, body_pose], axis=0)
             else:
@@ -199,8 +243,7 @@ class AdHocDataset(D4DressDataset):
             img_pil = Image.fromarray(img)
             mask_pil = Image.fromarray(mask)
             
-            # Apply transforms
-            # img_transformed = self.normalise(self.transform(img_pil))
+
             img_transformed = self.transform(img_pil)
             mask_transformed = self.mask_transform(mask_pil).squeeze()
 
@@ -210,12 +253,6 @@ class AdHocDataset(D4DressDataset):
             ret['imgs'].append(img_transformed)
             ret['masks'].append(mask_transformed)
 
-
-            # lbs_weights_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'lbs_images', 'lbs_image-f{}.pt'.format(sampled_frame))
-            # lbs_weights_fname = '/scratch/u5au/chexuan.u5au/4DDress/00122/Inner/Take2/Capture/0076/lbs_images/lbs_image-f00011.pt'
-            # lbs_weights = torch.load(lbs_weights_fname, map_location='cpu')
-            # print(f"Loaded lbs_weights type: {type(lbs_weights)}, is_sparse: {lbs_weights.is_sparse if hasattr(lbs_weights, 'is_sparse') else 'N/A'}")
-            # ret['smpl_w_maps'].append(lbs_weights)
 
 
         ret['imgs'] = torch.tensor(np.stack(ret['imgs']))
@@ -281,14 +318,29 @@ def _set_scatter_limits(ax, x, elev=10, azim=90):
 
 
 class Solver:
-    def __init__(self, id, take, frames, cameras, novel_pose_path, load_path):
+    def __init__(self, id, take, frames, cameras, novel_pose_path, gt_scan_dir_path, gt_smpl_dir_path, load_path, save_dir=None):
         self.id = id
         self.take = take
+        self.stride = 5
+        self.save_dir = save_dir
+        if save_dir is not None:
+            os.makedirs(save_dir, exist_ok=True)
         self.novel_pose_path = novel_pose_path
-
-        self.stride = 2
-
+        self.gt_scan_dir_path = gt_scan_dir_path
+        self.gt_smpl_dir_path = gt_smpl_dir_path
         seed_everything(42)
+
+        self.gt_scan_fnames = sorted([
+            fname for fname in os.listdir(gt_scan_dir_path)
+            if fname.endswith('.pkl') and fname.startswith('mesh')
+        ])
+        self.gt_smpl_fnames = sorted([
+            fname for fname in os.listdir(gt_smpl_dir_path)
+            if fname.endswith('.pkl') and fname.startswith('mesh')
+        ])
+
+
+
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f'Device: {device}')
@@ -315,100 +367,129 @@ class Solver:
 
         init_batch = next(iter(self.dataloader))
         init_batch = _move_to_device(init_batch, self.device)
+        images = init_batch['imgs']
         
         vc_ret = self.model.build_avatar(init_batch)
+        confidence = vc_ret['vc_init_conf']
+        conf_mask = confidence > 3
+        conf_mask = rearrange(conf_mask[0, :4, ...], 'n h w -> (n h w)').bool()
+
+
         for k, v in vc_ret.items():
             preds[k] = v
     
-        novel_poses = self.get_novel_poses(novel_pose_path)
+        novel_poses, global_orient_seq = get_novel_poses(self.novel_pose_path, self.smplx_male, self.device)
 
 
         
         vp_list = []
-        
-        # Process novel poses in smaller chunks to avoid OOM, and move results to CPU
-        def _move_to_cpu(sample):
-            if isinstance(sample, torch.Tensor):
-                return sample.detach().cpu()
-            if isinstance(sample, dict):
-                return {k: _move_to_cpu(v) for k, v in sample.items()}
-            if isinstance(sample, list):
-                return [_move_to_cpu(v) for v in sample]
-            if isinstance(sample, tuple):
-                return tuple(_move_to_cpu(v) for v in sample)
-            return sample
 
+        
+        distance_list = defaultdict(list)
+        
         stride_indices = list(range(0, novel_poses.shape[0], self.stride))
         chunk_size = 10
         for start in tqdm(range(0, len(stride_indices), chunk_size)):
             end = min(start + chunk_size, len(stride_indices))
             for idx in stride_indices[start:end]:
                 novel_pose = novel_poses[idx]
+
                 vp = self.model.drive_avatar(vc_ret, init_batch, novel_pose)
+
+                gt_smpl_data = load_pickle(os.path.join(self.gt_smpl_dir_path, self.gt_smpl_fnames[idx]))
+                gt_scan_transl = gt_smpl_data['transl']
+
+                gt_scan_mesh = pickle.load(open(os.path.join(self.gt_scan_dir_path, self.gt_scan_fnames[idx]), 'rb'))
+                gt_scan_verts = gt_scan_mesh['vertices']
+                gt_scan_verts_centered = gt_scan_verts - gt_scan_transl[None, :]
+                gt_scan_faces = gt_scan_mesh['faces']
+                gt_scan_mesh = trimesh.Trimesh(vertices=gt_scan_verts_centered, faces=gt_scan_faces)
+
+
+
                 vp_cpu = _move_to_cpu(vp)
                 vp_list.append(vp_cpu)
+
+
+                mask = rearrange(init_batch['masks'][0, :4, ...], 'n h w -> (n h w)').bool()
+                mask = mask * conf_mask
+
+                pred_vp = rearrange(vp['vp'][0, -1, ...], 'n h w c -> (n h w) c')
+
+                color = rearrange(images[0, :4, ...], 'n c h w -> (n h w) c')
+                # # Unnormalize using ImageNet statistics
+                # imagenet_mean = torch.tensor([0.485, 0.456, 0.406], device=color.device if hasattr(color, 'device') else 'cpu')
+                # imagenet_std = torch.tensor([0.229, 0.224, 0.225], device=color.device if hasattr(color, 'device') else 'cpu')
+                # if isinstance(color, torch.Tensor):
+                #     color_unnorm = color.clone()
+                #     color_unnorm = color_unnorm.float()
+                #     if color_unnorm.shape[1] >= 3:
+                #         color_unnorm[:, :3] = color_unnorm[:, :3] * imagenet_std[None, :] + imagenet_mean[None, :]
+                #         color_unnorm[:, :3] = (color_unnorm[:, :3].clamp(0, 1) * 255)  # to [0,255]
+                #         color = color_unnorm
+                color = color[mask]
+                color = color.cpu().numpy()
+                # Ensure color is uint8 and has 4 channels (RGBA)
+                if color.shape[1] == 3:
+                    # Add alpha channel, set to 255 (fully opaque)
+                    alpha = np.full((color.shape[0], 1), 255, dtype=np.uint8)
+                    color = np.concatenate([color, alpha], axis=1)
+                color = color.astype(np.uint8)
+
+
+                pred_vp = pred_vp[mask]
+
+                if self.save_dir is not None:
+                    save_path = os.path.join(self.save_dir, f"pred_vp_{idx:03d}.ply")
+                    trimesh.PointCloud(pred_vp.cpu().numpy(), colors=color).export(save_path)
+                    save_path = os.path.join(self.save_dir, f"gt_vp_{idx:03d}.ply")
+                    gt_scan_mesh.export(save_path)
+
+                pred_vp = Pointclouds(points=pred_vp[None])
+                gt_vp = Pointclouds(points=torch.tensor(gt_scan_verts_centered[None], dtype=torch.float32, device=self.device))
+
+
+                
+            
+                cfd_ret, _ = chamfer_distance(
+                    pred_vp,
+                    gt_vp,
+                    point_reduction=None,
+                    batch_reduction=None,
+                )
+
+                cfd_sqrd_pred2gt = cfd_ret[0]  
+                cfd_sqrd_gt2pred = cfd_ret[1]
+
+                cfd_pred2gt = torch.sqrt(cfd_sqrd_pred2gt).mean() * 100.0
+                cfd_gt2pred = torch.sqrt(cfd_sqrd_gt2pred).mean() * 100.0
+
+                print(cfd_pred2gt, cfd_gt2pred)
+
+                distance_list['cfd_pred2gt'].append(cfd_pred2gt.item())
+                distance_list['cfd_gt2pred'].append(cfd_gt2pred.item())
+                distance_list['cfd'].append((cfd_pred2gt.item() + cfd_gt2pred.item())/2)
+
+
+
                 del vp, vp_cpu
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
+        for k, v in distance_list.items():
+            distance_list[k] = np.mean(v)
+            print(f'{k}: {distance_list[k]}')
+
         preds['vp_list'] = vp_list
 
-        self.visualise(preds, init_batch)
+        # self.visualise(preds, init_batch)
 
         # Save predictions and batch data
         logger.info("Saving predictions and batch data...")
         
-        # Create output directory if it doesn't exist
-        # os.makedirs('app/avatar_outputs', exist_ok=True)
-        
-        # Save vp_list
-        # with open('app/avatar_outputs/vp_list.pkl', 'wb') as f:
-        #     pickle.dump(vp_list, f)
-            
-        # # Save full predictions dict
-        # with open('app/avatar_outputs/preds.pkl', 'wb') as f:
-        #     pickle.dump(preds, f)
-            
-        # # Save initial batch
-        # with open('app/avatar_outputs/init_batch.pkl', 'wb') as f:
-        #     pickle.dump(init_batch, f)
-
         return vp_list
     
 
-
-    def get_novel_poses(self, pose_dir):
-        pose_seq = []
-        for file in sorted(os.listdir(pose_dir)):
-            if file.endswith('.pkl'):
-                smpl_data = load_pickle(os.path.join(pose_dir, file))
-                body_pose = torch.tensor(smpl_data['body_pose'], dtype=torch.float32, device=self.device)[None]
-                global_orient = torch.tensor(smpl_data['global_orient'], dtype=torch.float32, device=self.device)[None]
-                betas = torch.tensor(smpl_data['betas'], dtype=torch.float32, device=self.device)[None]
-                transl = torch.tensor(smpl_data['transl'], dtype=torch.float32, device=self.device)[None]
-                left_hand_pose = torch.tensor(smpl_data['left_hand_pose'], dtype=torch.float32, device=self.device)[None]
-                right_hand_pose = torch.tensor(smpl_data['right_hand_pose'], dtype=torch.float32, device=self.device)[None]
-                jaw_pose = torch.tensor(smpl_data['jaw_pose'], dtype=torch.float32, device=self.device)[None]
-                leye_pose = torch.tensor(smpl_data['leye_pose'], dtype=torch.float32, device=self.device)[None]
-                reye_pose = torch.tensor(smpl_data['reye_pose'], dtype=torch.float32, device=self.device)[None]
-                expression = torch.tensor(smpl_data['expression'], dtype=torch.float32, device=self.device)[None]
-                smpl_output = self.smplx_male(
-                    betas=betas,
-                    global_orient = global_orient,
-                    body_pose = body_pose,
-                    left_hand_pose = left_hand_pose,
-                    right_hand_pose = right_hand_pose,
-                    transl = transl,
-                    expression = expression,
-                    jaw_pose = jaw_pose,
-                    leye_pose = leye_pose,
-                    reye_pose = reye_pose,
-                    return_full_pose=True,
-                )
-                pose_seq.append(smpl_output.full_pose)
-        pose_seq = torch.stack(pose_seq)
-        return pose_seq
-        
 
     def load_pretrained(self, model, load_path=None):
         if load_path is not None:
@@ -461,7 +542,7 @@ class Solver:
         scatter_mask = mask_N[0].astype(bool) # nhw
         if "vc_init_conf" in predictions:
             confidence = predictions['vc_init_conf']
-            confidence = confidence > 1.25
+            confidence = confidence > 1.
         else:
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
         scatter_mask = scatter_mask * confidence[0].astype(bool)
@@ -566,26 +647,6 @@ class Solver:
         )
 
 
-            
-        # fig = plt.figure(figsize=(subfig_size * num_cols, subfig_size * num_rows))
-        # r = 0
-
-
-        # for i in range(num_total_plots):
-        #     verts = predictions['vp_list'][i]['vp'][0, -1, ...].cpu().detach().numpy() # B K N H W 3 -> N H W 3
-        #     verts = verts[scatter_mask]
-        #     ax = fig.add_subplot(num_rows, num_cols, i+1, projection='3d')
-        #     ax.scatter(verts[:, 0], 
-        #             verts[:, 1], 
-        #             verts[:, 2], c=color, s=s, alpha=gt_alpha)
-        #     ax.set_title(f'pred $V^{{{i+1}}}$')
-        #     _set_scatter_limits(ax, x)
-
-        # plt.tight_layout()
-        # plt.savefig(f'{self.id}_{self.take}_animation.png', dpi=200)
-        # plt.close()
-
-
     def gen_gt_animation(self, path):
 
         subfig_size = 8
@@ -660,6 +721,7 @@ if __name__ == '__main__':
         action="store_true"
     )  
     args = parser.parse_args()
+    assert (args.load_from_ckpt is not None), 'Specify load_from_ckpt'
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -667,44 +729,31 @@ if __name__ == '__main__':
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
 
+    cfg = get_cch_cfg_defaults()
+    cfg.TRAIN.BATCH_SIZE = 1
 
-    assert (args.load_from_ckpt is not None), 'Specify load_from_ckpt'
+    
 
-
-    # id = '00147'
-    # take = 'Take6'
-    # frames = ['00021', '00021', '00021', '00021', '00021']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
-
-
-
-    # id = '00187'
-    # take = 'Take1'
-    # frames = ['00011', '00011', '00011', '00011', '00011']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
-
-    # id = '00188'
-    # take = 'Take1'
-    # frames = ['00021', '00021', '00021', '00021', '00021']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
+    smplx_male = smplx.create(
+        model_type="smplx",
+        model_path="model_files/",
+        num_pca_comps=12,
+    ).to(device)
 
 
     id = '00134'
     take = 'Take3'
     frames = ['00006', '00006', '00006', '00006', '00006']
-    cameras = ['0004', '0028', '0052', '0076', '0076']
+    cameras = ['0004', '0028', '0052', '0076', '0076']    
+    novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take1/SMPLX'
+    gt_scan_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take1/Meshes_pkl'
+    gt_smpl_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take1/SMPLX'
 
-
-    # id = '00148'
-    # take = 'Take1'
-    # frames = ['00021', '00021', '00021', '00021', '00021']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
-
+    save_dir = f'vis/00134_take1'
+    os.makedirs(save_dir, exist_ok=True)
 
     
-    novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/SMPLX'
-    gt_scan_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/Meshes_pkl'
 
 
-    solver = Solver(id, take, frames, cameras, novel_pose_path, args.load_from_ckpt)
+    solver = Solver(id, take, frames, cameras, novel_pose_path, gt_scan_dir_path, gt_smpl_dir_path, args.load_from_ckpt, save_dir)
     solver.run()

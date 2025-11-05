@@ -155,9 +155,9 @@ class CCHTrainer(pl.LightningModule):
 
 
         
-        # for k, v in loss_dict.items():
-        #     print(f"{k}: {v.item():.2f}", end='; ')
-        # print('')
+        for k, v in loss_dict.items():
+            print(f"{k}: {v.item():.2f}", end='; ')
+        print('')
         # import ipdb; ipdb.set_trace()
         
         return loss 
