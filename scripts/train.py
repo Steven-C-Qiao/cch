@@ -37,7 +37,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=None, plot=False):
-    set_seed(42)
+    set_seed(39)
     
     # Get config
     cfg = get_cch_cfg_defaults()
@@ -111,7 +111,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
             every_n_epochs=5,
             save_last=True,
             verbose=True,
-            monitor='val_loss',
+            monitor='val_loss/dataloader_idx_1',  # Monitor 4DDress validation loss
             mode='min'
         ),  
         # ModelCheckpoint( # this is the vc_init cfd 
@@ -129,7 +129,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
             save_top_k=1,
             save_last=False,
             verbose=True,
-            monitor='val_vc_cfd',
+            monitor='val_vc_cfd/dataloader_idx_1',  # Monitor 4DDress validation vc_cfd
             mode='min'
         ),
         *([] if not cfg.MODEL.POSE_BLENDSHAPES else [
@@ -148,7 +148,7 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
                 save_top_k=1,
                 save_last=False,
                 verbose=True,
-                monitor='val_vp_cfd',
+                monitor='val_vp_cfd/dataloader_idx_1',  # Monitor 4DDress validation vp_cfd
                 mode='min'
             ),
         ]),
@@ -162,12 +162,18 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
     else:
         num_sanity_val_steps = 2    
 
+    if plot:
+        num_nodes = 1
+    else:
+        num_nodes = 1
+
     trainer = pl.Trainer(
         max_epochs=cfg.TRAIN.NUM_EPOCHS,
         accelerator=cfg.SPEEDUP.ACCELERATOR,
-        num_nodes=1,
+        num_nodes=num_nodes,
         devices="auto", 
-        strategy="auto",
+        # strategy=DDPStrategy(find_unused_parameters=True),
+        strategy='auto',
         callbacks=checkpoint_callbacks,
         logger=tensorboard_logger,
         precision=cfg.SPEEDUP.MIXED_PRECISION,
@@ -254,7 +260,8 @@ if __name__ == '__main__':
     logger.info(f'Device: {device}')
 
     if args.plot:
-        os.environ["CUDA_VISIBLE_DEVICES"] = '0'
+        os.environ["CUDA_VISIBLE_DEVICES"] = '0'    
+    # os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
     # device_ids = list(map(int, args.gpus.split(",")))
     # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")

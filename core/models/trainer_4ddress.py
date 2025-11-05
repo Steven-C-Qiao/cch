@@ -22,6 +22,7 @@ from core.losses.cch_loss import CCHLoss
 from core.losses.cch_metrics import CCHMetrics
 from core.utils.visualiser import Visualiser
 from core.utils.feature_renderer import FeatureRenderer
+from core.utils.normal_renderer import SurfaceNormalRenderer
 from core.models.sapiens_wrapper import SapiensWrapper
 from core.configs.model_size_cfg import MODEL_CONFIGS
 from core.utils.general_lbs import general_lbs
@@ -40,6 +41,7 @@ class CCHTrainer(pl.LightningModule):
         self.save_scenepic = True 
         self.dev = dev
         self.cfg = cfg
+        self.num_samples = cfg.DATA.NUM_SAMPLES
         self.B = cfg.TRAIN.BATCH_SIZE
         self.use_sapiens = cfg.MODEL.USE_SAPIENS
         self.normalise = cfg.DATA.NORMALISE
@@ -53,8 +55,10 @@ class CCHTrainer(pl.LightningModule):
         self.freeze_canonical_epochs = getattr(cfg.TRAIN, 'WARMUP_EPOCHS', 0)
 
 
-        self.feature_renderer = FeatureRenderer(image_size=(256, 192))#(512, 384))#image_size=(256, 192)) 
+        self.feature_renderer = FeatureRenderer(image_size=(512, 384))#(512, 384))#image_size=(256, 192)) 
         self.thuman_renderer = FeatureRenderer(image_size=(256, 256))
+        # self.normal_renderer = SurfaceNormalRenderer(image_size=(512, 384))
+        # self.thuman_normal_renderer = SurfaceNormalRenderer(image_size=(256, 256))
 
         self.smpl_male = smplx.create(
             model_type=self.body_model,
@@ -107,6 +111,16 @@ class CCHTrainer(pl.LightningModule):
     
     def on_train_epoch_start(self):
         self.visualiser.set_global_rank(self.global_rank)
+        
+        # # Alternate between canonical and PBS training based on epoch
+        # current_epoch = self.current_epoch
+        # if current_epoch % 2 == 1:  # Odd epochs: train canonical only
+        #     self._set_train_vc()
+        # else:  # Odd epochs: train PBS only
+        #     self._set_train_vp()
+        
+        # # Update optimizer parameters after changing requires_grad status
+        # self._update_optimizer_parameters()
 
 
     def training_step(self, batch, batch_idx, split='train'):
@@ -115,8 +129,6 @@ class CCHTrainer(pl.LightningModule):
         if self.dev:
             batch = self.first_batch
 
-
-        # Route processing by dataset source to avoid mixing logic
         batch = batch[0] if np.random.rand() > self.d4dress_probability else batch[1]
         if batch['dataset'][0] == '4DDress':
             batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
@@ -129,18 +141,30 @@ class CCHTrainer(pl.LightningModule):
 
         metrics = self.metrics(preds, batch)
 
-        self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, self.global_step)
+        # self.visualiser.visualise_debug_loss(loss_dict)
+        # loss_dict.pop('debug_loss_pred2gt_conf')
+        # loss_dict.pop('debug_loss_pred2gt')
+        # loss_dict.pop('debug_loss_gt2pred')
 
-        # for k, v in loss_dict.items():
-        #     print(f"{k}: {v.item():.2f}", end='; ')
-        # print(''),
+        # self.visualiser.visualise_debug_vc_pm_loss(loss_dict)
+        # loss_dict.pop('debug_vc_pm_loss_conf')
+        # loss_dict.pop('debug_vc_pm_loss')
+
+
+        self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, batch_idx)
+
+
+        
+        for k, v in loss_dict.items():
+            print(f"{k}: {v.item():.2f}", end='; ')
+        print('')
         # import ipdb; ipdb.set_trace()
         
         return loss 
 
 
 
-    def _log_metrics_and_visualise(self, loss, loss_dict, metrics, split, preds, batch, global_step):
+    def _log_metrics_and_visualise(self, loss, loss_dict, metrics, split, preds, batch, batch_idx=None):
         if split == 'train' or split == 'test':
             on_step = True
         else:
@@ -150,30 +174,90 @@ class CCHTrainer(pl.LightningModule):
             loss_dict[f'{split}_{key}'] = loss_dict.pop(key)
         for key in list(metrics.keys()):
             metrics[f'{split}_{key}'] = metrics.pop(key)
+
+
         
-        self.log(f'{split}_loss', loss, prog_bar=True)
+        self.log(f'{split}_loss', loss, prog_bar=True, sync_dist=True)
         if f'{split}_vc_cfd' in metrics:
             self.log(f'{split}_vc_cfd', metrics.pop(f'{split}_vc_cfd'), 
-                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, batch_size=self.B)
+                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, sync_dist=True, batch_size=self.B)
         if f'{split}_vp_init_cfd' in metrics:
             self.log(f'{split}_vp_init_cfd', metrics.pop(f'{split}_vp_init_cfd'), 
-                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, batch_size=self.B)
+                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, sync_dist=True, batch_size=self.B)
         if f'{split}_vp_cfd' in metrics:
             self.log(f'{split}_vp_cfd', metrics.pop(f'{split}_vp_cfd'), 
-                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, batch_size=self.B)
-        self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, batch_size=self.B)
-        self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, batch_size=self.B)
-
-        # if (global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1):
-        #     self.visualiser.visualise(preds, batch) 
+                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, sync_dist=True, batch_size=self.B)
+        self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
+        self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
 
         if self.dev or self.plot:
-            self.visualiser.visualise(preds, batch)
+            # Synchronize CUDA on ALL ranks before visualization to ensure DDP processes stay in sync
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            self.visualiser.visualise(preds, batch, split=split, epoch=self.current_epoch)
+            # Synchronize CUDA on ALL ranks after visualization to ensure DDP processes stay in sync
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
             if self.dev:
                 for k, v in loss_dict.items():
                     print(f"{k}: {v.item():.2f}", end='; ')
                 print('')
                 # import ipdb; ipdb.set_trace()
+
+        else:
+            should_vis = False
+            global_step = self.global_step
+            if split in ('train', 'test'):
+                should_vis = ((global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1))
+            elif split == 'val':
+                # Visualise every N validation batches based on vis_frequency
+                should_vis = (batch_idx == 4)
+
+            if should_vis:
+                # Synchronize CUDA on ALL ranks before visualization to ensure DDP processes stay in sync
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                self.visualiser.visualise(preds, batch, split=split, epoch=self.current_epoch)
+                # Synchronize CUDA on ALL ranks after visualization to ensure DDP processes stay in sync
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize() 
+
+
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
+        # Handle both 4DDress and THuman validation datasets
+        # dataloader_idx: 0 = THuman, 1 = 4DDress (matching order in val_dataloader return)
+        if dataloader_idx == 0:
+            dataset_name = 'THuman'
+            batch = self.process_thuman(batch)
+        elif dataloader_idx == 1:
+            dataset_name = '4DDress'
+            batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
+        else:
+            # Fallback: try to determine from batch structure
+            if isinstance(batch, dict) and 'dataset' in batch:
+                dataset_name = batch['dataset'][0] if isinstance(batch['dataset'], list) else batch['dataset']
+            else:
+                dataset_name = '4DDress' if 'vc_maps' in batch else 'THuman'
+            
+            if dataset_name == '4DDress':
+                batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
+            elif dataset_name == 'THuman':
+                batch = self.process_thuman(batch)
+            else:
+                raise ValueError(f"Unknown dataset: {dataset_name}")
+        
+        preds = self(batch)
+        loss, loss_dict = self.criterion(preds, batch, dataset_name=dataset_name)
+        metrics = self.metrics(preds, batch)
+        self._log_metrics_and_visualise(loss, loss_dict, metrics, 'val', preds, batch, batch_idx)
+        # with torch.no_grad():
+        #     loss = self.training_step(batch, batch_idx, split='val')
+        return loss
+
+    def test_step(self, batch, batch_idx, dataloader_idx=0):
+        return self.validation_step(batch, batch_idx, dataloader_idx)
+    
+
     
     @torch.no_grad()
     def process_4ddress(self, batch, batch_idx, normalise=False):
@@ -319,6 +403,21 @@ class CCHTrainer(pl.LightningModule):
             batch['smpl_w_maps'] = w_maps
 
 
+            # ----------------------- Render scan pointmaps for normal loss -----------------------
+            pytorch3d_mesh = Meshes(
+                verts=scan_mesh_verts,
+                faces=scan_mesh_faces,
+                textures=TexturesVertex(verts_features=scan_mesh_verts_centered)
+            )
+            renderer_output = self.feature_renderer(pytorch3d_mesh)
+            scan_pointmaps = renderer_output['maps']
+            scan_pointmaps = scan_pointmaps[:, crop_amount:H-crop_amount, :, :]
+            scan_pointmaps = torch.nn.functional.interpolate(
+                scan_pointmaps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            )
+            scan_pointmaps = rearrange(scan_pointmaps, '(b k) c h w -> b k h w c', b=B, k=K)
+            batch['scan_pointmaps'] = scan_pointmaps
+
             template_mesh = batch['template_mesh']
             template_mesh_verts = [torch.tensor(mesh.vertices, device=self.device, dtype=torch.float32) for mesh in template_mesh]
             template_mesh_faces = [torch.tensor(mesh.faces, device=self.device, dtype=torch.long) for mesh in template_mesh]
@@ -360,6 +459,13 @@ class CCHTrainer(pl.LightningModule):
                 for k in range(K) 
             ]
 
+            if self.cfg.DATA.NORMALISE:
+                normalise_to_height = 1.7 
+                smpl_T_height = (smpl_T_vertices[..., 1].max(dim=-1).values - smpl_T_vertices[..., 1].min(dim=-1).values).flatten() # b * k
+                template_full_mesh_verts_expanded_list = [
+                    verts * (normalise_to_height / smpl_T_height[i]) for i, verts in enumerate(template_full_mesh_verts_expanded_list)
+                ]
+
 
             template_full_posed_pytorch3d_mesh = Meshes(
                 verts=template_full_mesh_verts_posed_list,
@@ -388,10 +494,28 @@ class CCHTrainer(pl.LightningModule):
             mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
             batch['smpl_mask'] = mask.squeeze(-1)
 
+
+            # # ----------------------- Render ground truth normals from template full mesh -----------------------
+            # # Compute and render normals from ground truth template FULL mesh for all K views
+            # # Use canonical (unposed) full mesh for normal rendering to match canonical space of vc_init
+            # self.normal_renderer._set_cameras(cameras)
+
+            # # Render normals using SurfaceNormalRenderer (returns normals in [-1, 1] by default)
+            # gt_normal_ret = self.normal_renderer(
+            #     mesh=pytorch3d_mesh,
+            #     return_normalized=True  # Return normals in [0, 1] range
+            # )
+            # gt_normal_maps = gt_normal_ret['normals']  # (B*K, H, W, 3)
+            # gt_normal_maps = gt_normal_maps[:, crop_amount:H-crop_amount, :, :]
+            # gt_normal_maps = torch.nn.functional.interpolate(
+            #     gt_normal_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            # )
+            # gt_normal_maps = rearrange(gt_normal_maps, '(b k) c h w -> b k h w c', b=B, k=K)
             
-            template_mesh = batch['template_mesh']
-            template_mesh_verts = [torch.tensor(mesh.vertices, device=self.device, dtype=torch.float32) for mesh in template_mesh]
-            template_mesh_faces = [torch.tensor(mesh.faces, device=self.device, dtype=torch.long) for mesh in template_mesh]
+            # # Add to batch
+            # batch['gt_normal_maps'] = gt_normal_maps
+
+
 
 
             # -----------------Normalise after render -----------------
@@ -413,7 +537,7 @@ class CCHTrainer(pl.LightningModule):
                 verts=scan_mesh_verts_centered,
                 faces=scan_mesh_faces,
             )
-            vp = sample_points_from_meshes(scan_mesh_centered, 24000)
+            vp = sample_points_from_meshes(scan_mesh_centered, self.num_samples)
             vp_ptcld = Pointclouds(points=vp)
             batch['vp_ptcld'] = vp_ptcld
             batch['vp'] = vp
@@ -425,12 +549,7 @@ class CCHTrainer(pl.LightningModule):
                 faces=template_mesh_faces
             )
 
-            batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, 24000)
-
-
-            # del pytorch3d_mesh, template_mesh_pytorch3d, scan_mesh_centered
-            # del template_full_mesh_verts_posed_list, template_full_mesh_faces_expanded_list, template_full_mesh_verts_expanded_list
-            # del template_full_posed_pytorch3d_mesh
+            batch['template_mesh_verts'] = sample_points_from_meshes(template_mesh_pytorch3d, self.num_samples)
 
 
 
@@ -438,6 +557,7 @@ class CCHTrainer(pl.LightningModule):
             # self._test_render(vc_maps, masks=mask, name='vc_maps')
             # self._test_render(w_maps, name='w_maps')
             # self._test_sampling(scan_mesh_centered, vp_ptcld)
+            # self._test_render(scan_pointmaps, masks=batch['masks'], name='scan_pointmaps')
 
         return batch 
     
@@ -472,47 +592,52 @@ class CCHTrainer(pl.LightningModule):
             scan_verts = [verts for sublist in batch['scan_verts'] for verts in sublist]
             scan_faces = [faces for sublist in batch['scan_faces'] for faces in sublist]
 
-            # normalise smpl joints, scan vertices, and smpl vertices
-            if self.cfg.DATA.NORMALISE:
-                normalise_to_height = 1.7 
-                smpl_T_height = smpl_T_output.vertices[:, :, 1].max(dim=-1).values - smpl_T_output.vertices[:, :, 1].min(dim=-1).values
-                smpl_T_joints = smpl_T_output.joints[:, :self.num_joints] * (normalise_to_height / smpl_T_height)[:, None, None]
-                scan_verts = [verts * (normalise_to_height / smpl_T_height[i]) for i, verts in enumerate(scan_verts)]
-            
-            batch['smpl_T_joints'] = rearrange(smpl_T_joints, '(b k) j c -> b k j c', b=B, k=K)
-            batch['pose'] = rearrange(smpl_output.full_pose, '(b k) c -> b k c', b=B, k=K)    
 
-
-
-            scan_mesh_pytorch3d = Meshes(
-                verts=scan_verts,
-                faces=scan_faces
-            )
-            vp = sample_points_from_meshes(scan_mesh_pytorch3d, 24000)
-            vp_ptcld = Pointclouds(points=vp)
-            batch['vp_ptcld'] = vp_ptcld
-            batch['vp'] = vp
 
 
             # ----------------------- Render -----------------------
             batch['smpl_w_maps'] = rearrange(batch['smpl_w_maps'], 'b k c h w -> b k h w c')
             batch['vc_smpl_maps'] = rearrange(batch['vc_smpl_maps'], 'b k c h w -> b k h w c')
 
+            cam_R, cam_T = batch['cam_R'], batch['cam_T']
 
-            # del scan_mesh_pytorch3d, vp, vp_ptcld
+            cameras = PerspectiveCameras(
+                R=cam_R.flatten(0, 1), 
+                T=cam_T.flatten(0, 1), 
+                focal_length=724.0773/2,
+                principal_point=[(128, 128),],
+                image_size=[(256, 256),],
+                device=self.device,
+                in_ndc=False
+            )
+            self.thuman_renderer._set_cameras(cameras)
 
-            # cam_R, cam_T = batch['cam_R'], batch['cam_T']
+            pytorch3d_mesh = Meshes(
+                verts=scan_verts,
+                faces=scan_faces,
+                textures=TexturesVertex(verts_features=scan_verts)
+            )
+            renderer_output = self.thuman_renderer(pytorch3d_mesh)
+            scan_pointmaps = renderer_output['maps']
+            scan_pointmaps = torch.nn.functional.interpolate(
+                scan_pointmaps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            )
+            scan_pointmaps = rearrange(scan_pointmaps, '(b k) c h w -> b k h w c', b=B, k=K)
+            batch['scan_pointmaps'] = scan_pointmaps
 
-            # cameras = PerspectiveCameras(
-            #     R=cam_R.flatten(0, 1), 
-            #     T=cam_T.flatten(0, 1), 
-            #     focal_length=724.0773/2,
-            #     principal_point=[(128, 128),],
-            #     image_size=[(256, 256),],
-            #     device=self.device,
-            #     in_ndc=False
+            # renderer_output = self.thuman_normal_renderer(
+            #     pytorch3d_mesh,
+            #     return_normalized=True
             # )
-            # self.thuman_renderer._set_cameras(cameras)
+            # gt_normal_maps = renderer_output['normals']
+            # gt_normal_maps = torch.nn.functional.interpolate(
+            #     gt_normal_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            # )
+            # gt_normal_maps = rearrange(gt_normal_maps, '(b k) c h w -> b k h w c', b=B, k=K)
+            # batch['gt_normal_maps'] = gt_normal_maps
+
+            # self._test_render(scan_pointmaps, masks=batch['masks'], name='scan_pointmaps')
+
 
             # dists, idx = self.knn_ptcld(
             #     Pointclouds(points=scan_verts), 
@@ -525,8 +650,7 @@ class CCHTrainer(pl.LightningModule):
             # scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
             # batch['scan_skinning_weights'] = scan_w
 
-            # if 'smpl_w_maps' in batch and len(batch['smpl_w_maps']) == B:
-            # else:
+
             # # Render skinning weight pointmaps
             # pytorch3d_mesh = Meshes(
             #     verts=scan_verts,
@@ -547,15 +671,16 @@ class CCHTrainer(pl.LightningModule):
             # w_maps = rearrange(w_maps, '(b k) j h w -> b k h w j', b=B, k=K)
             
             # batch['smpl_w_maps'] = w_maps
-            
 
-            # if 'vc_smpl_maps' in batch and len(batch['vc_smpl_maps']) == B:
-            
-            # else:
+            # if self.cfg.DATA.NORMALISE:
+            #     normalise_to_height = 1.7 
+            #     smpl_T_height = smpl_T_output.vertices[:, :, 1].max(dim=-1).values - smpl_T_output.vertices[:, :, 1].min(dim=-1).values
+            #     smpl_T_vertices_normalised = smpl_T_output.vertices * (normalise_to_height / smpl_T_height)[:, None, None]
+
             # pytorch3d_smpl_mesh = Meshes(
             #     verts=smpl_output.vertices,
             #     faces=torch.tensor(smpl_model.faces, device=self.device).expand(B*K, -1, -1),
-            #     textures=TexturesVertex(verts_features=smpl_T_output.vertices)
+            #     textures=TexturesVertex(verts_features=smpl_T_vertices_normalised)
             # )
 
             # renderer_output = self.thuman_renderer(pytorch3d_smpl_mesh)
@@ -573,16 +698,35 @@ class CCHTrainer(pl.LightningModule):
             # batch['smpl_mask'] = vc_mask.squeeze(-1)
             # batch['vc_smpl_maps'] = vc_maps
 
+
+            # normalise smpl joints, scan vertices, and smpl vertices
+            if self.cfg.DATA.NORMALISE:
+                normalise_to_height = 1.7 
+                smpl_T_height = smpl_T_output.vertices[:, :, 1].max(dim=-1).values - smpl_T_output.vertices[:, :, 1].min(dim=-1).values
+                smpl_T_joints = smpl_T_output.joints[:, :self.num_joints] * (normalise_to_height / smpl_T_height)[:, None, None]
+                scan_verts = [verts * (normalise_to_height / smpl_T_height[i]) for i, verts in enumerate(scan_verts)]
+
+
+            batch['smpl_T_joints'] = rearrange(smpl_T_joints, '(b k) j c -> b k j c', b=B, k=K)
+            batch['pose'] = rearrange(smpl_output.full_pose, '(b k) c -> b k c', b=B, k=K)    
+
+
+
+            scan_mesh_pytorch3d = Meshes(
+                verts=scan_verts,
+                faces=scan_faces
+            )
+            vp = sample_points_from_meshes(scan_mesh_pytorch3d, self.num_samples)
+            vp_ptcld = Pointclouds(points=vp)
+            batch['vp_ptcld'] = vp_ptcld
+            batch['vp'] = vp
+
         return batch
 
 
     
 
     def configure_optimizers(self):
-        # # Only include trainable parameters (excluding frozen aggregator and canonical_head)
-        # trainable_params = [p for p in self.model.parameters() if p.requires_grad]
-        # params = trainable_params + list(self.criterion.parameters())
-
         # Only include trainable parameters (dynamically updated based on freezing)
         trainable_params = [p for p in self.model.parameters() if p.requires_grad]
         criterion_params = list(self.criterion.parameters())
@@ -591,32 +735,6 @@ class CCHTrainer(pl.LightningModule):
 
         # Optional warmup (linear) followed by cosine annealing
         if self.cfg.TRAIN.LR_SCHEDULER == 'cosine':
-            warmup_epochs = int(getattr(self.cfg.TRAIN, 'WARMUP_EPOCHS', 0))
-            
-            # if warmup_epochs > 0:
-            #     # Create warmup scheduler
-            #     warmup = optim.lr_scheduler.LinearLR(
-            #         optimizer,
-            #         start_factor=1 / 3,
-            #         end_factor=1.0,
-            #         total_iters=warmup_epochs
-            #     )
-                
-            #     # Create cosine scheduler
-            #     cosine = optim.lr_scheduler.CosineAnnealingLR(
-            #         optimizer,
-            #         T_max=max(1, self.cfg.TRAIN.NUM_EPOCHS - warmup_epochs),
-            #         eta_min=self.cfg.TRAIN.LR * 0.1
-            #     )
-                
-            #     # Combine using SequentialLR
-            #     scheduler = optim.lr_scheduler.SequentialLR(
-            #         optimizer,
-            #         schedulers=[warmup, cosine],
-            #         milestones=[warmup_epochs]
-            #     )
-            # else:
-                # No warmup, just cosine
             scheduler = optim.lr_scheduler.CosineAnnealingLR(
                 optimizer,
                 T_max=self.cfg.TRAIN.NUM_EPOCHS,
@@ -634,21 +752,31 @@ class CCHTrainer(pl.LightningModule):
         else:
             return optimizer
 
+    def _update_optimizer_parameters(self):
+        """Update optimizer parameters when training mode changes"""
+        # Get current trainable parameters
+        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+        criterion_params = list(self.criterion.parameters())
+        current_params = set(trainable_params + criterion_params)
+        
+        # Get optimizer parameter groups
+        optimizer = self.optimizers()
+        if hasattr(optimizer, 'param_groups'):
+            optimizer_params = set()
+            for group in optimizer.param_groups:
+                optimizer_params.update(group['params'])
+            
+            # If parameters have changed, update optimizer
+            if current_params != optimizer_params:
+                # Create new parameter groups
+                new_param_groups = [
+                    {'params': trainable_params, 'lr': self.cfg.TRAIN.LR},
+                    {'params': criterion_params, 'lr': self.cfg.TRAIN.LR}
+                ]
+                optimizer.param_groups = new_param_groups
 
 
-    def validation_step(self, batch, batch_idx):
-        batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
-        preds = self(batch)
-        loss, loss_dict = self.criterion(preds, batch, dataset_name='4DDress')
-        metrics = self.metrics(preds, batch)
-        self._log_metrics_and_visualise(loss, loss_dict, metrics, 'val', preds, batch, self.global_step)
-        # with torch.no_grad():
-        #     loss = self.training_step(batch, batch_idx, split='val')
-        return loss
 
-    def test_step(self, batch, batch_idx):
-        return self.validation_step(batch, batch_idx)
-    
 
 
     @torch.no_grad()
@@ -693,19 +821,55 @@ class CCHTrainer(pl.LightningModule):
 
 
     def _freeze_canonical_modules(self):
-        """Freeze canonical stage modules (aggregator, canonical_head, skinning_head)."""
-        # Freeze aggregator
         for param in self.model.aggregator.parameters():
             param.requires_grad = False
-        
-        # Freeze canonical head
         for param in self.model.canonical_head.parameters():
             param.requires_grad = False
-            
-        # Freeze skinning head if it exists
         if hasattr(self.model, 'skinning_head'):
             for param in self.model.skinning_head.parameters():
                 param.requires_grad = False
+        if self.use_sapiens:
+            for param in self.model.sapiens.parameters():
+                param.requires_grad = False
+            
+        print("freeze canonical stage")
+
+    def _unfreeze_canonical_modules(self):
+        for param in self.model.aggregator.parameters():
+            param.requires_grad = True
+        for param in self.model.canonical_head.parameters():
+            param.requires_grad = True
+        if hasattr(self.model, 'skinning_head'):
+            for param in self.model.skinning_head.parameters():
+                param.requires_grad = True
+        for module in [self.smpl_male, self.smpl_female, self.smpl_neutral]:
+            for param in module.parameters():
+                param.requires_grad = False
+
+
+    def _freeze_pbs_modules(self):
+        for module in [self.model.pbs_aggregator, self.model.pbs_head]:
+            for param in module.parameters():
+                param.requires_grad = False
+
+    def _unfreeze_pbs_modules(self):
+        for param in self.model.pbs_aggregator.parameters():
+            param.requires_grad = True
+        for param in self.model.pbs_head.parameters():
+            param.requires_grad = True
+        for module in [self.smpl_male, self.smpl_female, self.smpl_neutral]:
+            for param in module.parameters():
+                param.requires_grad = False
+
+    def _set_train_vc(self):
+        self._unfreeze_canonical_modules()
+        self._freeze_pbs_modules()
+        print("train canonical stage, freeze pbs stage")
+
+    def _set_train_vp(self):
+        self._freeze_canonical_modules()
+        self._unfreeze_pbs_modules()
+        print("train pbs stage, freeze canonical stage")
     
 
     def _test_smpl_scan_alignment(self, smpl_vertices, scan_mesh_verts):
@@ -761,7 +925,7 @@ class CCHTrainer(pl.LightningModule):
             to_vis = maps.cpu().detach().numpy()
 
         if masks is not None:
-            mask = masks.cpu().detach().numpy().squeeze(-1)
+            mask = masks.cpu().detach().numpy()
             to_vis[~mask.astype(bool)] = 0
             norm_min, norm_max = to_vis.min(), to_vis.max()
             to_vis = (to_vis - norm_min) / (norm_max - norm_min) 
@@ -769,10 +933,10 @@ class CCHTrainer(pl.LightningModule):
 
         import matplotlib.pyplot as plt
         
-        fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+        fig, axes = plt.subplots(2, 5, figsize=(16, 8))
         for i in range(1):
-            for j in range(4):
-                idx = i * 4 + j
+            for j in range(5):
+                idx = i * 5 + j
                 axes[i,j].imshow(to_vis[i, j])
                 # axes[i,j].axis('off')
         

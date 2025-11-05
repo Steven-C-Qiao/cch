@@ -150,26 +150,26 @@ def render_single(PATH, scan_id, renderer, smpl_model):
         renderer._set_cameras(cameras)
 
 
-        # dists, idx = knn_ptcld(
-        #     Pointclouds(points=scan_verts[None]), 
-        #     smpl_output.vertices,
-        #     K=1
-        # )
-        # smpl_weights_flat = smpl_model.lbs_weights[None]
-        # idx_expanded = idx.repeat(1, 1, 55)
-        # scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
-        # # scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
-        # scan_w = scan_w_tensor
+        dists, idx = knn_ptcld(
+            Pointclouds(points=scan_verts[None]), 
+            smpl_output.vertices,
+            K=1
+        )
+        smpl_weights_flat = smpl_model.lbs_weights[None]
+        idx_expanded = idx.repeat(1, 1, 55)
+        scan_w_tensor = torch.gather(smpl_weights_flat, dim=1, index=idx_expanded)
+        # scan_w = [scan_w_tensor[i, :len(verts), :] for i, verts in enumerate(scan_verts)]
+        scan_w = scan_w_tensor
 
-        # # Render skinning weight pointmaps
-        # pytorch3d_mesh = Meshes(
-        #     verts=scan_verts[None].repeat(len(camera_ids), 1, 1),
-        #     faces=scan_faces[None].repeat(len(camera_ids), 1, 1),
-        #     textures=TexturesVertex(verts_features=scan_w.repeat(len(camera_ids), 1, 1))
-        # )
+        # Render skinning weight pointmaps
+        pytorch3d_mesh = Meshes(
+            verts=scan_verts[None].repeat(len(camera_ids), 1, 1),
+            faces=scan_faces[None].repeat(len(camera_ids), 1, 1),
+            textures=TexturesVertex(verts_features=scan_w.repeat(len(camera_ids), 1, 1))
+        )
 
-        # renderer_output = renderer(pytorch3d_mesh)
-        # w_maps = renderer_output['maps']
+        renderer_output = renderer(pytorch3d_mesh)
+        w_maps = renderer_output['maps']
 
 
         pytorch3d_smpl_mesh = Meshes(

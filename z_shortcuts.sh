@@ -12,3 +12,7 @@ source ~/miniforge3/bin/activate dev
 
 source /lus/lfs1aip2/home/u5au/chexuan.u5au/miniforge3/bin/activate
 conda activate dev
+
+
+source ~/miniforge3/bin/activate dev
+python thuman_preprocess/mesh_decimation.py --job 6 --num_jobs 8

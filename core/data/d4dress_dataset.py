@@ -22,54 +22,10 @@ sys.path.append('.')
 from core.data.d4dress_utils import load_pickle, load_image, rotation_matrix, d4dress_cameras_to_pytorch3d_cameras
 
 
-# PATH_TO_DATASET = os.path.join(BASE_PATH, "4DDress")
-
-"""
-4D-DRESS
-└── < Subject ID > (00***)
-    └── < Outfit > (Inner, Outer)
-       └── < Sequence ID > (Take*)
-            ├── basic_info.pkl: {'scan_frames', 'rotation', 'offset', ...}
-            ├── Meshes_pkl
-            │   ├── atlas-fxxxxx.pkl: uv texture map as pickle file (1024, 1024, 3)
-            │   └── mesh-fxxxxx.pkl: {'vertices', 'faces', 'colors', 'normals', 'uvs'}
-            ├── SMPL
-            │   ├── mesh-fxxxxx_smpl.pkl: SMPL params
-            │   └── mesh-fxxxxx_smpl.ply: SMPL mesh
-            ├── SMPLX
-            │   ├── mesh-fxxxxx_smplx.pkl: SMPLX params
-            │   └── mesh-fxxxxx_smplx.ply: SMPLX mesh
-            ├── Semantic
-            │   ├── labels
-            │   │   └── label-fxxxxx.pkl, {'scan_labels': (nvt, )}
-            │   ├── clothes: let user extract
-            │   │   └── cloth-fxxxxx.pkl, {'upper': {'vertices', 'faces', 'colors', 'uvs', 'uv_path'}, ...}
-            ├── Capture
-            │   ├── cameras.pkl: {'cam_id': {"intrinsics", "extrinsics", ...}}
-            │   ├── < Camera ID > (0004, 0028, 0052, 0076)
-            │   │   ├── images
-            │   │   │   └── capture-f*****.png: captured image (1280, 940, 3) 
-            │   │   ├── masks
-            │   │   │   └── mask-f*****.png: rendered mask (1280, 940)
-            │   │   ├── labels: let user extract
-            │   │   │   └── label-f*****.png: rendered label (1280, 940, 3) 
-            └── └── └── └── overlap-f*****.png: overlapped label (1280, 940, 3)
-"""
-
 
 # Use timm's names
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
-
-
-def make_normalize_transform(
-    mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
-    std: Sequence[float] = IMAGENET_DEFAULT_STD,
-) -> transforms.Normalize:
-    return transforms.Normalize(mean=mean, std=std)
-
-
-
 
 
 class D4DressDataset(Dataset):
@@ -82,7 +38,7 @@ class D4DressDataset(Dataset):
         self.body_model = cfg.MODEL.BODY_MODEL
         self.num_joints = 24 if self.body_model == 'smpl' else 55
 
-        self.ids = ids 
+        self.subject_ids = ids 
         self.layer = ['Inner', 'Outer']
         self.camera_ids = ['0004', '0028', '0052', '0076']
 
@@ -94,13 +50,13 @@ class D4DressDataset(Dataset):
         self.template_lbs_weights = defaultdict(dict)  # {id: {layer: weights}}
         self.smpl_T_data = defaultdict(dict)  # {id: {joints: ..., vertices: ...}}
         
-        for id in self.ids:
-            template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', id)
+        for subject_id in self.subject_ids:
+            template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', subject_id)
             
             # Load SMPL T data (same for both layers)
             smpl_T_joints = np.load(os.path.join(template_dir, 'smpl_T_joints.npy'))
             smpl_T_vertices = np.load(os.path.join(template_dir, 'smpl_T_vertices.npy'))
-            self.smpl_T_data[id] = {
+            self.smpl_T_data[subject_id] = {
                 'joints': torch.tensor(smpl_T_joints, dtype=torch.float32)[:, :self.num_joints],
                 'vertices': torch.tensor(smpl_T_vertices, dtype=torch.float32)
             }
@@ -121,7 +77,7 @@ class D4DressDataset(Dataset):
                     dtype=torch.float32
                 )
                 
-                self.template_meshes[id][layer] = {
+                self.template_meshes[subject_id][layer] = {
                     'filtered_mesh': full_filtered_mesh,
                     'filtered_vertices': full_filtered_vertices,
                     'filtered_faces': full_filtered_faces,
@@ -129,135 +85,164 @@ class D4DressDataset(Dataset):
                     'full_lbs_weights': template_full_lbs_weights
                 }
             
-            inner_takes = os.listdir(os.path.join(PATH_TO_DATASET, id, self.layer[0]))
+            inner_takes = os.listdir(os.path.join(PATH_TO_DATASET, subject_id, self.layer[0]))
             inner_takes = [(take, 'Inner') for take in inner_takes if take.startswith('Take')]
-            outer_takes = os.listdir(os.path.join(PATH_TO_DATASET, id, self.layer[1]))
+            outer_takes = os.listdir(os.path.join(PATH_TO_DATASET, subject_id, self.layer[1]))
             outer_takes = [(take, 'Outer') for take in outer_takes if take.startswith('Take')]
 
-            self.takes[id] = inner_takes + outer_takes
-            self.num_of_takes[id] = len(inner_takes + outer_takes)
+            self.takes[subject_id] = inner_takes + outer_takes
+            self.num_of_takes[subject_id] = len(inner_takes + outer_takes)
 
 
         self.transform = transforms.Compose([
             transforms.CenterCrop((940, 940)),
             transforms.Resize((self.img_size, self.img_size)),
             transforms.ToTensor(),
-            # make_normalize_transform()
         ])
         self.mask_transform = transforms.Compose([
             transforms.CenterCrop((940, 940)),
             transforms.Resize((self.img_size, self.img_size), interpolation=Image.NEAREST),
             transforms.ToTensor(),
-            # make_normalize_transform()
         ])
-        self.normalise = make_normalize_transform()
-
-        self.sapiens_transform = sapiens_transform
+        self.sapiens_transform = transforms.Compose([
+            transforms.CenterCrop((940, 940)),
+            transforms.Resize((1024, 1024)),
+            transforms.ToTensor(),
+            transforms.Normalize(IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD),
+        ])
 
         
 
     def __len__(self):
-        return int(len(self.ids) * self.lengthen_by)
+        return int(len(self.subject_ids) * self.lengthen_by)
 
     def __getitem__(self, index):
         ret = defaultdict(list)
         ret['dataset'] = '4DDress'
 
-        id = self.ids[index // self.lengthen_by]
-        
-            
+        subject_id = self.subject_ids[index // self.lengthen_by]
 
-        num_of_takes = self.num_of_takes[id]
-        sampled_take = self.takes[id][torch.randint(0, num_of_takes, (1,)).item()]
-        take_dir = os.path.join(PATH_TO_DATASET, id, sampled_take[1], sampled_take[0])
+        num_of_takes = self.num_of_takes[subject_id]
+        sampled_take = self.takes[subject_id][torch.randint(0, num_of_takes, (1,)).item()]
+        take_dir = os.path.join(PATH_TO_DATASET, subject_id, sampled_take[1], sampled_take[0])
+
+        # Sample an extra take in the same layer as sampled_take
+        same_layer_takes = [t for t in self.takes[subject_id] if t[1] == sampled_take[1]]
+        if len(same_layer_takes) > 1:
+            extra_take = sampled_take
+            while extra_take == sampled_take:
+                extra_take = same_layer_takes[torch.randint(0, len(same_layer_takes), (1,)).item()]
+        else:
+            extra_take = sampled_take  # fallback if only one take in this layer
+
+        extra_take_dir = os.path.join(PATH_TO_DATASET, subject_id, extra_take[1], extra_take[0])
         
         suffix = '_w_outer' if sampled_take[1] == 'Outer' else ''
 
         ret['take_dir'] = take_dir
-        ret['scan_ids'] = id   
+        ret['scan_ids'] = subject_id   
 
+        # Load basic_info from main take
         basic_info = load_pickle(os.path.join(take_dir, 'basic_info.pkl'))
         gender = basic_info['gender'] # is str
         ret['gender'] = gender
         scan_frames, scan_rotation = basic_info['scan_frames'], basic_info['rotation']
-        sampled_frames = np.random.choice(scan_frames, size=self.num_frames_pp + 1, replace=False)
+        
+        # Load basic_info from extra take for the last frame
+        extra_basic_info = load_pickle(os.path.join(extra_take_dir, 'basic_info.pkl'))
+        extra_scan_frames, extra_scan_rotation = extra_basic_info['scan_frames'], extra_basic_info['rotation']
+        
+        # Sample frames: first num_frames_pp from main take, last one from extra take
+        sampled_frames_main = np.random.choice(scan_frames, size=self.num_frames_pp, replace=False)
+        sampled_frame_extra = np.random.choice(extra_scan_frames, size=1, replace=False)[0]
+        sampled_frames = list(sampled_frames_main) + [sampled_frame_extra]
         
         sampled_cameras = self.camera_ids + [np.random.choice(self.camera_ids, size=1, replace=False).item()]
+        
+        # Load camera params from both takes
         camera_params = load_pickle(os.path.join(take_dir, 'Capture', 'cameras.pkl'))
-        R, T, K = d4dress_cameras_to_pytorch3d_cameras(camera_params, sampled_cameras)
-        ret['R'] = R
-        ret['T'] = T
-        ret['K'] = K
+        extra_camera_params = load_pickle(os.path.join(extra_take_dir, 'Capture', 'cameras.pkl'))
+        
+        # Build R, T, K for all cameras: first num_frames_pp from main take, last from extra take
+        R_list, T_list, K_list = [], [], []
+        for cam_idx, cam_id in enumerate(sampled_cameras):
+            if cam_idx == len(sampled_cameras) - 1:  # Last camera uses extra take
+                R_single, T_single, K_single = d4dress_cameras_to_pytorch3d_cameras(extra_camera_params, [cam_id])
+            else:  # Other cameras use main take
+                R_single, T_single, K_single = d4dress_cameras_to_pytorch3d_cameras(camera_params, [cam_id])
+            R_list.append(torch.from_numpy(R_single[0]))
+            T_list.append(torch.from_numpy(T_single[0]))
+            K_list.append(torch.from_numpy(K_single[0]))
+
+        ret['R'] = torch.stack(R_list)
+        ret['T'] = torch.stack(T_list)
+        ret['K'] = torch.stack(K_list)
 
 
         # ---- template mesh (use pre-loaded data) ----
         layer = sampled_take[1]
-        template_data = self.template_meshes[id][layer]
-        
+        template_data = self.template_meshes[subject_id][layer]
+
+
         ret['template_mesh'] = template_data['filtered_mesh']
         ret['template_mesh_verts'] = template_data['filtered_vertices']
         ret['template_mesh_faces'] = template_data['filtered_faces']
         
         ret['template_full_mesh'] = template_data['full_mesh']
         ret['template_full_lbs_weights'] = template_data['full_lbs_weights']
+        # for key in ['filtered_mesh', 'filtered_vertices', 'filtered_faces', 'full_mesh', 'full_lbs_weights']:
+        #     ret[str('template_') + key] = template_data[key]
+
 
         # -------------- SMPL T joints and vertices (use pre-loaded data) --------------
-        smpl_T_data = self.smpl_T_data[id]
+        smpl_T_data = self.smpl_T_data[subject_id]
         ret['smpl_T_joints'] = smpl_T_data['joints']
         ret['smpl_T_vertices'] = smpl_T_data['vertices']
 
 
         for i, sampled_frame in enumerate(sampled_frames):
+            # Determine which take to use: last frame uses extra_take, others use main take
+            is_last_frame = (i == len(sampled_frames) - 1)
+            current_take_dir = extra_take_dir if is_last_frame else take_dir
+            current_scan_rotation = extra_scan_rotation if is_last_frame else scan_rotation
             
             # ---- smpl / smplx data ----
-            smpl_data_fname = os.path.join(take_dir, self.body_model.upper(), 'mesh-f{}_{}.pkl'.format(sampled_frame, self.body_model))
-            # smpl_ply_fname = os.path.join(take_dir, self.body_model.upper(), 'mesh-f{}_{}.ply'.format(sampled_frame, self.body_model))
-
+            smpl_data_fname = os.path.join(current_take_dir, self.body_model.upper(), 'mesh-f{}_{}.pkl'.format(sampled_frame, self.body_model))
             smpl_data = load_pickle(smpl_data_fname)
-            global_orient, body_pose, transl, betas = smpl_data['global_orient'], smpl_data['body_pose'], smpl_data['transl'], smpl_data['betas']
-            ret['global_orient'].append(global_orient)
-            ret['body_pose'].append(body_pose)
-            ret['transl'].append(transl)
-            ret['betas'].append(betas)
 
-            if self.body_model == 'smplx': # additionally load smplx attributes
-                ret['left_hand_pose'].append(smpl_data['left_hand_pose'])
-                ret['right_hand_pose'].append(smpl_data['right_hand_pose'])
-                ret['jaw_pose'].append(smpl_data['jaw_pose'])
-                ret['leye_pose'].append(smpl_data['leye_pose'])
-                ret['reye_pose'].append(smpl_data['reye_pose'])
-                ret['expression'].append(smpl_data['expression'])
+            for key in ['global_orient', 'body_pose', 'transl', 'betas']:
+                ret[key].append(smpl_data[key])
+
+            if self.body_model == 'smplx': 
+                for key in ['left_hand_pose', 'right_hand_pose', 'jaw_pose', 'leye_pose', 'reye_pose', 'expression']:
+                    ret[key].append(smpl_data[key])
                 pose = np.concatenate(
-                    [global_orient, body_pose, 
+                    [smpl_data['global_orient'], smpl_data['body_pose'], 
                      smpl_data['jaw_pose'], smpl_data['leye_pose'], smpl_data['reye_pose'], 
                      smpl_data['left_hand_pose'], smpl_data['right_hand_pose']], axis=0
                 )
-
-               
-
             elif self.body_model == 'smpl':
-                pose = np.concatenate([global_orient, body_pose], axis=0)
+                pose = np.concatenate([smpl_data['global_orient'], smpl_data['body_pose']], axis=0)
             else:
                 raise ValueError(f"Body model {self.body_model} not supported")
-
             ret['pose'].append(pose)
 
             
             # ---- scan mesh ----
-            scan_mesh_fname = os.path.join(take_dir, 'Meshes_pkl', 'mesh-f{}.pkl'.format(sampled_frame))
+            scan_mesh_fname = os.path.join(current_take_dir, 'Meshes_pkl', 'mesh-f{}.pkl'.format(sampled_frame))
             scan_mesh = load_pickle(scan_mesh_fname)
             scan_mesh['uv_path'] = scan_mesh_fname.replace('mesh-f', 'atlas-f')
 
             ret['scan_mesh'].append(scan_mesh)
-            ret['scan_rotation'].append(torch.tensor(scan_rotation).float())
+            ret['scan_rotation'].append(torch.tensor(current_scan_rotation).float())
             ret['scan_mesh_verts'].append(torch.tensor(scan_mesh['vertices']).float()) # - transl[None, :]).float())
-            ret['scan_mesh_verts_centered'].append(torch.tensor(scan_mesh['vertices'] - transl[None, :]).float())
+            ret['scan_mesh_verts_centered'].append(torch.tensor(scan_mesh['vertices'] - smpl_data['transl'][None, :]).float())
             ret['scan_mesh_faces'].append(torch.tensor(scan_mesh['faces']).long())
             ret['scan_mesh_colors'].append(torch.tensor(scan_mesh['colors']).float())
 
             # ---- images ----
-            img_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'images', 'capture-f{}.png'.format(sampled_frame))
-            mask_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'masks', 'mask-f{}.png'.format(sampled_frame))
+            img_fname = os.path.join(current_take_dir, 'Capture', sampled_cameras[i], 'images', 'capture-f{}.png'.format(sampled_frame))
+            mask_fname = os.path.join(current_take_dir, 'Capture', sampled_cameras[i], 'masks', 'mask-f{}.png'.format(sampled_frame))
             
             # Load images and apply transforms
             img = load_image(img_fname)
@@ -270,61 +255,24 @@ class D4DressDataset(Dataset):
             mask_pil = Image.fromarray(mask)
             masked_img_pil = Image.fromarray(masked_img)
             
-            # Apply transforms
-            # img_transformed = self.normalise(self.transform(img_pil))
             img_transformed = self.transform(img_pil)
             mask_transformed = self.mask_transform(mask_pil).squeeze()
 
-            sapiens_image = sapiens_transform(masked_img_pil)
+            sapiens_image = self.sapiens_transform(masked_img_pil)
 
             ret['sapiens_images'].append(sapiens_image)
             ret['imgs'].append(img_transformed)
             ret['masks'].append(mask_transformed)
 
 
-            # lbs_weights_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'lbs_images', 'lbs_image-f{}.pt'.format(sampled_frame))
-            # lbs_weights_fname = '/scratch/u5au/chexuan.u5au/4DDress/00122/Inner/Take2/Capture/0076/lbs_images/lbs_image-f00011.pt'
-            # lbs_weights = torch.load(lbs_weights_fname, map_location='cpu')
-            # print(f"Loaded lbs_weights type: {type(lbs_weights)}, is_sparse: {lbs_weights.is_sparse if hasattr(lbs_weights, 'is_sparse') else 'N/A'}")
-            # ret['smpl_w_maps'].append(lbs_weights)
-
-
-        ret['imgs'] = torch.tensor(np.stack(ret['imgs']))
-        ret['masks'] = torch.tensor(np.stack(ret['masks']))
-        ret['R'] = torch.tensor(np.stack(ret['R']))
-        ret['T'] = torch.tensor(np.stack(ret['T']))
-        ret['K'] = torch.tensor(np.stack(ret['K']))
-        ret['global_orient'] = torch.tensor(np.stack(ret['global_orient']))
-        ret['body_pose'] = torch.tensor(np.stack(ret['body_pose']))
-        ret['pose'] = torch.tensor(np.stack(ret['pose']))
-        ret['transl'] = torch.tensor(np.stack(ret['transl']))
-        ret['betas'] = torch.tensor(np.stack(ret['betas']))
-        ret['scan_rotation'] = torch.tensor(np.stack(ret['scan_rotation']))
-        ret['sapiens_images'] = torch.tensor(np.stack(ret['sapiens_images']))
-        # ret['smpl_w_maps'] = torch.stack(ret['smpl_w_maps'])
-        if self.body_model == 'smplx':
-            ret['left_hand_pose'] = torch.tensor(np.stack(ret['left_hand_pose']))
-            ret['right_hand_pose'] = torch.tensor(np.stack(ret['right_hand_pose']))
-            ret['jaw_pose'] = torch.tensor(np.stack(ret['jaw_pose']))
-            ret['leye_pose'] = torch.tensor(np.stack(ret['leye_pose']))
-            ret['reye_pose'] = torch.tensor(np.stack(ret['reye_pose']))
-            ret['expression'] = torch.tensor(np.stack(ret['expression']))
-
-
+        for key in list(ret.keys()):
+            if isinstance(ret[key], (list, tuple)) and len(ret[key]) > 0:
+                try:
+                    ret[key] = torch.stack([t if torch.is_tensor(t) else torch.tensor(t) for t in ret[key]])
+                except:
+                    pass
         return ret
 
-def sapiens_transform(
-    image: torch.tensor
-) -> torch.tensor:
-    transform = transforms.Compose([
-        transforms.CenterCrop((940, 940)),
-        transforms.Resize((1024, 1024)),
-        transforms.ToTensor(),
-        make_normalize_transform()
-    ])
-    image = transform(image)
-
-    return image
 
 
 

@@ -64,6 +64,8 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         vis_save_dir=vis_save_dir,
         plot=True
     )
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
     if load_path is not None:
         logger.info(f"Loading checkpoint: {load_path}")
         ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
@@ -71,13 +73,27 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
         # logger.log_hyperparams(ckpt['hyper_parameters'])
 
     datamodule = CCHDataModule(cfg)
-    datamodule.setup('train')
+    datamodule.setup('val')
     train_dataloader = datamodule.train_dataloader()
+
+    def _move_to_device(data, device):
+        if isinstance(data, torch.Tensor):
+            return data.to(device)
+        if isinstance(data, dict):
+            return {k: _move_to_device(v, device) for k, v in data.items()}
+        if isinstance(data, list):
+            return [_move_to_device(v, device) for v in data]
+        if isinstance(data, tuple):
+            return tuple(_move_to_device(v, device) for v in data)
+        return data
 
     model.eval()
     with torch.no_grad():
         for batch_idx, batch in tqdm(enumerate(train_dataloader)):
-            model.forward_and_visualise(batch, batch_idx)
+            batch = _move_to_device(batch, device)
+            batch_proc = model.process_4ddress(batch, batch_idx, normalise=model.normalise)
+            preds = model(batch_proc)
+            model.visualiser.visualise(preds, batch_proc, batch_idx=batch_idx, split='plot')
 
 
 

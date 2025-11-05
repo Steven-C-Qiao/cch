@@ -25,6 +25,7 @@ class CCH(nn.Module):
         self.body_model = cfg.MODEL.BODY_MODEL
         self.image_size = cfg.DATA.IMAGE_SIZE
         self.use_sapiens = cfg.MODEL.USE_SAPIENS
+        self.sapiens_downsample_method = cfg.MODEL.SAPIENS_DOWNSAMPLE_METHOD
 
         s1_cfg = MODEL_CONFIGS[cfg.MODEL.CANONICAL_STAGE_SIZE]
         s2_cfg = MODEL_CONFIGS[cfg.MODEL.PBS_STAGE_SIZE]
@@ -35,7 +36,12 @@ class CCH(nn.Module):
         if self.use_sapiens:
             sapiens_embed_dim = 512
             interpolation_size = self.image_size // s1_cfg['patch_size']
-            self.sapiens = SapiensWrapper(project_dim=sapiens_embed_dim, interpolate_size=(interpolation_size, interpolation_size))
+            # Get downsample method from config, default to 'interpolate' for backward compatibility
+            self.sapiens = SapiensWrapper(
+                project_dim=sapiens_embed_dim, 
+                interpolate_size=(interpolation_size, interpolation_size),
+                downsample_method=self.sapiens_downsample_method
+            )
         else:
             sapiens_embed_dim = 0
 
@@ -150,9 +156,8 @@ class CCH(nn.Module):
             canonical_sapiens_tokens_list = canonical_tokens_list
 
         vc_init, vc_init_conf = self.canonical_head(canonical_sapiens_tokens_list, images[:, :N], patch_start_idx=patch_start_idx)
-        vc_init = torch.clamp(vc_init, -2, 2)
-
-        vc_init = vc_init * mask.unsqueeze(-1)[:, :N] # Mask background pixels to origin, important for backward chamfer metrics
+        # vc_init = torch.clamp(vc_init, -2, 2)
+        # vc_init = vc_init * mask.unsqueeze(-1)[:, :N] # Mask background pixels to origin, important for backward chamfer metrics
 
         ret['vc_init'] = vc_init
         ret['vc_init_conf'] = vc_init_conf
@@ -196,6 +201,8 @@ class CCH(nn.Module):
             
             pbs_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
 
+            # import ipdb; ipdb.set_trace()
+
             if self.use_sapiens:
                 full_tokens_list = [
                     torch.concat(
@@ -220,8 +227,11 @@ class CCH(nn.Module):
                     for pbs_tokens, agg_tokens in zip(pbs_tokens_list, canonical_tokens_list)
                 ]
 
-            dvc, dvc_conf = self.pbs_head(full_tokens_list, rearrange(images.unsqueeze(2).repeat_interleave(N, dim=2), 'b k n c h w -> (b k) n c h w'), patch_start_idx=patch_start_idx)
+            dvc, dvc_conf = self.pbs_head(
+                full_tokens_list, rearrange(images.unsqueeze(2).repeat_interleave(N, dim=2), 'b k n c h w -> (b k) n c h w'), patch_start_idx=patch_start_idx
+            )
             dvc = (torch.sigmoid(dvc) - 0.5) * 0.2 # limit the update to [-0.1, 0.1]
+
             dvc = rearrange(dvc, '(b k) n h w c -> b k n h w c', b=B, k=K)
             dvc_conf = rearrange(dvc_conf, '(b k) n h w -> b k n h w', b=B, k=K)
 
