@@ -54,11 +54,18 @@ class CCHTrainer(pl.LightningModule):
         self.num_smpl_vertices = 6890 if self.body_model=='smpl' else 10475
         self.freeze_canonical_epochs = getattr(cfg.TRAIN, 'WARMUP_EPOCHS', 0)
 
+        if self.cfg.DATA.IMAGE_SIZE == 518:
+            self.feature_renderer_image_size = (512, 384)
+            self.thuman_renderer_image_size = (512, 512)
+        elif self.cfg.DATA.IMAGE_SIZE == 224:
+            self.feature_renderer_image_size = (256, 192)
+            self.thuman_renderer_image_size = (256, 256)
+        else:
+            raise ValueError(f"Image size {self.cfg.DATA.IMAGE_SIZE} not supported")
 
-        self.feature_renderer = FeatureRenderer(image_size=(512, 384))#(512, 384))#image_size=(256, 192)) 
-        self.thuman_renderer = FeatureRenderer(image_size=(256, 256))
-        # self.normal_renderer = SurfaceNormalRenderer(image_size=(512, 384))
-        # self.thuman_normal_renderer = SurfaceNormalRenderer(image_size=(256, 256))
+
+        self.feature_renderer = FeatureRenderer(image_size=self.feature_renderer_image_size)
+        self.thuman_renderer = FeatureRenderer(image_size=self.thuman_renderer_image_size)
 
         self.smpl_male = smplx.create(
             model_type=self.body_model,
@@ -95,7 +102,8 @@ class CCHTrainer(pl.LightningModule):
             smpl_male=self.smpl_male,
             smpl_female=self.smpl_female,
         )
-        # self._freeze_canonical_modules()
+        if self.cfg.MODEL.FREEZE_CANONICAL_MODULES:
+            self._freeze_canonical_modules()
 
         self.criterion = CCHLoss(cfg)
         self.metrics = CCHMetrics(cfg)
@@ -129,7 +137,7 @@ class CCHTrainer(pl.LightningModule):
         if self.dev:
             batch = self.first_batch
 
-        batch = batch[0] if np.random.rand() > self.d4dress_probability else batch[1]
+        batch = batch[1] if np.random.rand() < self.d4dress_probability else batch[0]
         if batch['dataset'][0] == '4DDress':
             batch = self.process_4ddress(batch, batch_idx, normalise=self.normalise)
         elif batch['dataset'][0] == 'THuman':
@@ -153,11 +161,9 @@ class CCHTrainer(pl.LightningModule):
 
         self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, batch_idx)
 
-
-        
-        for k, v in loss_dict.items():
-            print(f"{k}: {v.item():.2f}", end='; ')
-        print('')
+        # for k, v in loss_dict.items():
+        #     print(f"{k}: {v.item():.2f}", end='; ')
+        # print('')
         # import ipdb; ipdb.set_trace()
         
         return loss 
@@ -194,7 +200,7 @@ class CCHTrainer(pl.LightningModule):
             # Synchronize CUDA on ALL ranks before visualization to ensure DDP processes stay in sync
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
-            self.visualiser.visualise(preds, batch, split=split, epoch=self.current_epoch)
+            self.visualiser.visualise(preds, batch, metrics=metrics, split=split, epoch=self.current_epoch)
             # Synchronize CUDA on ALL ranks after visualization to ensure DDP processes stay in sync
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -204,23 +210,23 @@ class CCHTrainer(pl.LightningModule):
                 print('')
                 # import ipdb; ipdb.set_trace()
 
-        else:
-            should_vis = False
-            global_step = self.global_step
-            if split in ('train', 'test'):
-                should_vis = ((global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1))
-            elif split == 'val':
-                # Visualise every N validation batches based on vis_frequency
-                should_vis = (batch_idx == 4)
+        # else:
+        #     should_vis = False
+        #     global_step = self.global_step
+        #     if split in ('train', 'test'):
+        #         should_vis = ((global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1))
+        #     elif split == 'val':
+        #         # Visualise every N validation batches based on vis_frequency
+        #         should_vis = (batch_idx == 50) or (batch_idx == 100)
 
-            if should_vis:
-                # Synchronize CUDA on ALL ranks before visualization to ensure DDP processes stay in sync
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-                self.visualiser.visualise(preds, batch, split=split, epoch=self.current_epoch)
-                # Synchronize CUDA on ALL ranks after visualization to ensure DDP processes stay in sync
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize() 
+        #     if should_vis:
+        #         # Synchronize CUDA on ALL ranks before visualization to ensure DDP processes stay in sync
+        #         if torch.cuda.is_available():
+        #             torch.cuda.synchronize()
+        #         self.visualiser.visualise(preds, batch, metrics=metrics, split=split, epoch=self.current_epoch)
+        #         # Synchronize CUDA on ALL ranks after visualization to ensure DDP processes stay in sync
+        #         if torch.cuda.is_available():
+        #             torch.cuda.synchronize() 
 
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
@@ -403,20 +409,6 @@ class CCHTrainer(pl.LightningModule):
             batch['smpl_w_maps'] = w_maps
 
 
-            # ----------------------- Render scan pointmaps for normal loss -----------------------
-            pytorch3d_mesh = Meshes(
-                verts=scan_mesh_verts,
-                faces=scan_mesh_faces,
-                textures=TexturesVertex(verts_features=scan_mesh_verts_centered)
-            )
-            renderer_output = self.feature_renderer(pytorch3d_mesh)
-            scan_pointmaps = renderer_output['maps']
-            scan_pointmaps = scan_pointmaps[:, crop_amount:H-crop_amount, :, :]
-            scan_pointmaps = torch.nn.functional.interpolate(
-                scan_pointmaps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
-            )
-            scan_pointmaps = rearrange(scan_pointmaps, '(b k) c h w -> b k h w c', b=B, k=K)
-            batch['scan_pointmaps'] = scan_pointmaps
 
             template_mesh = batch['template_mesh']
             template_mesh_verts = [torch.tensor(mesh.vertices, device=self.device, dtype=torch.float32) for mesh in template_mesh]
@@ -494,28 +486,25 @@ class CCHTrainer(pl.LightningModule):
             mask = rearrange(mask, '(b k) c h w -> b k h w c', b=B, k=K)
             batch['smpl_mask'] = mask.squeeze(-1)
 
-
-            # # ----------------------- Render ground truth normals from template full mesh -----------------------
-            # # Compute and render normals from ground truth template FULL mesh for all K views
-            # # Use canonical (unposed) full mesh for normal rendering to match canonical space of vc_init
-            # self.normal_renderer._set_cameras(cameras)
-
-            # # Render normals using SurfaceNormalRenderer (returns normals in [-1, 1] by default)
-            # gt_normal_ret = self.normal_renderer(
-            #     mesh=pytorch3d_mesh,
-            #     return_normalized=True  # Return normals in [0, 1] range
-            # )
-            # gt_normal_maps = gt_normal_ret['normals']  # (B*K, H, W, 3)
-            # gt_normal_maps = gt_normal_maps[:, crop_amount:H-crop_amount, :, :]
-            # gt_normal_maps = torch.nn.functional.interpolate(
-            #     gt_normal_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
-            # )
-            # gt_normal_maps = rearrange(gt_normal_maps, '(b k) c h w -> b k h w c', b=B, k=K)
-            
-            # # Add to batch
-            # batch['gt_normal_maps'] = gt_normal_maps
-
-
+            # Shrink smpl_mask by one pixel: if any of the 8 neighbors is False, set it to False
+            if self.cfg.DATA.ERODE_SMPL_MASK:
+                smpl_mask_float = batch['smpl_mask'].float()  # (B, K, H, W)
+                # Invert mask: 1.0 where True, 0.0 where False
+                inverted_mask = 1.0 - smpl_mask_float
+                # Apply max pooling on inverted mask to check if any neighbor is False
+                # max_pool2d on inverted mask: if max > 0, at least one neighbor was False
+                B_orig, K_orig, H_orig, W_orig = inverted_mask.shape
+                inverted_mask_flat = inverted_mask.view(B_orig * K_orig, 1, H_orig, W_orig)
+                pooled = torch.nn.functional.max_pool2d(
+                    inverted_mask_flat, 
+                    kernel_size=3, 
+                    stride=1, 
+                    padding=1
+                )
+                pooled = pooled.view(B_orig, K_orig, H_orig, W_orig)
+                # If pooled > 0, that pixel has at least one False neighbor, so set it to False
+                # Eroded mask: True only if all neighbors are True (pooled == 0)
+                batch['smpl_mask'] = (pooled == 0.0)
 
 
             # -----------------Normalise after render -----------------
@@ -528,6 +517,23 @@ class CCHTrainer(pl.LightningModule):
                 template_mesh_verts = [verts * (normalise_to_height / smpl_T_height[i]) for i, verts in enumerate(template_mesh_verts)]
 
             batch['smpl_T_joints'] = smpl_T_joints
+
+
+            # ----------------------- Render scan pointmaps for normal loss -----------------------
+            # This comes after normalisation since we're comparing against normalised predictions
+            pytorch3d_mesh = Meshes(
+                verts=scan_mesh_verts,
+                faces=scan_mesh_faces,
+                textures=TexturesVertex(verts_features=scan_mesh_verts_centered)
+            )
+            renderer_output = self.feature_renderer(pytorch3d_mesh)
+            scan_pointmaps = renderer_output['maps']
+            scan_pointmaps = scan_pointmaps[:, crop_amount:H-crop_amount, :, :]
+            scan_pointmaps = torch.nn.functional.interpolate(
+                scan_pointmaps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            )
+            scan_pointmaps = rearrange(scan_pointmaps, '(b k) c h w -> b k h w c', b=B, k=K)
+            batch['scan_pointmaps'] = scan_pointmaps
 
 
 
@@ -597,7 +603,7 @@ class CCHTrainer(pl.LightningModule):
 
             # ----------------------- Render -----------------------
             batch['smpl_w_maps'] = rearrange(batch['smpl_w_maps'], 'b k c h w -> b k h w c')
-            batch['vc_smpl_maps'] = rearrange(batch['vc_smpl_maps'], 'b k c h w -> b k h w c')
+            # batch['vc_smpl_maps'] = rearrange(batch['vc_smpl_maps'], 'b k c h w -> b k h w c')
 
             cam_R, cam_T = batch['cam_R'], batch['cam_T']
 
@@ -611,33 +617,7 @@ class CCHTrainer(pl.LightningModule):
                 in_ndc=False
             )
             self.thuman_renderer._set_cameras(cameras)
-
-            pytorch3d_mesh = Meshes(
-                verts=scan_verts,
-                faces=scan_faces,
-                textures=TexturesVertex(verts_features=scan_verts)
-            )
-            renderer_output = self.thuman_renderer(pytorch3d_mesh)
-            scan_pointmaps = renderer_output['maps']
-            scan_pointmaps = torch.nn.functional.interpolate(
-                scan_pointmaps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
-            )
-            scan_pointmaps = rearrange(scan_pointmaps, '(b k) c h w -> b k h w c', b=B, k=K)
-            batch['scan_pointmaps'] = scan_pointmaps
-
-            # renderer_output = self.thuman_normal_renderer(
-            #     pytorch3d_mesh,
-            #     return_normalized=True
-            # )
-            # gt_normal_maps = renderer_output['normals']
-            # gt_normal_maps = torch.nn.functional.interpolate(
-            #     gt_normal_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
-            # )
-            # gt_normal_maps = rearrange(gt_normal_maps, '(b k) c h w -> b k h w c', b=B, k=K)
-            # batch['gt_normal_maps'] = gt_normal_maps
-
-            # self._test_render(scan_pointmaps, masks=batch['masks'], name='scan_pointmaps')
-
+            
 
             # dists, idx = self.knn_ptcld(
             #     Pointclouds(points=scan_verts), 
@@ -672,31 +652,31 @@ class CCHTrainer(pl.LightningModule):
             
             # batch['smpl_w_maps'] = w_maps
 
-            # if self.cfg.DATA.NORMALISE:
-            #     normalise_to_height = 1.7 
-            #     smpl_T_height = smpl_T_output.vertices[:, :, 1].max(dim=-1).values - smpl_T_output.vertices[:, :, 1].min(dim=-1).values
-            #     smpl_T_vertices_normalised = smpl_T_output.vertices * (normalise_to_height / smpl_T_height)[:, None, None]
+            if self.cfg.DATA.NORMALISE:
+                normalise_to_height = 1.7 
+                smpl_T_height = smpl_T_output.vertices[:, :, 1].max(dim=-1).values - smpl_T_output.vertices[:, :, 1].min(dim=-1).values
+                smpl_T_vertices_normalised = smpl_T_output.vertices * (normalise_to_height / smpl_T_height)[:, None, None]
 
-            # pytorch3d_smpl_mesh = Meshes(
-            #     verts=smpl_output.vertices,
-            #     faces=torch.tensor(smpl_model.faces, device=self.device).expand(B*K, -1, -1),
-            #     textures=TexturesVertex(verts_features=smpl_T_vertices_normalised)
-            # )
+            pytorch3d_smpl_mesh = Meshes(
+                verts=smpl_output.vertices,
+                faces=torch.tensor(smpl_model.faces, device=self.device).expand(B*K, -1, -1),
+                textures=TexturesVertex(verts_features=smpl_T_vertices_normalised)
+            )
 
-            # renderer_output = self.thuman_renderer(pytorch3d_smpl_mesh)
-            # vc_maps = renderer_output['maps']
-            # vc_mask = renderer_output['mask'].unsqueeze(-1)
-            # vc_maps = torch.nn.functional.interpolate(
-            #     vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
-            # )
-            # vc_maps = rearrange(vc_maps, '(b k) j h w -> b k h w j', b=B, k=K)
+            renderer_output = self.thuman_renderer(pytorch3d_smpl_mesh)
+            vc_maps = renderer_output['maps']
+            vc_mask = renderer_output['mask'].unsqueeze(-1)
+            vc_maps = torch.nn.functional.interpolate(
+                vc_maps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            )
+            vc_maps = rearrange(vc_maps, '(b k) j h w -> b k h w j', b=B, k=K)
 
-            # vc_mask = torch.nn.functional.interpolate(
-            #     vc_mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
-            # )
-            # vc_mask = rearrange(vc_mask, '(b k) c h w -> b k h w c', b=B, k=K)
-            # batch['smpl_mask'] = vc_mask.squeeze(-1)
-            # batch['vc_smpl_maps'] = vc_maps
+            vc_mask = torch.nn.functional.interpolate(
+                vc_mask.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='nearest'
+            )
+            vc_mask = rearrange(vc_mask, '(b k) c h w -> b k h w c', b=B, k=K)
+            batch['smpl_mask'] = vc_mask.squeeze(-1)
+            batch['vc_smpl_maps'] = vc_maps
 
 
             # normalise smpl joints, scan vertices, and smpl vertices
@@ -711,6 +691,22 @@ class CCHTrainer(pl.LightningModule):
             batch['pose'] = rearrange(smpl_output.full_pose, '(b k) c -> b k c', b=B, k=K)    
 
 
+            pytorch3d_mesh = Meshes(
+                verts=scan_verts,
+                faces=scan_faces,
+                textures=TexturesVertex(verts_features=scan_verts)
+            )
+            renderer_output = self.thuman_renderer(pytorch3d_mesh)
+            scan_pointmaps = renderer_output['maps']
+            scan_pointmaps = torch.nn.functional.interpolate(
+                scan_pointmaps.permute(0,3,1,2), size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+            )
+            scan_pointmaps = rearrange(scan_pointmaps, '(b k) c h w -> b k h w c', b=B, k=K)
+            batch['scan_pointmaps'] = scan_pointmaps
+            # self._test_render(scan_pointmaps, masks=batch['masks'], name='scan_pointmaps')
+
+
+
 
             scan_mesh_pytorch3d = Meshes(
                 verts=scan_verts,
@@ -720,6 +716,27 @@ class CCHTrainer(pl.LightningModule):
             vp_ptcld = Pointclouds(points=vp)
             batch['vp_ptcld'] = vp_ptcld
             batch['vp'] = vp
+
+            # Shrink smpl_mask by one pixel: if any of the 8 neighbors is False, set it to False
+            if 'smpl_mask' in batch and self.cfg.DATA.ERODE_SMPL_MASK:
+                smpl_mask_float = batch['smpl_mask'].float()  # (B, K, H, W)
+                # Invert mask: 1.0 where True, 0.0 where False
+                inverted_mask = 1.0 - smpl_mask_float
+                # Apply max pooling on inverted mask to check if any neighbor is False
+                # max_pool2d on inverted mask: if max > 0, at least one neighbor was False
+                B_orig, K_orig, H_orig, W_orig = inverted_mask.shape
+                inverted_mask_flat = inverted_mask.view(B_orig * K_orig, 1, H_orig, W_orig)
+                pooled = torch.nn.functional.max_pool2d(
+                    inverted_mask_flat, 
+                    kernel_size=3, 
+                    stride=1, 
+                    padding=1
+                )
+                pooled = pooled.view(B_orig, K_orig, H_orig, W_orig)
+                # If pooled > 0, that pixel has at least one False neighbor, so set it to False
+                # Eroded mask: True only if all neighbors are True (pooled == 0)
+                batch['smpl_mask'] = (pooled == 0.0)
+
 
         return batch
 

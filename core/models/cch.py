@@ -201,8 +201,6 @@ class CCH(nn.Module):
             
             pbs_tokens_list, patch_start_idx = self.pbs_aggregator(pbs_aggregator_input)
 
-            # import ipdb; ipdb.set_trace()
-
             if self.use_sapiens:
                 full_tokens_list = [
                     torch.concat(

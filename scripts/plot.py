@@ -109,6 +109,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--cfg_opts', 
         '-O', 
+        action='append',
         nargs='*', 
         default=None,
         help='Command line options to modify experiment config e.g. ''-O TRAIN.NUM_EPOCHS 120'' '
@@ -154,6 +155,13 @@ if __name__ == '__main__':
     # logger.info(f"Using GPUs: {args.gpus} (Device IDs: {device_ids})")
 
     assert ((args.resume_training_states is not None) * (args.load_from_ckpt is not None) == 0), 'Specify either resume_training_states or load_from_ckpt, not both'
+
+    # Flatten cfg_opts if it's a list of lists (from multiple -O flags)
+    if args.cfg_opts is not None:
+        flattened_cfg_opts = []
+        for opt_list in args.cfg_opts:
+            flattened_cfg_opts.extend(opt_list)
+        args.cfg_opts = flattened_cfg_opts
 
     torch.set_float32_matmul_precision('high')
     run_train(

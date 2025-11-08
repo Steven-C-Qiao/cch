@@ -114,15 +114,6 @@ def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=Non
             monitor='val_loss/dataloader_idx_1',  # Monitor 4DDress validation loss
             mode='min'
         ),  
-        # ModelCheckpoint( # this is the vc_init cfd 
-        #     dirpath=model_save_dir,
-        #     filename='train_vc_cfd_{epoch:03d}',
-        #     save_top_k=1,
-        #     save_last=False,
-        #     verbose=True,
-        #     monitor='train_vc_cfd',
-        #     mode='min'
-        # ),
         ModelCheckpoint(
             dirpath=model_save_dir,
             filename='val_vc_cfd_{epoch:03d}',
@@ -220,6 +211,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--cfg_opts', 
         '-O', 
+        action='append',
         nargs='*', 
         default=None,
         help='Command line options to modify experiment config e.g. ''-O TRAIN.NUM_EPOCHS 120'' '
@@ -268,7 +260,12 @@ if __name__ == '__main__':
 
     assert ((args.resume_training_states is not None) * (args.load_from_ckpt is not None) == 0), 'Specify either resume_training_states or load_from_ckpt, not both'
 
-
+    # Flatten cfg_opts if it's a list of lists (from multiple -O flags)
+    if args.cfg_opts is not None:
+        flattened_cfg_opts = []
+        for opt_list in args.cfg_opts:
+            flattened_cfg_opts.extend(opt_list)
+        args.cfg_opts = flattened_cfg_opts
 
     
     run_train(

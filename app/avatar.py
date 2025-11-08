@@ -42,6 +42,43 @@ def _move_to_device(sample, device):
     return sample
 
 
+def _get_confidence_threshold_from_percentage(confidence, image_mask, mask_percentage=0.0):
+    """
+    Compute threshold value that masks a certain percentage of foreground pixels with lowest confidence.
+    
+    Args:
+        confidence: Confidence values array (N, H, W) or (H, W), can be torch tensor or numpy array
+        image_mask: Foreground mask (N, H, W) or (H, W), can be torch tensor or numpy array
+        
+    Returns:
+        Threshold value to use for masking
+    """
+    
+    # Convert to numpy if torch tensors
+    if hasattr(confidence, 'cpu'):
+        confidence = confidence.cpu().detach().numpy()
+    if hasattr(image_mask, 'cpu'):
+        image_mask = image_mask.cpu().detach().numpy()
+    
+    # Ensure mask is boolean
+    image_mask = image_mask.astype(bool)
+    
+    # Flatten for easier processing
+    confidence_flat = confidence.flatten()
+    mask_flat = image_mask.flatten()
+    
+    # Get confidence values only for foreground pixels
+    foreground_conf = confidence_flat[mask_flat]
+    
+    # Calculate the threshold value for the given percentage
+    # We want to mask the lowest mask_percentage of foreground pixels
+    percentile = mask_percentage * 100
+    computed_threshold = np.percentile(foreground_conf, percentile)
+    
+    # Use the computed threshold
+    return computed_threshold
+
+
 # Use timm's names
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
@@ -461,7 +498,11 @@ class Solver:
         scatter_mask = mask_N[0].astype(bool) # nhw
         if "vc_init_conf" in predictions:
             confidence = predictions['vc_init_conf']
-            confidence = confidence > 1.25
+            # Compute threshold from percentage if enabled, otherwise use fixed threshold
+            threshold_value = _get_confidence_threshold_from_percentage(
+                confidence[0], mask_N[0], mask_percentage=0.01
+            )
+            confidence = confidence > threshold_value
         else:
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
         scatter_mask = scatter_mask * confidence[0].astype(bool)
@@ -671,10 +712,10 @@ if __name__ == '__main__':
     assert (args.load_from_ckpt is not None), 'Specify load_from_ckpt'
 
 
-    # id = '00147'
-    # take = 'Take6'
-    # frames = ['00021', '00021', '00021', '00021', '00021']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
+    id = '00147'
+    take = 'Take6'
+    frames = ['00021', '00021', '00021', '00021', '00021']
+    cameras = ['0004', '0028', '0052', '0076', '0076']
 
 
 
@@ -689,19 +730,19 @@ if __name__ == '__main__':
     # cameras = ['0004', '0028', '0052', '0076', '0076']
 
 
-    id = '00134'
-    take = 'Take3'
-    frames = ['00006', '00006', '00006', '00006', '00006']
-    cameras = ['0004', '0028', '0052', '0076', '0076']
+    # id = '00134'
+    # take = 'Take3'
+    # frames = ['00006', '00006', '00006', '00006', '00006']
+    # cameras = ['0004', '0028', '0052', '0076', '0076']
+    # novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/SMPLX'
+    # gt_scan_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/Meshes_pkl'
+
 
 
     # id = '00148'
     # take = 'Take1'
-    # frames = ['00021', '00021', '00021', '00021', '00021']
+    # frames = ['00021', '00041', '00109', '00137', '00021']
     # cameras = ['0004', '0028', '0052', '0076', '0076']
-
-
-    
     novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/SMPLX'
     gt_scan_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/Meshes_pkl'
 

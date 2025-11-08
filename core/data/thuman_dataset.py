@@ -92,6 +92,7 @@ class THumanDataset(Dataset):
         self.crop_transform = transforms.Compose(
             [
                 transforms.Resize(self.img_size),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
                 transforms.ToTensor(),
                 # no normalise since done in cch_aggregator
             ]
@@ -124,7 +125,7 @@ class THumanDataset(Dataset):
         )
 
     def __len__(self):
-        return int(len(self.ids) * self.lengthen_by)
+        return int(len(self.ids) * self.lengthen_by )
     
     def __getitem__(self, index):
         ret = defaultdict(list)
@@ -142,10 +143,10 @@ class THumanDataset(Dataset):
         
         # Sample one camera ID from each row of camera angles
         sampled_cameras = [
-            np.random.choice(['000', '010', '020', '030', '040', '050', '060', '070', '080'], size=1)[0],
-            np.random.choice(['090', '100', '110', '120', '130', '140', '150', '160', '170'], size=1)[0], 
-            np.random.choice(['180', '190', '200', '210', '220', '230', '240', '250', '260'], size=1)[0],
-            np.random.choice(['270', '280', '290', '300', '310', '320', '330', '340', '350'], size=1)[0]
+            np.random.choice(['000', '010', '020'], size=1)[0],
+            np.random.choice(['090', '100', '110'], size=1)[0], 
+            np.random.choice(['180', '190', '200'], size=1)[0],
+            np.random.choice(['270', '280', '290'], size=1)[0]
         ]
         if len(sampled_cameras) < K:
             additional_cameras = np.random.choice(self.camera_ids, size=K-len(sampled_cameras), replace=False)
@@ -220,19 +221,19 @@ class THumanDataset(Dataset):
             ret['cam_K'].append(intrinsic)
 
 
-            vc_maps_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id,  f'{scan_id}_vc_maps_normalised_170cm.npy')
-            vc_map = np.load(vc_maps_fname)  # (36, 512, 512, 3)
+            # vc_maps_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id,  f'{scan_id}_vc_maps_normalised_170cm.npy')
+            # vc_map = np.load(vc_maps_fname)  # (36, 512, 512, 3)
 
-            # Convert camera ID to index (e.g. '000' -> 0, '010' -> 1, etc)
-            camera_idx = int(sampled_cameras[i]) // 10
-            # Index into vc_map using camera index
-            vc_map = vc_map[camera_idx]  # (512, 512, 3)
-            # Create binary mask where none of the elements are 1 across axis=-1
+            # # Convert camera ID to index (e.g. '000' -> 0, '010' -> 1, etc)
+            # camera_idx = int(sampled_cameras[i]) // 10
+            # # Index into vc_map using camera index
+            # vc_map = vc_map[camera_idx]  # (512, 512, 3)
+            # # Create binary mask where none of the elements are 1 across axis=-1
 
-            vc_map = self.vc_map_transform(vc_map)
-            assert vc_map.shape == (3, self.img_size, self.img_size)
-            # vc_mask = self.vc_mask_transform(vc_mask).squeeze()
-            vc_mask = (vc_map != 1).all(dim=0)
+            # vc_map = self.vc_map_transform(vc_map)
+            # assert vc_map.shape == (3, self.img_size, self.img_size)
+            # # vc_mask = self.vc_mask_transform(vc_mask).squeeze()
+            # vc_mask = (vc_map != 1).all(dim=0)
 
             # w_maps_dir_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, f'{scan_id}_w_maps_sparse', f'{sampled_cameras[i]}.pt') #.npz')
             # w_map = torch.load(w_maps_dir_fname, map_location='cpu')
@@ -241,8 +242,8 @@ class THumanDataset(Dataset):
             w_map = load_w_maps_sparse(w_maps_dir_fname)  # Shape: (512, 512, 55)
             assert w_map.shape == (512, 512, 55)
             w_map = self.vc_map_transform(w_map)
-            ret['vc_smpl_maps'].append(vc_map)
-            ret['smpl_mask'].append(vc_mask)
+            # ret['vc_smpl_maps'].append(vc_map)
+            # ret['smpl_mask'].append(vc_mask)
             ret['smpl_w_maps'].append(w_map)
 
 

@@ -1,1 +1,0 @@
-python scripts/train.py -E exp/exp_074_resume_isbd_023 -L exp/Isambard/exp_023_vp_extend/vp_cfd_epoch=045.ckpt --gpus 0,1,2,3

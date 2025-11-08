@@ -43,10 +43,52 @@ class Visualiser(pl.LightningModule):
         self.rank = rank
         self.cfg = cfg
         self.threshold = cfg.LOSS.CONFIDENCE_THRESHOLD if cfg is not None else 100
+        self.mask_percentage = cfg.LOSS.CONFIDENCE_MASK_PERCENTAGE if cfg is not None else 0.0
         self._suffix = ''
 
         # self.threshold = 50
         # print("Visualiser confidence threshold:", self.threshold)
+
+    def _get_confidence_threshold_from_percentage(self, confidence, image_mask):
+        """
+        Compute threshold value that masks a certain percentage of foreground pixels with lowest confidence.
+        
+        Args:
+            confidence: Confidence values array (N, H, W) or (H, W), can be torch tensor or numpy array
+            image_mask: Foreground mask (N, H, W) or (H, W), can be torch tensor or numpy array
+            
+        Returns:
+            Threshold value to use for masking
+        """
+        if self.mask_percentage <= 0.0:
+            return self.threshold
+        
+        # Convert to numpy if torch tensors
+        if hasattr(confidence, 'cpu'):
+            confidence = confidence.cpu().detach().numpy()
+        if hasattr(image_mask, 'cpu'):
+            image_mask = image_mask.cpu().detach().numpy()
+        
+        # Ensure mask is boolean
+        image_mask = image_mask.astype(bool)
+        
+        # Flatten for easier processing
+        confidence_flat = confidence.flatten()
+        mask_flat = image_mask.flatten()
+        
+        # Get confidence values only for foreground pixels
+        foreground_conf = confidence_flat[mask_flat]
+        
+        if len(foreground_conf) == 0:
+            return self.threshold
+        
+        # Calculate the threshold value for the given percentage
+        # We want to mask the lowest mask_percentage of foreground pixels
+        percentile = self.mask_percentage * 100
+        computed_threshold = np.percentile(foreground_conf, percentile)
+        
+        # Use the computed threshold
+        return computed_threshold
 
     def set_global_rank(self, global_rank):
         self.rank = global_rank
@@ -135,14 +177,13 @@ class Visualiser(pl.LightningModule):
         for n in range(N):
             row = 0
             ax = plt.subplot(num_rows, num_cols, row*num_cols + n + 1)
-            # Plot conf in normal scale (can be negative)
-            conf_data = debug_vc_pm_loss_conf[0, n].copy()
-            # Mask zero values to be white by setting them to NaN
-            zero_mask = (conf_data == 0.0)
-            conf_data[zero_mask] = np.nan
-            # Also mask very large values to NaN for readability
-            # Use the same diverging colormap style as error visualisation
-            im = ax.imshow(conf_data, cmap='RdYlGn_r')
+            
+            vc_loss_conf = debug_vc_pm_loss_conf[0, n].copy()
+
+            zero_mask = (vc_loss_conf == 0.0)
+            vc_loss_conf[zero_mask] = np.nan
+
+            im = ax.imshow(vc_loss_conf, cmap='RdYlGn_r')
             ax.set_title(f'Debug VC PM Loss Conf {n}')
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
@@ -150,13 +191,11 @@ class Visualiser(pl.LightningModule):
 
             row = 1
             ax = plt.subplot(num_rows, num_cols, row*num_cols + n + 1)
-            # Visualize loss with linear color scale
-            loss_data = debug_vc_pm_loss[0, n].copy()
-            # Mask zero values to be white by setting them to NaN
-            zero_mask = (loss_data == 0.0)
-            # loss_data[zero_mask] = np.nan
-            # Also mask very large values to NaN for readability
-            im = ax.imshow(loss_data, cmap='RdYlGn_r')
+            vc_loss = debug_vc_pm_loss[0, n].copy()
+            zero_mask = (vc_loss == 0.0)
+            vc_loss[zero_mask] = np.nan
+
+            im = ax.imshow(vc_loss, cmap='RdYlGn_r')
             ax.set_title(f'Debug VC PM Loss {n}')
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
@@ -171,6 +210,7 @@ class Visualiser(pl.LightningModule):
         self, 
         predictions,
         batch,
+        metrics=None,
         batch_idx=None,
         split=None,
         epoch=None
@@ -232,6 +272,10 @@ class Visualiser(pl.LightningModule):
         for k, v in batch.items():
             batch[k] = v.cpu().detach().numpy() if isinstance(v, torch.Tensor) else v
 
+        if metrics is not None:
+            for k, v in metrics.items():
+                metrics[k] = v.cpu().detach().numpy() if isinstance(v, torch.Tensor) else v
+
         # self.visualise_input_normal_imgs(
         #     normal_maps
         # )
@@ -248,7 +292,8 @@ class Visualiser(pl.LightningModule):
 
         self.visualise_full_pyvista(
             predictions,
-            batch
+            batch,
+            metrics
         )
 
         # self.visualise_full(
@@ -262,43 +307,12 @@ class Visualiser(pl.LightningModule):
         # )
 
 
-        
-        
 
-    def visualise_input_images(self, images):
-        if self.rank == 0:
-            B, N = images.shape[:2]
-            B = min(B, 2)
-            N = min(N, 4)
-
-            
-            images = np.transpose(images, (0, 1, 3, 4, 2))
-
-            # Create a grid of subplots
-            fig, axes = plt.subplots(B, N, figsize=(4*N, 4*B))
-            
-            # Handle single row/column case
-            if B == 1:
-                axes = axes[None, :]
-            if N == 1:
-                axes = axes[:, None]
-
-            # Plot each normal image
-            for b in range(B):
-                for n in range(N):
-                    axes[b,n].imshow(images[b,n])
-                    # axes[b,n].axis('off')
-            
-            # Save figure
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.save_dir, self._get_filename('_images')))
-            plt.close()
-      
 
     def visualise_initial_pms(
         self, 
         predictions,
-        batch
+        batch,
     ):
         B, N, H, W, C = predictions['vc_init'].shape
         image_masks = batch['masks']
@@ -311,6 +325,8 @@ class Visualiser(pl.LightningModule):
         mask_intersection = image_masks_N * smpl_masks_N
         mask_union = image_masks_N + smpl_masks_N - mask_intersection
         mask_union = mask_union.astype(bool)
+
+        dataset_name = batch['dataset'][0]
 
 
         B = 1
@@ -491,7 +507,7 @@ class Visualiser(pl.LightningModule):
 
 
         plt.tight_layout(pad = 0.1)
-        plt.savefig(os.path.join(self.save_dir, self._get_filename('_vc')))
+        plt.savefig(os.path.join(self.save_dir, self._get_filename(f'_{dataset_name}_vc')))
         plt.close()
 
 
@@ -501,6 +517,7 @@ class Visualiser(pl.LightningModule):
         predictions,
         batch
     ):
+        dataset_name = batch['dataset'][0]
         B, N, H, W, C = predictions['vc_init'].shape
         K = 5 
         image_masks = batch['masks']
@@ -604,7 +621,7 @@ class Visualiser(pl.LightningModule):
 
 
         plt.tight_layout(pad = 0.1)
-        plt.savefig(os.path.join(self.save_dir, self._get_filename('_pbs')))
+        plt.savefig(os.path.join(self.save_dir, self._get_filename(f'_{dataset_name}_pbs')))
         plt.close()
 
 
@@ -631,7 +648,8 @@ class Visualiser(pl.LightningModule):
     def visualise_full_pyvista(
         self,
         predictions,
-        batch
+        batch,
+        metrics=None
     ):
         """
         Fast version of visualise_full using PyVista for point cloud rendering.
@@ -640,6 +658,8 @@ class Visualiser(pl.LightningModule):
         if not PV_AVAILABLE:
             print("Warning: PyVista not available, falling back to matplotlib visualise_full")
             return self.visualise_full(predictions, batch)
+
+        dataset_name = batch['dataset'][0]
         
         subfig_size = 4
         gt_alpha, pred_alpha = 0.5, 0.5
@@ -662,7 +682,11 @@ class Visualiser(pl.LightningModule):
         scatter_mask = image_masks_N[0].astype(bool) # nhw
         if "vc_init_conf" in predictions:
             confidence = predictions['vc_init_conf']
-            confidence = confidence > self.threshold
+            # Compute threshold from percentage if enabled, otherwise use fixed threshold
+            threshold_value = self._get_confidence_threshold_from_percentage(
+                confidence[0], image_masks_N[0]
+            )
+            confidence = confidence > threshold_value
         else:
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
         scatter_mask = scatter_mask * confidence[0].astype(bool)
@@ -936,6 +960,8 @@ class Visualiser(pl.LightningModule):
                     ax = fig.add_subplot(num_rows, K, r*K+k+1)
                     ax.imshow(img)
                     ax.set_title(f'pred final $V^{k+1}$')
+                    if metrics is not None:
+                        ax.set_title(f'pred final $V^{k+1}$')
                     ax.axis('off')
                 else:
                     ax = fig.add_subplot(num_rows, K, r*K+k+1)
@@ -943,7 +969,7 @@ class Visualiser(pl.LightningModule):
                     ax.set_title(f'pred final $V^{k+1}$')
 
         plt.tight_layout(pad = 0.1)
-        plt.savefig(os.path.join(self.save_dir, self._get_filename('')), dpi=200)
+        plt.savefig(os.path.join(self.save_dir, self._get_filename(f'_{dataset_name}')), dpi=200)
         plt.close()
 
             
@@ -972,7 +998,11 @@ class Visualiser(pl.LightningModule):
         scatter_mask = mask_N[0].astype(bool) # nhw
         if "vc_init_conf" in predictions:
             confidence = predictions['vc_init_conf']
-            confidence = confidence > self.threshold
+            # Compute threshold from percentage if enabled, otherwise use fixed threshold
+            threshold_value = self._get_confidence_threshold_from_percentage(
+                confidence[0], mask_N[0]
+            )
+            confidence = confidence > threshold_value
         else:
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
         scatter_mask = scatter_mask * confidence[0].astype(bool)
@@ -1241,7 +1271,11 @@ class Visualiser(pl.LightningModule):
         mask = batch['masks'][0].astype(np.bool) # nhw
         if "vc_init_conf" in predictions:
             confidence = predictions['vc_init_conf']
-            confidence = confidence > self.threshold
+            # Compute threshold from percentage if enabled, otherwise use fixed threshold
+            threshold_value = self._get_confidence_threshold_from_percentage(
+                confidence[0], batch['masks'][0]
+            )
+            confidence = confidence > threshold_value
         else:
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(np.bool)
         mask = mask * confidence[0].astype(np.bool)

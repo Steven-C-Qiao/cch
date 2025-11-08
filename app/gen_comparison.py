@@ -371,9 +371,46 @@ class Solver:
         
         vc_ret = self.model.build_avatar(init_batch)
         confidence = vc_ret['vc_init_conf']
-        conf_mask = confidence > 3
-        conf_mask = rearrange(conf_mask[0, :4, ...], 'n h w -> (n h w)').bool()
 
+
+
+
+        def get_confidence_threshold_from_percentage(confidence, image_mask):
+            """
+            Compute threshold value that masks a certain percentage of foreground pixels with lowest confidence.
+            
+            Args:
+                confidence: Confidence values tensor (B, N, H, W) or any shape
+                image_mask: Foreground mask (B, N, H, W) or matching shape, can be boolean or numeric
+                
+            Returns:
+                Threshold value to use for masking (scalar)
+            """
+            # Ensure mask is boolean tensor
+            if not image_mask.dtype == torch.bool:
+                image_mask = image_mask.bool()
+            
+            # Flatten for easier processing
+            confidence_flat = confidence.flatten()
+            mask_flat = image_mask.flatten()
+            
+            # Get confidence values only for foreground pixels
+            foreground_conf = confidence_flat[mask_flat]
+            
+            if foreground_conf.numel() == 0:
+                return 0.0
+            
+            # Calculate the threshold value for the given percentage
+            # We want to mask the lowest mask_percentage of foreground pixels
+            # Use quantile to get the threshold (equivalent to percentile)
+            # quantile expects value in [0, 1] range, where 0.1 means 10th percentile
+            computed_threshold = torch.quantile(foreground_conf.float(), 0.05)
+            
+            # Use the computed threshold
+            return computed_threshold.item()
+
+        conf_mask = confidence > get_confidence_threshold_from_percentage(confidence, init_batch['masks'][0, :4, ...])
+        conf_mask = rearrange(conf_mask[0, :4, ...], 'n h w -> (n h w)').bool()
 
         for k, v in vc_ret.items():
             preds[k] = v
@@ -749,7 +786,7 @@ if __name__ == '__main__':
     gt_scan_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take1/Meshes_pkl'
     gt_smpl_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take1/SMPLX'
 
-    save_dir = f'vis/00134_take1'
+    save_dir = f'vis/00134_take1_exp_090'
     os.makedirs(save_dir, exist_ok=True)
 
     

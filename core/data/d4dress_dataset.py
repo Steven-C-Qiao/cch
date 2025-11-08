@@ -90,13 +90,14 @@ class D4DressDataset(Dataset):
             outer_takes = os.listdir(os.path.join(PATH_TO_DATASET, subject_id, self.layer[1]))
             outer_takes = [(take, 'Outer') for take in outer_takes if take.startswith('Take')]
 
-            self.takes[subject_id] = inner_takes + outer_takes
-            self.num_of_takes[subject_id] = len(inner_takes + outer_takes)
+            self.takes[subject_id] = inner_takes #+ outer_takes
+            self.num_of_takes[subject_id] = len(inner_takes )#+ outer_takes)
 
 
         self.transform = transforms.Compose([
             transforms.CenterCrop((940, 940)),
             transforms.Resize((self.img_size, self.img_size)),
+            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
             transforms.ToTensor(),
         ])
         self.mask_transform = transforms.Compose([

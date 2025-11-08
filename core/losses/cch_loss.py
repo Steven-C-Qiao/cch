@@ -221,14 +221,16 @@ class CCHLoss(pl.LightningModule):
 
 
 
-            # confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
-            # mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
-            # if confidence is not None:
-            #     confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
-            confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
-            mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
-            if confidence is not None:
-                confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+            if self.cfg.LOSS.VP_SEPARATE_UNCERTAINTY:
+                confidence = predictions['dvc_conf'] if "dvc_conf" in predictions else None
+                mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+                if confidence is not None:
+                    confidence = rearrange(confidence, 'b k n h w -> (b k) (n h w)')
+            else:
+                confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None
+                mask = rearrange(mask[:, :N].unsqueeze(1).repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
+                if confidence is not None:
+                    confidence = rearrange(confidence[:, None].repeat(1, K, 1, 1, 1), 'b k n h w -> (b k) (n h w)')
 
             pred_vp = rearrange(pred_vp, 'b k n h w c -> (b k) (n h w) c')
 
@@ -337,7 +339,7 @@ class MaskedUncertaintyChamferLoss(nn.Module):
             loss_pred2gt = loss_pred2gt * conf - self.alpha * log_conf
             loss_gt2pred *= self.cfg.LOSS.SCALE_GT2PRED
 
-        loss_pred2gt = filter_by_quantile(loss_pred2gt, 0.98)
+        loss_pred2gt = filter_by_quantile(loss_pred2gt, 0.9999)
 
         final_loss = loss_pred2gt.mean() + loss_gt2pred.mean()
 
@@ -367,6 +369,8 @@ class MaskedUncertaintyL2Loss(nn.Module):
 
         if mask is not None:
             loss = loss * mask
+
+        loss = filter_by_quantile(loss, 0.99999) # Get rid of very extreme outliers only 
         
         return loss.sum() / (mask.sum() + 1e-6)
 
@@ -399,6 +403,8 @@ class ASAPLoss(nn.Module):
             full_mask = norm_mask
 
         loss = loss * full_mask
+
+        loss = filter_by_quantile(loss, 0.99999)
 
         return loss.sum() / (full_mask.sum() + 1e-6)
 
