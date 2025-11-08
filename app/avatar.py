@@ -712,10 +712,10 @@ if __name__ == '__main__':
     assert (args.load_from_ckpt is not None), 'Specify load_from_ckpt'
 
 
-    id = '00147'
-    take = 'Take6'
-    frames = ['00021', '00021', '00021', '00021', '00021']
-    cameras = ['0004', '0028', '0052', '0076', '0076']
+    # id = '00147'
+    # take = 'Take6'
+    # frames = ['00021', '00021', '00021', '00021', '00021']
+    # cameras = ['0004', '0028', '0052', '0076', '0076']
 
 
 
@@ -739,10 +739,10 @@ if __name__ == '__main__':
 
 
 
-    # id = '00148'
-    # take = 'Take1'
-    # frames = ['00021', '00041', '00109', '00137', '00021']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
+    id = '00148'
+    take = 'Take1'
+    frames = ['00021', '00041', '00109', '00137', '00021']
+    cameras = ['0004', '0028', '0052', '0076', '0076']
     novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/SMPLX'
     gt_scan_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/Meshes_pkl'
 

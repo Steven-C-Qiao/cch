@@ -52,15 +52,21 @@ class FullDataModule(pl.LightningDataModule):
         super().__init__()
         self.cfg = cfg
 
-        # 4DDress splits (reuse those used in the standalone datamodule)
         self.d4dress_train_ids = [
             '00122', '00123', '00127', '00129', '00135', '00136', '00137',
             '00140', '00147', '00149', '00151', '00152', '00154', '00156',
             '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175',
-            '00176', '00179', '00180', '00185', '00187', '00188', '00190',
+            '00176', '00179', '00180', '00185', '00187', '00188', '00190', '00191'
         ]
-        # self.d4dress_val_ids = ['00188', '00191']
-        self.d4dress_val_ids = ['00134', '00191']
+        self.d4dress_val_ids = ['00134', '00148']
+
+        # self.d4dress_train_ids = [
+        #     '00122', '00123', '00127', '00129', '00135', '00136', '00137',
+        #     '00140', '00147', '00149', '00151', '00152', '00154', '00156',
+        #     '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175',
+        #     '00176', '00179', '00180', '00185', '00187', '00190', '00191'
+        # ]
+        # self.d4dress_val_ids = ['00134', '00188']
 
         self.thuman_train_ids = sorted(THuman_metadata.keys())[:-50]
         self.thuman_val_ids = sorted(THuman_metadata.keys())[-50:]
@@ -84,27 +90,27 @@ class FullDataModule(pl.LightningDataModule):
 
 
     # def train_dataloader(self):
-        # thuman_loader = DataLoader(
-        #     self.val_d4dress,
-        #     batch_size=self.cfg.TRAIN.BATCH_SIZE,
-        #     shuffle=True,
-        #     drop_last=True,
-        #     num_workers=self.cfg.TRAIN.NUM_WORKERS,
-        #     pin_memory=self.cfg.TRAIN.PIN_MEMORY,
-        #     collate_fn=custom_collate_fn,
-        # )
+    #     thuman_loader = DataLoader(
+    #         self.val_d4dress,
+    #         batch_size=self.cfg.TRAIN.BATCH_SIZE,
+    #         shuffle=True,
+    #         drop_last=True,
+    #         num_workers=self.cfg.TRAIN.NUM_WORKERS,
+    #         pin_memory=self.cfg.TRAIN.PIN_MEMORY,
+    #         collate_fn=custom_collate_fn,
+    #     )
 
-        # d4dress_loader = DataLoader(
-        #     self.val_d4dress,
-        #     batch_size=self.cfg.TRAIN.BATCH_SIZE,
-        #     shuffle=True,
-        #     drop_last=True,
-        #     num_workers=self.cfg.TRAIN.NUM_WORKERS,
-        #     pin_memory=self.cfg.TRAIN.PIN_MEMORY,
-        #     collate_fn=custom_collate_fn,
-        # )
+    #     d4dress_loader = DataLoader(
+    #         self.val_d4dress,
+    #         batch_size=self.cfg.TRAIN.BATCH_SIZE,
+    #         shuffle=True,
+    #         drop_last=True,
+    #         num_workers=self.cfg.TRAIN.NUM_WORKERS,
+    #         pin_memory=self.cfg.TRAIN.PIN_MEMORY,
+    #         collate_fn=custom_collate_fn,
+    #     )
 
-        # return [thuman_loader, d4dress_loader]
+    #     return [thuman_loader, d4dress_loader]
 
         
 

@@ -158,12 +158,15 @@ class CCHTrainer(pl.LightningModule):
         # loss_dict.pop('debug_vc_pm_loss_conf')
         # loss_dict.pop('debug_vc_pm_loss')
 
-
         self._log_metrics_and_visualise(loss, loss_dict, metrics, split, preds, batch, batch_idx)
 
+
         # for k, v in loss_dict.items():
-        #     print(f"{k}: {v.item():.2f}", end='; ')
-        # print('')
+        #     print(f"{k}: {v.item():.2f}")
+
+        # for k, v in metrics.items():
+        #     print(f"{k}: {v.item():.2f}")
+        # print('--------------------------------')
         # import ipdb; ipdb.set_trace()
         
         return loss 
@@ -196,20 +199,13 @@ class CCHTrainer(pl.LightningModule):
         self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
         self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
 
-        if self.dev or self.plot:
-            # Synchronize CUDA on ALL ranks before visualization to ensure DDP processes stay in sync
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            self.visualiser.visualise(preds, batch, metrics=metrics, split=split, epoch=self.current_epoch)
-            # Synchronize CUDA on ALL ranks after visualization to ensure DDP processes stay in sync
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            if self.dev:
-                for k, v in loss_dict.items():
-                    print(f"{k}: {v.item():.2f}", end='; ')
-                print('')
-                # import ipdb; ipdb.set_trace()
-
+        # if self.dev or self.plot:
+        #     self.visualiser.visualise(preds, batch, metrics=metrics, split=split, epoch=self.current_epoch)
+        #     if self.dev:
+        #         for k, v in loss_dict.items():
+        #             print(f"{k}: {v.item():.2f}", end='; ')
+        #         print('')
+        #         # import ipdb; ipdb.set_trace()
         # else:
         #     should_vis = False
         #     global_step = self.global_step
@@ -220,13 +216,8 @@ class CCHTrainer(pl.LightningModule):
         #         should_vis = (batch_idx == 50) or (batch_idx == 100)
 
         #     if should_vis:
-        #         # Synchronize CUDA on ALL ranks before visualization to ensure DDP processes stay in sync
-        #         if torch.cuda.is_available():
-        #             torch.cuda.synchronize()
         #         self.visualiser.visualise(preds, batch, metrics=metrics, split=split, epoch=self.current_epoch)
-        #         # Synchronize CUDA on ALL ranks after visualization to ensure DDP processes stay in sync
-        #         if torch.cuda.is_available():
-        #             torch.cuda.synchronize() 
+
 
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):

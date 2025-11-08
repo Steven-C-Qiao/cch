@@ -280,6 +280,9 @@ class Visualiser(pl.LightningModule):
         #     normal_maps
         # )
 
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
         self.visualise_initial_pms(
             predictions,
             batch
@@ -305,6 +308,9 @@ class Visualiser(pl.LightningModule):
         #     predictions,
         #     batch
         # )
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
 
 
