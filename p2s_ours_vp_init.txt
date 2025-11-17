@@ -1,0 +1,117 @@
+Overall mean distance: 0.847 cm
+Overall median distance: 0.640 cm
+Std of mean distances: 0.080 cm
+
+Per-file results:
+  pred_vp_init_17435.ply: mean=0.967 cm, median=0.799 cm
+  pred_vp_init_17436.ply: mean=0.854 cm, median=0.700 cm
+  pred_vp_init_17437.ply: mean=1.082 cm, median=0.790 cm
+  pred_vp_init_17438.ply: mean=0.973 cm, median=0.758 cm
+  pred_vp_init_17439.ply: mean=0.825 cm, median=0.647 cm
+  pred_vp_init_17440.ply: mean=0.847 cm, median=0.590 cm
+  pred_vp_init_17441.ply: mean=0.865 cm, median=0.689 cm
+  pred_vp_init_17442.ply: mean=0.885 cm, median=0.672 cm
+  pred_vp_init_17443.ply: mean=0.859 cm, median=0.637 cm
+  pred_vp_init_17444.ply: mean=0.734 cm, median=0.501 cm
+  pred_vp_init_17445.ply: mean=0.801 cm, median=0.612 cm
+  pred_vp_init_17446.ply: mean=0.811 cm, median=0.627 cm
+  pred_vp_init_17447.ply: mean=0.855 cm, median=0.683 cm
+  pred_vp_init_17448.ply: mean=0.880 cm, median=0.625 cm
+  pred_vp_init_17449.ply: mean=0.658 cm, median=0.490 cm
+  pred_vp_init_17450.ply: mean=0.812 cm, median=0.663 cm
+  pred_vp_init_17451.ply: mean=0.877 cm, median=0.612 cm
+  pred_vp_init_17452.ply: mean=0.869 cm, median=0.630 cm
+  pred_vp_init_17453.ply: mean=0.842 cm, median=0.615 cm
+  pred_vp_init_17454.ply: mean=0.960 cm, median=0.739 cm
+  pred_vp_init_17455.ply: mean=0.701 cm, median=0.543 cm
+  pred_vp_init_17456.ply: mean=1.007 cm, median=0.753 cm
+  pred_vp_init_17457.ply: mean=0.881 cm, median=0.661 cm
+  pred_vp_init_17458.ply: mean=0.747 cm, median=0.578 cm
+  pred_vp_init_17459.ply: mean=0.794 cm, median=0.602 cm
+  pred_vp_init_17460.ply: mean=0.788 cm, median=0.603 cm
+  pred_vp_init_17461.ply: mean=0.773 cm, median=0.624 cm
+  pred_vp_init_17462.ply: mean=0.834 cm, median=0.629 cm
+  pred_vp_init_17463.ply: mean=0.832 cm, median=0.654 cm
+  pred_vp_init_17464.ply: mean=0.851 cm, median=0.601 cm
+  pred_vp_init_17465.ply: mean=0.717 cm, median=0.560 cm
+  pred_vp_init_17466.ply: mean=0.784 cm, median=0.624 cm
+  pred_vp_init_17467.ply: mean=0.770 cm, median=0.583 cm
+  pred_vp_init_17468.ply: mean=0.905 cm, median=0.690 cm
+  pred_vp_init_17469.ply: mean=0.942 cm, median=0.746 cm
+  pred_vp_init_17470.ply: mean=0.712 cm, median=0.547 cm
+  pred_vp_init_17471.ply: mean=0.820 cm, median=0.610 cm
+  pred_vp_init_17472.ply: mean=0.848 cm, median=0.559 cm
+  pred_vp_init_17473.ply: mean=0.793 cm, median=0.604 cm
+  pred_vp_init_17474.ply: mean=0.870 cm, median=0.671 cm
+  pred_vp_init_17475.ply: mean=0.909 cm, median=0.646 cm
+  pred_vp_init_17476.ply: mean=0.908 cm, median=0.689 cm
+  pred_vp_init_17477.ply: mean=0.944 cm, median=0.713 cm
+  pred_vp_init_17478.ply: mean=0.771 cm, median=0.544 cm
+  pred_vp_init_17479.ply: mean=0.850 cm, median=0.615 cm
+  pred_vp_init_17480.ply: mean=0.858 cm, median=0.640 cm
+  pred_vp_init_17481.ply: mean=0.829 cm, median=0.623 cm
+  pred_vp_init_17482.ply: mean=0.881 cm, median=0.736 cm
+  pred_vp_init_17483.ply: mean=0.846 cm, median=0.656 cm
+  pred_vp_init_17484.ply: mean=0.917 cm, median=0.628 cm
+
+
+
+
+============================================================
+Summary:
+============================================================
+Overall mean distance: 0.940 cm
+Overall median distance: 0.728 cm
+Std of mean distances: 0.113 cm
+
+Per-file results:
+  pred_vp_init_17435.ply: mean=0.869 cm, median=0.658 cm
+  pred_vp_init_17436.ply: mean=1.052 cm, median=0.847 cm
+  pred_vp_init_17437.ply: mean=0.893 cm, median=0.726 cm
+  pred_vp_init_17438.ply: mean=0.864 cm, median=0.646 cm
+  pred_vp_init_17439.ply: mean=0.985 cm, median=0.737 cm
+  pred_vp_init_17440.ply: mean=0.861 cm, median=0.682 cm
+  pred_vp_init_17441.ply: mean=0.857 cm, median=0.658 cm
+  pred_vp_init_17442.ply: mean=1.104 cm, median=0.833 cm
+  pred_vp_init_17443.ply: mean=1.024 cm, median=0.803 cm
+  pred_vp_init_17444.ply: mean=1.322 cm, median=1.002 cm
+  pred_vp_init_17445.ply: mean=0.927 cm, median=0.742 cm
+  pred_vp_init_17446.ply: mean=0.874 cm, median=0.719 cm
+  pred_vp_init_17447.ply: mean=0.802 cm, median=0.632 cm
+  pred_vp_init_17448.ply: mean=0.841 cm, median=0.640 cm
+  pred_vp_init_17449.ply: mean=0.888 cm, median=0.663 cm
+  pred_vp_init_17450.ply: mean=0.785 cm, median=0.589 cm
+  pred_vp_init_17451.ply: mean=0.958 cm, median=0.750 cm
+  pred_vp_init_17452.ply: mean=0.691 cm, median=0.517 cm
+  pred_vp_init_17453.ply: mean=1.031 cm, median=0.744 cm
+  pred_vp_init_17454.ply: mean=1.001 cm, median=0.758 cm
+  pred_vp_init_17455.ply: mean=1.059 cm, median=0.754 cm
+  pred_vp_init_17456.ply: mean=0.923 cm, median=0.756 cm
+  pred_vp_init_17457.ply: mean=0.896 cm, median=0.694 cm
+  pred_vp_init_17458.ply: mean=1.029 cm, median=0.785 cm
+  pred_vp_init_17459.ply: mean=0.874 cm, median=0.656 cm
+  pred_vp_init_17460.ply: mean=1.050 cm, median=0.833 cm
+  pred_vp_init_17461.ply: mean=0.981 cm, median=0.795 cm
+  pred_vp_init_17462.ply: mean=0.764 cm, median=0.576 cm
+  pred_vp_init_17463.ply: mean=0.920 cm, median=0.673 cm
+  pred_vp_init_17464.ply: mean=0.968 cm, median=0.749 cm
+  pred_vp_init_17465.ply: mean=0.958 cm, median=0.751 cm
+  pred_vp_init_17466.ply: mean=0.918 cm, median=0.719 cm
+  pred_vp_init_17467.ply: mean=0.869 cm, median=0.678 cm
+  pred_vp_init_17468.ply: mean=0.979 cm, median=0.782 cm
+  pred_vp_init_17469.ply: mean=0.915 cm, median=0.711 cm
+  pred_vp_init_17470.ply: mean=0.810 cm, median=0.661 cm
+  pred_vp_init_17471.ply: mean=0.796 cm, median=0.576 cm
+  pred_vp_init_17472.ply: mean=0.973 cm, median=0.716 cm
+  pred_vp_init_17473.ply: mean=0.911 cm, median=0.739 cm
+  pred_vp_init_17474.ply: mean=0.927 cm, median=0.727 cm
+  pred_vp_init_17475.ply: mean=0.967 cm, median=0.775 cm
+  pred_vp_init_17476.ply: mean=1.002 cm, median=0.773 cm
+  pred_vp_init_17477.ply: mean=1.275 cm, median=0.920 cm
+  pred_vp_init_17478.ply: mean=0.863 cm, median=0.683 cm
+  pred_vp_init_17479.ply: mean=0.997 cm, median=0.763 cm
+  pred_vp_init_17480.ply: mean=1.089 cm, median=0.887 cm
+  pred_vp_init_17481.ply: mean=0.935 cm, median=0.758 cm
+  pred_vp_init_17482.ply: mean=0.882 cm, median=0.715 cm
+  pred_vp_init_17483.ply: mean=0.960 cm, median=0.789 cm
+  pred_vp_init_17484.ply: mean=0.860 cm, median=0.641 cm

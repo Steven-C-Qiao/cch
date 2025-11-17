@@ -52,21 +52,22 @@ class FullDataModule(pl.LightningDataModule):
         super().__init__()
         self.cfg = cfg
 
-        self.d4dress_train_ids = [
-            '00122', '00123', '00127', '00129', '00135', '00136', '00137',
-            '00140', '00147', '00149', '00151', '00152', '00154', '00156',
-            '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175',
-            '00176', '00179', '00180', '00185', '00187', '00188', '00190', '00191'
-        ]
-        self.d4dress_val_ids = ['00134', '00148']
-
         # self.d4dress_train_ids = [
         #     '00122', '00123', '00127', '00129', '00135', '00136', '00137',
         #     '00140', '00147', '00149', '00151', '00152', '00154', '00156',
         #     '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175',
-        #     '00176', '00179', '00180', '00185', '00187', '00190', '00191'
+        #     '00176', '00179', '00180', '00185', '00187', '00188', '00190', '00191'
         # ]
-        # self.d4dress_val_ids = ['00134', '00188']
+        # self.d4dress_val_ids = ['00134', '00148']
+
+        self.d4dress_train_ids = [
+            '00122', '00123', '00127', '00129', '00135', '00136', '00137',
+            '00140', '00147', '00149', '00151', '00152', '00154', '00156',
+            '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175',
+            '00176', '00179', '00180', '00185', '00187', '00190', '00188'
+        ]
+        self.d4dress_val_ids = ['00191', '00134']
+        # self.d4dress_val_ids = ['00191']
 
         self.thuman_train_ids = sorted(THuman_metadata.keys())[:-50]
         self.thuman_val_ids = sorted(THuman_metadata.keys())[-50:]
@@ -89,9 +90,45 @@ class FullDataModule(pl.LightningDataModule):
         print(f"4DDress val samples: {len(self.val_d4dress)}")
 
 
+    def train_dataloader(self):
+        # Create a generator with fixed seed for deterministic data loading
+        generator = torch.Generator()
+        generator.manual_seed(42)
+        
+        thuman_loader = DataLoader(
+            self.val_d4dress,
+            batch_size=self.cfg.TRAIN.BATCH_SIZE,
+            shuffle=False,
+            drop_last=True,
+            num_workers=self.cfg.TRAIN.NUM_WORKERS,
+            pin_memory=self.cfg.TRAIN.PIN_MEMORY,
+            collate_fn=custom_collate_fn,
+            generator=generator,
+        )
+
+        # Create a separate generator for the second loader (with different seed offset)
+        generator2 = torch.Generator()
+        generator2.manual_seed(42)
+        
+        d4dress_loader = DataLoader(
+            self.val_d4dress,
+            batch_size=self.cfg.TRAIN.BATCH_SIZE,
+            shuffle=False,
+            drop_last=True,
+            num_workers=self.cfg.TRAIN.NUM_WORKERS,
+            pin_memory=self.cfg.TRAIN.PIN_MEMORY,
+            collate_fn=custom_collate_fn,
+            generator=generator2,
+        )
+
+        return [thuman_loader, d4dress_loader]
+
+        
+
+
     # def train_dataloader(self):
     #     thuman_loader = DataLoader(
-    #         self.val_d4dress,
+    #         self.train_thuman,
     #         batch_size=self.cfg.TRAIN.BATCH_SIZE,
     #         shuffle=True,
     #         drop_last=True,
@@ -101,7 +138,7 @@ class FullDataModule(pl.LightningDataModule):
     #     )
 
     #     d4dress_loader = DataLoader(
-    #         self.val_d4dress,
+    #         self.train_d4dress,
     #         batch_size=self.cfg.TRAIN.BATCH_SIZE,
     #         shuffle=True,
     #         drop_last=True,
@@ -112,35 +149,15 @@ class FullDataModule(pl.LightningDataModule):
 
     #     return [thuman_loader, d4dress_loader]
 
-        
-
-
-    def train_dataloader(self):
-        thuman_loader = DataLoader(
-            self.train_thuman,
-            batch_size=self.cfg.TRAIN.BATCH_SIZE,
-            shuffle=True,
-            drop_last=True,
-            num_workers=self.cfg.TRAIN.NUM_WORKERS,
-            pin_memory=self.cfg.TRAIN.PIN_MEMORY,
-            collate_fn=custom_collate_fn,
-        )
-
-        d4dress_loader = DataLoader(
-            self.train_d4dress,
-            batch_size=self.cfg.TRAIN.BATCH_SIZE,
-            shuffle=True,
-            drop_last=True,
-            num_workers=self.cfg.TRAIN.NUM_WORKERS,
-            pin_memory=self.cfg.TRAIN.PIN_MEMORY,
-            collate_fn=custom_collate_fn,
-        )
-
-        return [thuman_loader, d4dress_loader]
-
 
 
     def val_dataloader(self):
+        # Create generators with fixed seeds for deterministic data loading
+        generator = torch.Generator()
+        generator.manual_seed(42)
+        generator2 = torch.Generator()
+        generator2.manual_seed(43)
+        
         thuman_val_loader = DataLoader(
             self.val_thuman,
             batch_size=self.cfg.TRAIN.BATCH_SIZE,
@@ -149,6 +166,7 @@ class FullDataModule(pl.LightningDataModule):
             num_workers=self.cfg.TRAIN.NUM_WORKERS,
             pin_memory=self.cfg.TRAIN.PIN_MEMORY,
             collate_fn=custom_collate_fn,
+            generator=generator,
         )
         d4dress_val_loader = DataLoader(
             self.val_d4dress,
@@ -158,6 +176,7 @@ class FullDataModule(pl.LightningDataModule):
             num_workers=self.cfg.TRAIN.NUM_WORKERS,
             pin_memory=self.cfg.TRAIN.PIN_MEMORY,
             collate_fn=custom_collate_fn,
+            generator=generator2,
         )
 
         return [thuman_val_loader, d4dress_val_loader]

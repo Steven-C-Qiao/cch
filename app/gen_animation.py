@@ -57,6 +57,83 @@ def _move_to_cpu(sample):
     return sample
 
 
+def uniformly_sample_pointcloud(points, num_points=None, voxel_size=None):
+    """
+    Uniformly sample a point cloud in space using voxel grid downsampling.
+    
+    Args:
+        points: torch.Tensor of shape (N, 3) - point cloud coordinates
+        num_points: int - target number of points (if None, uses voxel_size)
+        voxel_size: float - voxel size for downsampling (if None, auto-computed)
+    
+    Returns:
+        torch.Tensor of shape (M, 3) - uniformly sampled point cloud
+    """
+    # Convert to numpy
+    if isinstance(points, torch.Tensor):
+        points_np = points.cpu().numpy()
+        device = points.device
+        dtype = points.dtype
+    else:
+        points_np = np.asarray(points)
+        device = 'cpu'
+        dtype = torch.float32
+    
+    # Check for empty or invalid point cloud
+    if len(points_np) == 0:
+        return torch.tensor(points_np, dtype=dtype, device=device)
+    
+    # Remove NaN and Inf values
+    valid_mask = np.isfinite(points_np).all(axis=1)
+    points_np = points_np[valid_mask]
+    
+    if len(points_np) == 0:
+        return torch.tensor(points_np, dtype=dtype, device=device)
+    
+    # If num_points is specified, estimate voxel_size
+    if num_points is not None and voxel_size is None:
+        # Estimate voxel size based on bounding box and target number of points
+        bbox_min = points_np.min(axis=0)
+        bbox_max = points_np.max(axis=0)
+        bbox_size = bbox_max - bbox_min
+        volume = np.prod(bbox_size)
+        if volume > 0 and num_points > 0:
+            # Approximate voxel size to get roughly num_points
+            voxel_size = np.cbrt(volume / num_points)
+        else:
+            voxel_size = 0.01  # default fallback
+    
+    # Perform voxel grid downsampling
+    if voxel_size is not None and voxel_size > 0:
+        # Compute voxel indices for each point
+        bbox_min = points_np.min(axis=0)
+        voxel_indices = np.floor((points_np - bbox_min) / voxel_size).astype(np.int64)
+        
+        # Use dictionary to keep one point per voxel (first point in each voxel)
+        voxel_dict = {}
+        for i, voxel_idx in enumerate(voxel_indices):
+            voxel_key = tuple(voxel_idx)
+            if voxel_key not in voxel_dict:
+                voxel_dict[voxel_key] = i
+        
+        # Get sampled indices
+        sampled_indices = np.array(list(voxel_dict.values()))
+        points_sampled = points_np[sampled_indices]
+    else:
+        # If no downsampling specified, return original
+        points_sampled = points_np
+    
+    # If num_points is specified and we have more points, randomly sample to exact number
+    if num_points is not None and len(points_sampled) > num_points:
+        indices = np.random.choice(len(points_sampled), num_points, replace=False)
+        points_sampled = points_sampled[indices]
+    elif num_points is not None and len(points_sampled) < num_points:
+        # If we have fewer points, we can't upsample, so return what we have
+        pass
+    
+    # Convert back to torch tensor
+    return torch.tensor(points_sampled, dtype=dtype, device=device)
+
 
 def get_novel_poses(pose_dir, smpl_model, device):
     pose_seq = []
@@ -127,6 +204,13 @@ class AdHocDataset(D4DressDataset):
         self.takes = takes
         self.frames = frames
         self.cameras = cameras
+
+
+        self.transform = transforms.Compose([
+            transforms.CenterCrop((940, 940)),
+            transforms.Resize((self.img_size, self.img_size)),
+            transforms.ToTensor(),
+        ])
         
 
     def __getitem__(self, index):
@@ -280,42 +364,6 @@ class AdHocDataset(D4DressDataset):
 
 
 
-def _no_annotations(fig):
-    for ax in fig.axes:
-        ax.grid(False)
-        ax.xaxis.pane.fill = False
-        ax.yaxis.pane.fill = False
-        ax.zaxis.pane.fill = False
-        ax.xaxis.pane.set_edgecolor('none')
-        ax.yaxis.pane.set_edgecolor('none') 
-        ax.zaxis.pane.set_edgecolor('none')
-        ax.xaxis.line.set_color('none')
-        ax.yaxis.line.set_color('none')
-        ax.zaxis.line.set_color('none')
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_zticks([])
-
-
-def _set_scatter_limits(ax, x, elev=10, azim=90):
-    max_range = np.array([
-        x[:, 0].max() - x[:, 0].min(),
-        x[:, 1].max() - x[:, 1].min(),
-        x[:, 2].max() - x[:, 2].min()
-    ]).max() / 2.0 + 0.05
-    mid_x = (x[:, 0].max() + x[:, 0].min()) * 0.5
-    mid_y = (x[:, 1].max() + x[:, 1].min()) * 0.5
-    mid_z = (x[:, 2].max() + x[:, 2].min()) * 0.5
-
-    ax.set_xlim(mid_x - max_range, mid_x + max_range)
-    ax.set_ylim(mid_y - max_range, mid_y + max_range)
-    ax.set_zlim(mid_z - max_range, mid_z + max_range)
-    ax.view_init(elev=elev, azim=azim, vertical_axis='y')
-    ax.set_box_aspect([1, 1, 1])
-    ax.xaxis.set_major_locator(plt.MaxNLocator(5))
-    ax.yaxis.set_major_locator(plt.MaxNLocator(5)) 
-    ax.zaxis.set_major_locator(plt.MaxNLocator(3))
-
 
 class Solver:
     def __init__(self, id, take, frames, cameras, novel_pose_path, gt_scan_dir_path, gt_smpl_dir_path, load_path, save_dir=None):
@@ -452,20 +500,15 @@ class Solver:
                 mask = mask * conf_mask
 
                 pred_vp = rearrange(vp['vp'][0, -1, ...], 'n h w c -> (n h w) c')
+                pred_vp_init = rearrange(vp['vp_init'][0, -1, ...], 'n h w c -> (n h w) c')
 
                 color = rearrange(images[0, :4, ...], 'n c h w -> (n h w) c')
-                # # Unnormalize using ImageNet statistics
-                # imagenet_mean = torch.tensor([0.485, 0.456, 0.406], device=color.device if hasattr(color, 'device') else 'cpu')
-                # imagenet_std = torch.tensor([0.229, 0.224, 0.225], device=color.device if hasattr(color, 'device') else 'cpu')
-                # if isinstance(color, torch.Tensor):
-                #     color_unnorm = color.clone()
-                #     color_unnorm = color_unnorm.float()
-                #     if color_unnorm.shape[1] >= 3:
-                #         color_unnorm[:, :3] = color_unnorm[:, :3] * imagenet_std[None, :] + imagenet_mean[None, :]
-                #         color_unnorm[:, :3] = (color_unnorm[:, :3].clamp(0, 1) * 255)  # to [0,255]
-                #         color = color_unnorm
+                # Images are in [0, 1] range from ToTensor() transform (no normalization applied)
+                # Need to scale to [0, 255] before converting to uint8
                 color = color[mask]
                 color = color.cpu().numpy()
+                # Scale from [0, 1] to [0, 255] and clamp to ensure valid range
+                color = (color * 255.0).clip(0, 255)
                 # Ensure color is uint8 and has 4 channels (RGBA)
                 if color.shape[1] == 3:
                     # Add alpha channel, set to 255 (fully opaque)
@@ -475,14 +518,26 @@ class Solver:
 
 
                 pred_vp = pred_vp[mask]
+                pred_vp_init = pred_vp_init[mask]
+                # Uniformly sample pred_vp in space before calculating chamfer distance
+                # You can adjust num_points or voxel_size based on your needs
+                # For example, to sample to ~10000 points: uniformly_sample_pointcloud(pred_vp, num_points=10000)
+                # Or use a fixed voxel size: uniformly_sample_pointcloud(pred_vp, voxel_size=0.01)
+                # pred_vp = uniformly_sample_pointcloud(pred_vp, voxel_size=0.01)
 
+                # Save original pred_vp with colors before sampling
                 if self.save_dir is not None:
                     save_path = os.path.join(self.save_dir, f"pred_vp_{idx:03d}.ply")
                     trimesh.PointCloud(pred_vp.cpu().numpy(), colors=color).export(save_path)
                     save_path = os.path.join(self.save_dir, f"gt_vp_{idx:03d}.ply")
                     gt_scan_mesh.export(save_path)
+                    save_path = os.path.join(self.save_dir, f"pred_vp_init_{idx:03d}.ply")
+                    trimesh.PointCloud(pred_vp_init.cpu().numpy(), colors=color).export(save_path)
 
                 pred_vp = Pointclouds(points=pred_vp[None])
+
+                print(pred_vp.points_packed().shape)
+
                 gt_vp = Pointclouds(points=torch.tensor(gt_scan_verts_centered[None], dtype=torch.float32, device=self.device))
 
 
@@ -555,187 +610,6 @@ class Solver:
 
 
 
-    def visualise(self, predictions, batch):
-        for k, v in predictions.items():
-            predictions[k] = v.cpu().detach().numpy() if isinstance(v, torch.Tensor) else v
-        for k, v in batch.items():
-            batch[k] = v.cpu().detach().numpy() if isinstance(v, torch.Tensor) else v
-
-        subfig_size = 8
-        s = 0.05 # scatter point size
-        gt_alpha, pred_alpha = 0.5, 0.5
-
-        B, N, H, W, C = predictions['vc_init'].shape
-        K = 5
-
-        mask = batch['masks']
-        mask_N = mask[:, :N]
-
-        num_cols = 4
-        num_total_plots = len(predictions['vp_list'])
-        num_rows = num_total_plots // num_cols + (num_total_plots % num_cols > 0)
-
-
-        scatter_mask = mask_N[0].astype(bool) # nhw
-        if "vc_init_conf" in predictions:
-            confidence = predictions['vc_init_conf']
-            confidence = confidence > 1.
-        else:
-            confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
-        scatter_mask = scatter_mask * confidence[0].astype(bool)
-        # Color for predicted scatters 
-        color = rearrange(batch['imgs'][0, :N], 'n c h w -> n h w c')
-        color = color[scatter_mask]
-        color = color.astype(np.float32)
-
-
-        x = batch['smpl_T_joints'].reshape(-1, 3)
-
-        self.x = x
-
-        self.gen_gt_animation(gt_scan_path)
-
-
-            
-
-
-
-        # Save individual subplots for gif
-        frames = []
-        temp_fig = plt.figure(figsize=(subfig_size*4, subfig_size))
-        azims = [0, 90, 180, 270]
-        
-        for i in range(num_total_plots):
-            verts = predictions['vp_list'][i]['vp'][0, -1, ...].cpu().detach().numpy()
-            verts = verts[scatter_mask]
-            
-            for j, azim in enumerate(azims):
-                ax = temp_fig.add_subplot(1, 4, j+1, projection='3d')
-                ax.scatter(
-                    verts[:, 0], 
-                    verts[:, 1], 
-                    verts[:, 2], c=color, s=s, alpha=gt_alpha
-                )
-                # ax.set_title(f'pred $V^{{{i+1}}}$')
-                _set_scatter_limits(ax, x, elev=10, azim=azim)
-            _no_annotations(temp_fig)
-            plt.tight_layout(pad=0.)
-            
-            # Save frame to memory
-            temp_fig.canvas.draw()
-            frame = np.frombuffer(temp_fig.canvas.tostring_rgb(), dtype=np.uint8)
-            frame = frame.reshape(temp_fig.canvas.get_width_height()[::-1] + (3,))
-            frames.append(Image.fromarray(frame))
-            
-            # Clear figure for next frame
-            plt.clf()
-        
-        plt.close(temp_fig)
-        
-        # Save as gif
-        frames[0].save(
-            f'{self.id}_{self.take}_animation.gif',
-            save_all=True,
-            append_images=frames[1:],
-            duration=100, # 500ms per frame
-            loop=0,
-            dpi=(200, 200) # Higher DPI for better quality
-        )
-
-        # Create GIF for vp_init if available
-        vp_init_frames = []
-        # Create a new figure for vp_init
-        vp_init_fig = plt.figure(figsize=(subfig_size*4, subfig_size))
-        
-        for i in range(num_total_plots):  # Iterate over K frames
-            verts = predictions['vp_list'][i]['vp_init'][0, -1, ...].cpu().detach().numpy()
-            verts = verts[scatter_mask]
-            
-            for j, azim in enumerate(azims):
-                ax = vp_init_fig.add_subplot(1, 4, j+1, projection='3d')
-                ax.scatter(
-                    verts[:, 0], 
-                    verts[:, 1], 
-                    verts[:, 2], c=color, s=s, alpha=gt_alpha
-                )
-                _set_scatter_limits(ax, x, elev=10, azim=azim)
-            _no_annotations(vp_init_fig)
-            plt.tight_layout(pad=0.)
-            
-            # Save frame to memory
-            vp_init_fig.canvas.draw()
-            frame = np.frombuffer(vp_init_fig.canvas.tostring_rgb(), dtype=np.uint8)
-            frame = frame.reshape(vp_init_fig.canvas.get_width_height()[::-1] + (3,))
-            vp_init_frames.append(Image.fromarray(frame))
-            
-            # Clear figure for next frame
-            plt.clf()
-        
-        plt.close(vp_init_fig)
-            
-        # Save vp_init as gif
-        vp_init_frames[0].save(
-            f'{self.id}_{self.take}_vp_init_animation.gif',
-            save_all=True,
-            append_images=vp_init_frames[1:],
-            duration=100, # 500ms per frame
-            loop=0,
-            dpi=(200, 200) # Higher DPI for better quality
-        )
-
-
-    def gen_gt_animation(self, path):
-
-        subfig_size = 8
-        s = 0.05 # scatter point size
-        gt_alpha = 0.5
-        gt_frames = []
-        azims = [0, 90, 180, 270]
-        gt_fig = plt.figure(figsize=(4*4, 4))
-
-        mesh_fnames = sorted(f for f in os.listdir(path) if (f.endswith('.pkl') and f.startswith('mesh-f')))
-        x = None
-        for mesh_fname in mesh_fnames[::self.stride]:
-            mesh = load_pickle(os.path.join(path, mesh_fname))
-
-            gt_verts = mesh['vertices']
-
-            if x is None:
-                x = gt_verts
-            gt_color = mesh['colors']
-
-            for j, azim in enumerate(azims):
-                ax = gt_fig.add_subplot(1, 4, j+1, projection='3d')
-                ax.scatter(
-                    gt_verts[:, 0], 
-                    gt_verts[:, 1], 
-                    gt_verts[:, 2], s=s, alpha=gt_alpha#, c=gt_color
-                )
-                _set_scatter_limits(ax, x, elev=10, azim=azim)
-            _no_annotations(gt_fig)
-            plt.tight_layout(pad=0.)
-
-            # Save frame to memory
-            gt_fig.canvas.draw()
-            frame = np.frombuffer(gt_fig.canvas.tostring_rgb(), dtype=np.uint8)
-            frame = frame.reshape(gt_fig.canvas.get_width_height()[::-1] + (3,))
-            gt_frames.append(Image.fromarray(frame))
-            
-            # Clear figure for next frame
-            plt.clf()
-
-        plt.close(gt_fig)
-
-        gt_frames[0].save(
-            f'{self.id}_{self.take}_gt_animation.gif',
-            save_all=True,
-            append_images=gt_frames[1:],
-            duration=100, # 500ms per frame
-            loop=0,
-            dpi=(200, 200) # Higher DPI for better quality
-        )
-        return gt_frames
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
@@ -778,19 +652,58 @@ if __name__ == '__main__':
     ).to(device)
 
 
-    id = '00134'
-    take = 'Take3'
-    frames = ['00006', '00006', '00006', '00006', '00006']
-    cameras = ['0004', '0028', '0052', '0076', '0076']    
-    novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take1/SMPLX'
-    gt_scan_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take1/Meshes_pkl'
-    gt_smpl_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take1/SMPLX'
 
-    save_dir = f'vis/00134_take1_exp_090'
-    os.makedirs(save_dir, exist_ok=True)
+    ''' ---------------------------------------------------------- '''
+    # id = '00148'
+    # take = 'Take1'
+    # frames = ['00021', '00041', '00109', '00137', '00021']
+    # cameras = ['0004', '0028', '0052', '0076', '0076']    
+    # novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take4/SMPLX'
+    # gt_scan_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take4/Meshes_pkl'
+    # gt_smpl_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take4/SMPLX'
 
-    
+    # solver = Solver(id, take, frames, cameras, novel_pose_path, gt_scan_dir_path, gt_smpl_dir_path, args.load_from_ckpt, save_dir)
+    # solver.run()
+
+    ''' ---------------------------------------------------------- '''
+    vc_id = '00134'
+    vc_take = 'Take3'
+    vc_frames = ['00006', '00006', '00006', '00006', '00006']
+    vc_cameras = ['0004', '0028', '0052', '0076', '0076']    
+    # vc_novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take1/SMPLX'
+    # vc_gt_scan_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take1/Meshes_pkl'
+    # vc_gt_smpl_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take1/SMPLX'
+    # vc_save_dir = f'Figures/vis/00134_take1_exp_102'
+
+    for take in ['Take1', 'Take3', 'Take4', 'Take5', 'Take6', 'Take7', 'Take9']:
+        novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/{take}/SMPLX'
+        gt_scan_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/{take}/Meshes_pkl'
+        gt_smpl_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/{take}/SMPLX'
+        save_dir = f'Figures/vis/00134/00134_{take}_exp_100_5'
+        os.makedirs(save_dir, exist_ok=True)
+
+        solver = Solver(vc_id, vc_take, vc_frames, vc_cameras, novel_pose_path, gt_scan_dir_path, gt_smpl_dir_path, args.load_from_ckpt, save_dir)
+        solver.run()
+
+        break 
+
+    ''' ---------------------------------------------------------- '''
+    # vc_id = '00191'
+    # vc_take = 'Take2'
+    # vc_frames = ['00021', '00021', '00021', '00021', '00021']
+    # vc_cameras = ['0004', '0028', '0052', '0076', '0076'] 
 
 
-    solver = Solver(id, take, frames, cameras, novel_pose_path, gt_scan_dir_path, gt_smpl_dir_path, args.load_from_ckpt, save_dir)
-    solver.run()
+    # for take in ['Take2', 'Take3', 'Take4', 'Take5', 'Take6', 'Take8', 'Take9']:
+    #     novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00191/Inner/{take}/SMPLX'
+    #     gt_scan_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00191/Inner/{take}/Meshes_pkl'
+    #     gt_smpl_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00191/Inner/{take}/SMPLX'
+    #     save_dir = f'Figures/vis/00191/00191_{take}_exp_100_4'
+    #     os.makedirs(save_dir, exist_ok=True)
+
+    #     solver = Solver(vc_id, vc_take, vc_frames, vc_cameras, novel_pose_path, gt_scan_dir_path, gt_smpl_dir_path, args.load_from_ckpt, save_dir)
+    #     solver.run()
+
+    #     break 
+
+

@@ -3,6 +3,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 import numpy as np
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 from einops import rearrange
 
@@ -18,6 +19,7 @@ class CCHLoss(pl.LightningModule):
         super().__init__()
         self.cfg = cfg
 
+        self.init_posed_chamfer_loss = MaskedUncertaintyChamferLoss(cfg=cfg)
         self.posed_chamfer_loss = MaskedUncertaintyChamferLoss(cfg=cfg)
         self.canonical_chamfer_loss = MaskedUncertaintyChamferLoss(cfg=cfg)
 
@@ -190,7 +192,7 @@ class CCHLoss(pl.LightningModule):
 
             pred_vp = rearrange(pred_vp, 'b k n h w c -> (b k) (n h w) c')
 
-            vp_loss = self.posed_chamfer_loss(
+            vp_loss = self.init_posed_chamfer_loss(
                 gt_vp,
                 pred_vp, 
                 mask,
@@ -295,9 +297,10 @@ class MaskedUncertaintyChamferLoss(nn.Module):
         x_pred: (B, V2, 3)
         mask: (B, V2, 1)
     """
-    def __init__(self, alpha=1.0, cfg=None):
+    def __init__(self, alpha=1.0, gamma=1.0, cfg=None):
         super().__init__()
         self.alpha = alpha
+        self.gamma = gamma
         self.cfg = cfg
 
     def get_conf_log(self, x):
@@ -336,7 +339,7 @@ class MaskedUncertaintyChamferLoss(nn.Module):
         if confidence is not None:
             conf = torch.cat(conf_list, dim=0)
             log_conf = torch.cat(log_conf_list, dim=0)
-            loss_pred2gt = loss_pred2gt * conf - self.alpha * log_conf
+            loss_pred2gt = self.gamma * loss_pred2gt * conf - self.alpha * log_conf
             loss_gt2pred *= self.cfg.LOSS.SCALE_GT2PRED
 
         loss_pred2gt = filter_by_quantile(loss_pred2gt, 0.9999)
@@ -496,6 +499,36 @@ def normal_loss(prediction, target, mask, cos_eps=1e-8, conf=None, gamma=1.0, al
     # Convert point maps to surface normals using cross products
     pred_normals, pred_valids = point_map_to_normal(prediction, mask, eps=cos_eps)
     gt_normals,   gt_valids   = point_map_to_normal(target,     mask, eps=cos_eps)
+
+    # # Temporary visualization: pred_normals vs gt_normals for each direction using imshow
+    # if pred_normals.numel() > 0:
+    #     # Average over the 4 normal directions for visualization
+    #     pred_normals_avg = pred_normals.mean(dim=0)  # (B, H, W, 3)
+    #     gt_normals_avg = gt_normals.mean(dim=0)  # (B, H, W, 3)
+        
+    #     # Take first batch for visualization
+    #     pred_normals_vis = pred_normals_avg[0].detach().cpu().numpy()  # (H, W, 3)
+    #     gt_normals_vis = gt_normals_avg[0].detach().cpu().numpy()  # (H, W, 3)
+        
+    #     fig, axes = plt.subplots(3, 2, figsize=(10, 15))
+    #     directions = ['X', 'Y', 'Z']
+        
+    #     for i, direction in enumerate(directions):
+    #         # Predicted normal
+    #         im1 = axes[i, 0].imshow(pred_normals_vis[:, :, i], cmap='RdBu', vmin=-1, vmax=1)
+    #         axes[i, 0].set_title(f'Pred Normal {direction}')
+    #         axes[i, 0].axis('off')
+    #         plt.colorbar(im1, ax=axes[i, 0])
+            
+    #         # Ground truth normal
+    #         im2 = axes[i, 1].imshow(gt_normals_vis[:, :, i], cmap='RdBu', vmin=-1, vmax=1)
+    #         axes[i, 1].set_title(f'GT Normal {direction}')
+    #         axes[i, 1].axis('off')
+    #         plt.colorbar(im2, ax=axes[i, 1])
+        
+    #     plt.tight_layout()
+    #     plt.savefig('normal_loss_visualization.png', dpi=150, bbox_inches='tight')
+    #     plt.close()
 
     # Only consider regions where both predicted and GT normals are valid
     all_valid = pred_valids & gt_valids  # shape: (4, B, H, W)

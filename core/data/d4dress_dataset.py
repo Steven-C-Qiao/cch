@@ -85,9 +85,9 @@ class D4DressDataset(Dataset):
                     'full_lbs_weights': template_full_lbs_weights
                 }
             
-            inner_takes = os.listdir(os.path.join(PATH_TO_DATASET, subject_id, self.layer[0]))
+            inner_takes = sorted(os.listdir(os.path.join(PATH_TO_DATASET, subject_id, self.layer[0])))
             inner_takes = [(take, 'Inner') for take in inner_takes if take.startswith('Take')]
-            outer_takes = os.listdir(os.path.join(PATH_TO_DATASET, subject_id, self.layer[1]))
+            outer_takes = sorted(os.listdir(os.path.join(PATH_TO_DATASET, subject_id, self.layer[1])))
             outer_takes = [(take, 'Outer') for take in outer_takes if take.startswith('Take')]
 
             self.takes[subject_id] = inner_takes #+ outer_takes
@@ -97,7 +97,7 @@ class D4DressDataset(Dataset):
         self.transform = transforms.Compose([
             transforms.CenterCrop((940, 940)),
             transforms.Resize((self.img_size, self.img_size)),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+            # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
             transforms.ToTensor(),
         ])
         self.mask_transform = transforms.Compose([
@@ -118,6 +118,15 @@ class D4DressDataset(Dataset):
         return int(len(self.subject_ids) * self.lengthen_by)
 
     def __getitem__(self, index):
+        # Create a deterministic random state for this specific index
+        # This ensures the same index always produces the same random samples
+        rng_state = torch.get_rng_state()
+        np_rng_state = np.random.get_state()
+        
+        # Seed based on index for deterministic sampling
+        torch.manual_seed(42 + index)
+        np.random.seed(42 + index)
+        
         ret = defaultdict(list)
         ret['dataset'] = '4DDress'
 
@@ -137,6 +146,7 @@ class D4DressDataset(Dataset):
             extra_take = sampled_take  # fallback if only one take in this layer
 
         extra_take_dir = os.path.join(PATH_TO_DATASET, subject_id, extra_take[1], extra_take[0])
+
         
         suffix = '_w_outer' if sampled_take[1] == 'Outer' else ''
 
@@ -158,7 +168,14 @@ class D4DressDataset(Dataset):
         sampled_frame_extra = np.random.choice(extra_scan_frames, size=1, replace=False)[0]
         sampled_frames = list(sampled_frames_main) + [sampled_frame_extra]
         
+        # print(subject_id, sampled_take, extra_take)
+        # print(sampled_frames)
+        
         sampled_cameras = self.camera_ids + [np.random.choice(self.camera_ids, size=1, replace=False).item()]
+        
+        # Restore the original random state
+        torch.set_rng_state(rng_state)
+        np.random.set_state(np_rng_state)
         
         # Load camera params from both takes
         camera_params = load_pickle(os.path.join(take_dir, 'Capture', 'cameras.pkl'))
@@ -281,57 +298,106 @@ class D4DressDataset(Dataset):
 
 
 if __name__ == "__main__":
-    dataset = D4DressDataset()
+    from pytorch_lightning import seed_everything
+    import sys
+    sys.path.append('.')
+    from core.configs.cch_cfg import get_cch_cfg_defaults
+
+    seed_everything(42)
+    dataset = D4DressDataset(cfg=get_cch_cfg_defaults(), ids=['00138', '00191'])
 
     # Example of how to use the dataset with custom collate function
     # This prevents PyTorch from trying to stack meshes with different vertex counts
     from torch.utils.data import DataLoader
-    dataloader = DataLoader(dataset, batch_size=5, shuffle=True, collate_fn=d4dress_collate_fn)
     
-    print("Testing dataset with custom collate function...")
-    for batch_idx, batch in enumerate(dataloader):
-        print(f"\nBatch {batch_idx}:")
-        for k, v in batch.items():
-            if isinstance(v, torch.Tensor):
-                print(f"  {k}: tensor shape {v.shape}")
-            else:
-                print(f"  {k}: list of {len(v)} items")
-                if k in ['scan_mesh', 'smpl_data'] and v:
-                    # Show some info about the first mesh
-                    first_mesh = v[0][0] if isinstance(v[0], list) else v[0]
-                    if isinstance(first_mesh, dict) and 'vertices' in first_mesh:
-                        print(f"    First mesh has {len(first_mesh['vertices'])} vertices")
+
+    def custom_collate_fn(batch):
+        """
+        Custom collate function to handle variable-sized mesh data.
+        Returns lists for mesh data that can't be stacked, and tensors for data that can.
+        """
+        collated = defaultdict(list)
         
-        if batch_idx >= 1:  # Only test first few batches
-            break
+        for sample in batch:
+            for key, value in sample.items():
+                collated[key].append(value)
+        
+        nonstackable_keys = [
+            #THuman
+            'scan_verts', 'scan_faces', 'smplx_param', 'gender', 'scan_ids', 'camera_ids', 'dataset',
+            #4DDress
+            'scan_mesh', 'scan_mesh_verts', 'scan_mesh_faces', 'scan_mesh_verts_centered', 'scan_mesh_colors',
+            'template_mesh', 'template_mesh_verts', 'template_mesh_faces', 'template_full_mesh', 
+            'template_full_lbs_weights', 'gender', 'take_dir', 'dataset'
+        ]
 
 
-    print(f"batch keys: {batch.keys()}")
-    print(f"batch['imgs'].shape: {batch['imgs'].shape}")
-    print(f"batch['masks'].shape: {batch['masks'].shape}")
-    print(type(batch['scan_mesh'][0]))
+        for key in collated.keys():
+            if collated[key] and (key not in nonstackable_keys):
+                try:
+                    collated[key] = torch.stack(collated[key])
+                except RuntimeError as e:
+                    print(f"Warning: Could not stack {key}, keeping as list. Error: {e}")
+                    # Keep as list if stacking fails
+        
+        # Keep mesh data as lists since they have different vertex counts
+        for key in nonstackable_keys:
+            if key in collated:
+                # Keep as list - don't try to stack
+                pass
+        
+        return dict(collated)
+
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, collate_fn=custom_collate_fn)
+    for batch in dataloader:
+        for k, v in batch.items():
+            print(k, v.shape)
+        import ipdb; ipdb.set_trace()
+    
+    # print("Testing dataset with custom collate function...")
+    # for batch_idx, batch in enumerate(dataloader):
+    #     print(f"\nBatch {batch_idx}:")
+    #     for k, v in batch.items():
+    #         if isinstance(v, torch.Tensor):
+    #             print(f"  {k}: tensor shape {v.shape}")
+    #         else:
+    #             print(f"  {k}: list of {len(v)} items")
+    #             if k in ['scan_mesh', 'smpl_data'] and v:
+    #                 # Show some info about the first mesh
+    #                 first_mesh = v[0][0] if isinstance(v[0], list) else v[0]
+    #                 if isinstance(first_mesh, dict) and 'vertices' in first_mesh:
+    #                     print(f"    First mesh has {len(first_mesh['vertices'])} vertices")
+        
+    #     if batch_idx >= 1:  # Only test first few batches
+    #         break
+
+
+    # print(f"batch keys: {batch.keys()}")
+    # print(f"batch['imgs'].shape: {batch['imgs'].shape}")
+    # print(f"batch['masks'].shape: {batch['masks'].shape}")
+    # print(type(batch['scan_mesh'][0]))
     
 
 
-    # Visualize images from the batch
-    import matplotlib.pyplot as plt
+    # # Visualize images from the batch
+    # import matplotlib.pyplot as plt
 
-    batch_size, num_views = batch['imgs'].shape[:2]
-    fig, axes = plt.subplots(batch_size, num_views, figsize=(4*num_views, 4*batch_size))
+    # batch_size, num_views = batch['imgs'].shape[:2]
+    # fig, axes = plt.subplots(batch_size, num_views, figsize=(4*num_views, 4*batch_size))
     
-    for b in range(batch_size):
-        for n in range(num_views):
-            img = batch['imgs'][b,n].numpy()
-            if batch_size == 1:
-                ax = axes[n]
-            else:
-                ax = axes[b,n]
-            ax.imshow(img)
-            ax.axis('off')
-            ax.set_title(f'Batch {b}, View {n}')
+    # for b in range(batch_size):
+    #     for n in range(num_views):
+    #         img = batch['imgs'][b,n].numpy()
+    #         if batch_size == 1:
+    #             ax = axes[n]
+    #         else:
+    #             ax = axes[b,n]
+    #         ax.imshow(img)
+    #         ax.axis('off')
+    #         ax.set_title(f'Batch {b}, View {n}')
     
-    plt.tight_layout()
-    plt.show()
+    # plt.tight_layout()
+    # plt.show()
 
 
 

@@ -125,7 +125,7 @@ class THumanDataset(Dataset):
         )
 
     def __len__(self):
-        return int(len(self.ids) * self.lengthen_by )
+        return 0# int(len(self.ids) * self.lengthen_by )
     
     def __getitem__(self, index):
         ret = defaultdict(list)

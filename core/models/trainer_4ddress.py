@@ -149,6 +149,12 @@ class CCHTrainer(pl.LightningModule):
 
         metrics = self.metrics(preds, batch)
 
+        # Monitor gradient contributions periodically (expensive, so only every 1000 steps)
+        # Uncomment the block below to enable gradient contribution monitoring
+        # Note: This recomputes losses, so it's expensive
+        # self.compute_loss_gradient_contributions(preds, batch, batch['dataset'][0])
+        # import ipdb; ipdb.set_trace()
+
         # self.visualiser.visualise_debug_loss(loss_dict)
         # loss_dict.pop('debug_loss_pred2gt_conf')
         # loss_dict.pop('debug_loss_pred2gt')
@@ -169,7 +175,8 @@ class CCHTrainer(pl.LightningModule):
         # print('--------------------------------')
         # import ipdb; ipdb.set_trace()
         
-        return loss 
+        return loss
+    
 
 
 
@@ -196,27 +203,34 @@ class CCHTrainer(pl.LightningModule):
         if f'{split}_vp_cfd' in metrics:
             self.log(f'{split}_vp_cfd', metrics.pop(f'{split}_vp_cfd'), 
                      on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, sync_dist=True, batch_size=self.B)
+        if f'{split}_vp_cfd_pred2gt' in metrics:
+            self.log(f'{split}_vp_cfd_pred2gt', metrics.pop(f'{split}_vp_cfd_pred2gt'), 
+                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, sync_dist=True, batch_size=self.B)
+        if f'{split}_vp_cfd_gt2pred' in metrics:
+            self.log(f'{split}_vp_cfd_gt2pred', metrics.pop(f'{split}_vp_cfd_gt2pred'), 
+                     on_step=on_step, on_epoch=True, prog_bar=True, rank_zero_only=True, sync_dist=True, batch_size=self.B)
         self.log_dict(loss_dict, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
         self.log_dict(metrics, on_step=on_step, on_epoch=True, prog_bar=False, rank_zero_only=True, sync_dist=True, batch_size=self.B)
 
-        # if self.dev or self.plot:
-        #     self.visualiser.visualise(preds, batch, metrics=metrics, split=split, epoch=self.current_epoch)
-        #     if self.dev:
-        #         for k, v in loss_dict.items():
-        #             print(f"{k}: {v.item():.2f}", end='; ')
-        #         print('')
-        #         # import ipdb; ipdb.set_trace()
-        # else:
-        #     should_vis = False
-        #     global_step = self.global_step
-        #     if split in ('train', 'test'):
-        #         should_vis = ((global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1))
-        #     elif split == 'val':
-        #         # Visualise every N validation batches based on vis_frequency
-        #         should_vis = (batch_idx == 50) or (batch_idx == 100)
+        if self.dev or self.plot:
+            self.visualiser.visualise(preds, batch, metrics=metrics, split=split, epoch=self.current_epoch)
+            if self.dev:
+                for k, v in loss_dict.items():
+                    print(f"{k}: {v.item():.2f}", end='; ')
+                print('')
+                # import ipdb; ipdb.set_trace()
+        else:
+            should_vis = False
+            global_step = self.global_step
+            if split in ('train', 'test'):
+                should_vis = ((global_step % self.vis_frequency == 0 and global_step > 0) or (global_step == 1))
+            elif split == 'val':
+                # Visualise every N validation batches based on vis_frequency
+                should_vis = (batch_idx == 50) or (batch_idx == 100)
 
-        #     if should_vis:
-        #         self.visualiser.visualise(preds, batch, metrics=metrics, split=split, epoch=self.current_epoch)
+            if should_vis:
+                self.visualiser.visualise(preds, batch, metrics=metrics, split=split, epoch=self.current_epoch)
+
 
 
 
@@ -784,6 +798,53 @@ class CCHTrainer(pl.LightningModule):
                 optimizer.param_groups = new_param_groups
 
 
+    def compute_loss_gradient_contributions(self, preds, batch, dataset_name):
+        """
+        Compute gradient contributions for each loss component.
+        This method recomputes each loss component separately and measures
+        their individual gradient contributions by doing backward on each separately.
+        
+        Note: This is expensive (requires multiple forward/backward passes) and should 
+        only be called periodically for monitoring (e.g., every 1000 steps).
+        """
+        # Recompute losses to get fresh computation graph
+        _, loss_dict = self.criterion(preds, batch, dataset_name=dataset_name)
+        
+        grad_contributions = {}
+        
+        # Get optimizer (PyTorch Lightning returns a list of optimizers)
+        optimizers = self.optimizers()
+        optimizer = optimizers[0] if isinstance(optimizers, list) else optimizers
+        
+        # Compute gradient contribution for each loss component
+        for loss_name, loss_value in loss_dict.items():
+            if loss_name == 'total_loss':
+                continue
+            
+            # Zero gradients
+            optimizer.zero_grad()
+            
+            # Backward on this loss component only
+            loss_value.backward(retain_graph=True)
+            
+            # Compute gradient norm for this loss component
+            grad_norm = 0.0
+            for name, param in self.model.named_parameters():
+                if param.grad is not None:
+                    grad_norm += param.grad.data.norm(2).item() ** 2
+            grad_norm = grad_norm ** 0.5
+            grad_contributions[loss_name] = grad_norm
+        
+        # Zero gradients after computing contributions
+        optimizer.zero_grad()
+        
+        # Print gradient contributions
+        print(f"\n[Step {self.global_step}] Gradient contributions by loss:")
+        for loss_name, grad_norm in grad_contributions.items():
+            print(f"  {loss_name}: {grad_norm:.6f}")
+        print()
+        
+        return grad_contributions 
 
 
 
@@ -803,6 +864,11 @@ class CCHTrainer(pl.LightningModule):
 
         preds_vc = self.model._forward_vc(batch)
 
+        return preds_vc 
+
+    def build_avatar_thuman(self, batch):
+        batch = self.process_thuman(batch)
+        preds_vc = self.model._forward_vc(batch)
         return preds_vc 
 
     def drive_avatar(self, vc, batch, novel_pose):

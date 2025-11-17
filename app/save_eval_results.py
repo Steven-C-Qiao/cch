@@ -1,0 +1,721 @@
+import os
+import torch
+import pickle
+import argparse
+import trimesh
+import numpy as np
+from typing import Sequence 
+
+from pytorch3d.loss import chamfer_distance
+from pytorch3d.structures import Pointclouds
+
+
+from tqdm import tqdm
+from PIL import Image
+from loguru import logger
+from collections import defaultdict
+from pytorch_lightning import seed_everything
+from einops import rearrange
+from torch.utils.data import DataLoader
+import torchvision.transforms as transforms
+
+import sys
+sys.path.append('.')
+
+from core.configs.cch_cfg import get_cch_cfg_defaults
+from core.models.trainer_4ddress import CCHTrainer
+from core.data.d4dress_dataset import D4DressDataset
+from core.data.full_dataset import custom_collate_fn as d4dress_collate_fn
+from core.configs.paths import DATA_PATH as PATH_TO_DATASET
+from core.data.d4dress_utils import load_pickle, load_image, d4dress_cameras_to_pytorch3d_cameras
+
+
+import smplx
+
+
+def _move_to_device(sample, device):
+    """Recursively move tensors within nested containers to device."""
+    if isinstance(sample, torch.Tensor):
+        return sample.to(device)
+    if isinstance(sample, dict):
+        return {k: _move_to_device(v, device) for k, v in sample.items()}
+    if isinstance(sample, list):
+        return [_move_to_device(v, device) for v in sample]
+    if isinstance(sample, tuple):
+        return tuple(_move_to_device(v, device) for v in sample)
+    return sample
+
+# Process novel poses in smaller chunks to avoid OOM, and move results to CPU
+def _move_to_cpu(sample):
+    if isinstance(sample, torch.Tensor):
+        return sample.detach().cpu()
+    if isinstance(sample, dict):
+        return {k: _move_to_cpu(v) for k, v in sample.items()}
+    if isinstance(sample, list):
+        return [_move_to_cpu(v) for v in sample]
+    if isinstance(sample, tuple):
+        return tuple(_move_to_cpu(v) for v in sample)
+    return sample
+
+
+
+def get_confidence_threshold_from_percentage(confidence, image_mask):
+    """
+    Compute threshold value that masks a certain percentage of foreground pixels with lowest confidence.
+    
+    Args:
+        confidence: Confidence values tensor (B, N, H, W) or any shape
+        image_mask: Foreground mask (B, N, H, W) or matching shape, can be boolean or numeric
+        
+    Returns:
+        Threshold value to use for masking (scalar)
+    """
+    # Ensure mask is boolean tensor
+    if not image_mask.dtype == torch.bool:
+        image_mask = image_mask.bool()
+    
+    # Flatten for easier processing
+    confidence_flat = confidence.flatten()
+    mask_flat = image_mask.flatten()
+    
+    # Get confidence values only for foreground pixels
+    foreground_conf = confidence_flat[mask_flat]
+    
+    if foreground_conf.numel() == 0:
+        return 0.0
+    
+    # Calculate the threshold value for the given percentage
+    # We want to mask the lowest mask_percentage of foreground pixels
+    # Use quantile to get the threshold (equivalent to percentile)
+    # quantile expects value in [0, 1] range, where 0.1 means 10th percentile
+    computed_threshold = torch.quantile(foreground_conf.float(), 0.05)
+    
+    # Use the computed threshold
+    return computed_threshold.item()
+
+
+def uniformly_sample_pointcloud(points, num_points=None, voxel_size=None):
+    """
+    Uniformly sample a point cloud in space using voxel grid downsampling.
+    
+    Args:
+        points: torch.Tensor of shape (N, 3) - point cloud coordinates
+        num_points: int - target number of points (if None, uses voxel_size)
+        voxel_size: float - voxel size for downsampling (if None, auto-computed)
+    
+    Returns:
+        torch.Tensor of shape (M, 3) - uniformly sampled point cloud
+    """
+    # Convert to numpy
+    if isinstance(points, torch.Tensor):
+        points_np = points.cpu().numpy()
+        device = points.device
+        dtype = points.dtype
+    else:
+        points_np = np.asarray(points)
+        device = 'cpu'
+        dtype = torch.float32
+    
+    # Check for empty or invalid point cloud
+    if len(points_np) == 0:
+        return torch.tensor(points_np, dtype=dtype, device=device)
+    
+    # Remove NaN and Inf values
+    valid_mask = np.isfinite(points_np).all(axis=1)
+    points_np = points_np[valid_mask]
+    
+    if len(points_np) == 0:
+        return torch.tensor(points_np, dtype=dtype, device=device)
+    
+    # If num_points is specified, estimate voxel_size
+    if num_points is not None and voxel_size is None:
+        # Estimate voxel size based on bounding box and target number of points
+        bbox_min = points_np.min(axis=0)
+        bbox_max = points_np.max(axis=0)
+        bbox_size = bbox_max - bbox_min
+        volume = np.prod(bbox_size)
+        if volume > 0 and num_points > 0:
+            # Approximate voxel size to get roughly num_points
+            voxel_size = np.cbrt(volume / num_points)
+        else:
+            voxel_size = 0.01  # default fallback
+    
+    # Perform voxel grid downsampling
+    if voxel_size is not None and voxel_size > 0:
+        # Compute voxel indices for each point
+        bbox_min = points_np.min(axis=0)
+        voxel_indices = np.floor((points_np - bbox_min) / voxel_size).astype(np.int64)
+        
+        # Use dictionary to keep one point per voxel (first point in each voxel)
+        voxel_dict = {}
+        for i, voxel_idx in enumerate(voxel_indices):
+            voxel_key = tuple(voxel_idx)
+            if voxel_key not in voxel_dict:
+                voxel_dict[voxel_key] = i
+        
+        # Get sampled indices
+        sampled_indices = np.array(list(voxel_dict.values()))
+        points_sampled = points_np[sampled_indices]
+    else:
+        # If no downsampling specified, return original
+        points_sampled = points_np
+    
+    # If num_points is specified and we have more points, randomly sample to exact number
+    if num_points is not None and len(points_sampled) > num_points:
+        indices = np.random.choice(len(points_sampled), num_points, replace=False)
+        points_sampled = points_sampled[indices]
+    elif num_points is not None and len(points_sampled) < num_points:
+        # If we have fewer points, we can't upsample, so return what we have
+        pass
+    
+    # Convert back to torch tensor
+    return torch.tensor(points_sampled, dtype=dtype, device=device)
+
+
+
+# Use timm's names
+IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
+
+
+def make_normalize_transform(
+    mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
+    std: Sequence[float] = IMAGENET_DEFAULT_STD,
+) -> transforms.Normalize:
+    return transforms.Normalize(mean=mean, std=std)
+
+def sapiens_transform(
+    image: torch.tensor
+) -> torch.tensor:
+    transform = transforms.Compose([
+        transforms.CenterCrop((940, 940)),
+        transforms.Resize((1024, 1024)),
+        transforms.ToTensor(),
+        make_normalize_transform()
+    ])
+    image = transform(image)
+
+    return image
+
+class AdHocDataset(D4DressDataset):
+    def __init__(self, cfg, ids=[], layer='Inner', takes=['Take3'],
+                 frames=['00011', '00011', '00011', '00011', '00015'],
+                 cameras=['0004', '0028', '0052', '0076', '0076']):
+        super().__init__(cfg, ids)
+        self.ids = ids
+        self.layer = layer
+        self.takes = takes
+        self.frames = frames
+        self.cameras = cameras
+
+
+        self.transform = transforms.Compose([
+            transforms.CenterCrop((940, 940)),
+            transforms.Resize((self.img_size, self.img_size)),
+            transforms.ToTensor(),
+        ])
+        
+
+    def __getitem__(self, index):
+        ret = defaultdict(list)
+
+        id = self.ids[index]
+        layer = self.layer 
+        take_dir = os.path.join(PATH_TO_DATASET, id, layer, self.takes[index])
+        sampled_frames = self.frames
+        sampled_cameras = self.cameras
+
+        ret['take_dir'] = take_dir
+
+        basic_info = load_pickle(os.path.join(take_dir, 'basic_info.pkl'))
+        gender = basic_info['gender'] # is str
+        ret['gender'] = gender
+        scan_frames, scan_rotation = basic_info['scan_frames'], basic_info['rotation']
+        
+        camera_params = load_pickle(os.path.join(take_dir, 'Capture', 'cameras.pkl'))
+        R, T, K = d4dress_cameras_to_pytorch3d_cameras(camera_params, sampled_cameras)
+        ret['R'] = R
+        ret['T'] = T
+        ret['K'] = K
+
+
+        # ---- template mesh ----
+        template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', id)
+            
+        upper_mesh = trimesh.load(os.path.join(template_dir, 'upper.ply'))
+        body_mesh = trimesh.load(os.path.join(template_dir, 'body.ply'))
+        if os.path.exists(os.path.join(template_dir, 'lower.ply')):
+            lower_mesh = trimesh.load(os.path.join(template_dir, 'lower.ply'))
+            clothing_mesh = trimesh.util.concatenate([lower_mesh, upper_mesh])
+        else:
+            clothing_mesh = upper_mesh
+
+
+        full_filtered_mesh = trimesh.load(os.path.join(template_dir, 'filtered.ply'))
+        full_filtered_vertices = full_filtered_mesh.vertices
+        full_filtered_faces = full_filtered_mesh.faces
+
+        ret['template_mesh'] = full_filtered_mesh
+        ret['template_mesh_verts'] = torch.tensor(full_filtered_vertices, dtype=torch.float32)
+        ret['template_mesh_faces'] = torch.tensor(full_filtered_faces, dtype=torch.long)
+
+        template_full_mesh = trimesh.load(os.path.join(template_dir, 'full_mesh.ply'))
+        template_full_lbs_weights = np.load(os.path.join(template_dir, 'full_lbs_weights.npy'))
+        ret['template_full_mesh'] = template_full_mesh
+        ret['template_full_lbs_weights'] = torch.tensor(template_full_lbs_weights, dtype=torch.float32)
+
+
+        # -------------- SMPL T joints and vertices --------------
+        smpl_T_joints = np.load(os.path.join(template_dir, 'smpl_T_joints.npy'))
+        smpl_T_vertices = np.load(os.path.join(template_dir, 'smpl_T_vertices.npy'))
+        ret['smpl_T_joints'] = torch.tensor(smpl_T_joints, dtype=torch.float32)[:, :self.num_joints]
+        ret['smpl_T_vertices'] = torch.tensor(smpl_T_vertices, dtype=torch.float32)
+
+
+        for i, sampled_frame in enumerate(sampled_frames):
+            
+            # ---- smpl / smplx data ----
+            smpl_data_fname = os.path.join(take_dir, self.body_model.upper(), 'mesh-f{}_{}.pkl'.format(sampled_frame, self.body_model))
+            # smpl_ply_fname = os.path.join(take_dir, self.body_model.upper(), 'mesh-f{}_{}.ply'.format(sampled_frame, self.body_model))
+
+            smpl_data = load_pickle(smpl_data_fname)
+            global_orient, body_pose, transl, betas = smpl_data['global_orient'], smpl_data['body_pose'], smpl_data['transl'], smpl_data['betas']
+            ret['global_orient'].append(global_orient)
+            ret['body_pose'].append(body_pose)
+            ret['transl'].append(transl)
+            ret['betas'].append(betas)
+
+            # Load SMPLX attributes
+            ret['left_hand_pose'].append(smpl_data['left_hand_pose'])
+            ret['right_hand_pose'].append(smpl_data['right_hand_pose'])
+            ret['jaw_pose'].append(smpl_data['jaw_pose'])
+            ret['leye_pose'].append(smpl_data['leye_pose'])
+            ret['reye_pose'].append(smpl_data['reye_pose'])
+            ret['expression'].append(smpl_data['expression'])
+            pose = np.concatenate(
+                [global_orient, body_pose, 
+                 smpl_data['jaw_pose'], smpl_data['leye_pose'], smpl_data['reye_pose'], 
+                 smpl_data['left_hand_pose'], smpl_data['right_hand_pose']], axis=0
+            )
+
+            ret['pose'].append(pose)
+
+            
+            # ---- scan mesh ----
+            scan_mesh_fname = os.path.join(take_dir, 'Meshes_pkl', 'mesh-f{}.pkl'.format(sampled_frame))
+            scan_mesh = load_pickle(scan_mesh_fname)
+            scan_mesh['uv_path'] = scan_mesh_fname.replace('mesh-f', 'atlas-f')
+
+            ret['scan_mesh'].append(scan_mesh)
+            ret['scan_rotation'].append(torch.tensor(scan_rotation).float())
+            ret['scan_mesh_verts'].append(torch.tensor(scan_mesh['vertices']).float()) # - transl[None, :]).float())
+            ret['scan_mesh_verts_centered'].append(torch.tensor(scan_mesh['vertices'] - transl[None, :]).float())
+            ret['scan_mesh_faces'].append(torch.tensor(scan_mesh['faces']).long())
+            ret['scan_mesh_colors'].append(torch.tensor(scan_mesh['colors']).float())
+
+            # ---- images ----
+            img_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'images', 'capture-f{}.png'.format(sampled_frame))
+            mask_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'masks', 'mask-f{}.png'.format(sampled_frame))
+            
+            # Load images and apply transforms
+            img = load_image(img_fname)
+            mask = load_image(mask_fname)
+            
+            # Convert to PIL Images for transforms
+            img_pil = Image.fromarray(img)
+            mask_pil = Image.fromarray(mask)
+            
+
+            img_transformed = self.transform(img_pil)
+            mask_transformed = self.mask_transform(mask_pil).squeeze()
+
+            sapiens_image = sapiens_transform(img_pil)
+
+            ret['sapiens_images'].append(sapiens_image)
+            ret['imgs'].append(img_transformed)
+            ret['masks'].append(mask_transformed)
+
+
+
+        ret['imgs'] = torch.tensor(np.stack(ret['imgs']))
+        ret['masks'] = torch.tensor(np.stack(ret['masks']))
+        ret['R'] = torch.tensor(np.stack(ret['R']))
+        ret['T'] = torch.tensor(np.stack(ret['T']))
+        ret['K'] = torch.tensor(np.stack(ret['K']))
+        ret['global_orient'] = torch.tensor(np.stack(ret['global_orient']))
+        ret['body_pose'] = torch.tensor(np.stack(ret['body_pose']))
+        ret['pose'] = torch.tensor(np.stack(ret['pose']))
+        ret['transl'] = torch.tensor(np.stack(ret['transl']))
+        ret['betas'] = torch.tensor(np.stack(ret['betas']))
+        ret['scan_rotation'] = torch.tensor(np.stack(ret['scan_rotation']))
+        ret['sapiens_images'] = torch.tensor(np.stack(ret['sapiens_images']))
+        # ret['smpl_w_maps'] = torch.stack(ret['smpl_w_maps'])
+        # Stack SMPLX attributes
+        ret['left_hand_pose'] = torch.tensor(np.stack(ret['left_hand_pose']))
+        ret['right_hand_pose'] = torch.tensor(np.stack(ret['right_hand_pose']))
+        ret['jaw_pose'] = torch.tensor(np.stack(ret['jaw_pose']))
+        ret['leye_pose'] = torch.tensor(np.stack(ret['leye_pose']))
+        ret['reye_pose'] = torch.tensor(np.stack(ret['reye_pose']))
+        ret['expression'] = torch.tensor(np.stack(ret['expression']))
+
+        return ret
+
+
+
+
+class Solver:
+    def __init__(self, id, take, frames, cameras, load_path, save_dir=None):
+        self.id = id
+        self.take = take
+        self.stride = 5
+        self.save_dir = save_dir
+        if save_dir is not None:
+            os.makedirs(save_dir, exist_ok=True)
+        seed_everything(42)
+
+
+
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info(f'Device: {device}')
+        self.device = device
+
+        # Get config
+        cfg = get_cch_cfg_defaults()
+        self.model = CCHTrainer(
+            cfg=cfg,
+            dev=False,
+            vis_save_dir=None
+        )
+
+        self.load_pretrained(model=self.model, load_path=load_path)
+        
+        # Move SMPL models to device
+        self.model.smpl_male.to(self.device)
+        self.model.smpl_female.to(self.device)
+
+        self.init_batch_dataset = AdHocDataset(cfg, ids=[id], takes=[take], frames=frames, cameras=cameras)
+        self.init_batch_dataloader = DataLoader(self.init_batch_dataset, batch_size=1, shuffle=False, collate_fn=d4dress_collate_fn)
+
+        self.novel_pose_dataset = D4DressDataset(cfg, ids=[id])
+        self.novel_pose_dataloader = DataLoader(self.novel_pose_dataset, batch_size=1, shuffle=False, collate_fn=d4dress_collate_fn)
+
+        
+    def run(self):
+        preds = defaultdict(list)
+
+        init_batch = next(iter(self.init_batch_dataloader))
+        init_batch = _move_to_device(init_batch, self.device)
+        images = init_batch['imgs']
+        
+        vc_ret = self.model.build_avatar(init_batch)
+        confidence = vc_ret['vc_init_conf']
+
+
+
+
+        conf_mask = confidence > get_confidence_threshold_from_percentage(confidence, init_batch['masks'][0, :4, ...])
+        conf_mask = rearrange(conf_mask[0, :4, ...], 'n h w -> (n h w)').bool()
+
+        for k, v in vc_ret.items():
+            preds[k] = v
+    
+        # Extract novel poses and ground truth data from novel_pose_dataset
+        logger.info("Extracting novel poses and ground truth data from dataset...")
+        novel_poses_list = []
+        gt_data_list = []  # Store ground truth data for each novel pose
+        
+        for novel_batch in tqdm(self.novel_pose_dataloader, desc="Loading novel poses"):
+            novel_batch = _move_to_device(novel_batch, self.device)
+            
+            # Extract SMPL parameters from the last frame (index -1) which is the novel pose
+            # Get gender to determine which SMPL model to use
+            gender = novel_batch['gender'][0] if isinstance(novel_batch['gender'], (list, tuple)) else novel_batch['gender']
+            smpl_model = self.model.smpl_male if gender == 'male' else self.model.smpl_female
+            
+            # Extract SMPLX parameters from last frame
+            global_orient = novel_batch['global_orient'][0, -1, :].unsqueeze(0)  # Shape: (1, 3)
+            body_pose = novel_batch['body_pose'][0, -1, :].unsqueeze(0)  # Shape: (1, 63)
+            betas = novel_batch['betas'][0, -1, :].unsqueeze(0)  # Shape: (1, 10)
+            transl = novel_batch['transl'][0, -1, :].unsqueeze(0)  # Shape: (1, 3)
+            
+            # Prepare SMPLX model input
+            smpl_kwargs = {
+                'betas': betas,
+                'global_orient': global_orient,
+                'body_pose': body_pose,
+                'transl': transl,
+                'left_hand_pose': novel_batch['left_hand_pose'][0, -1, :].unsqueeze(0),
+                'right_hand_pose': novel_batch['right_hand_pose'][0, -1, :].unsqueeze(0),
+                'jaw_pose': novel_batch['jaw_pose'][0, -1, :].unsqueeze(0),
+                'leye_pose': novel_batch['leye_pose'][0, -1, :].unsqueeze(0),
+                'reye_pose': novel_batch['reye_pose'][0, -1, :].unsqueeze(0),
+                'expression': novel_batch['expression'][0, -1, :].unsqueeze(0),
+                'return_full_pose': True,
+            }
+            
+            # Process through SMPL model to get full_pose
+            with torch.no_grad():
+                smpl_output = smpl_model(**smpl_kwargs)
+                full_pose = smpl_output.full_pose.squeeze(0)  # Shape: (pose_dim,) - this is what drive_avatar expects
+            
+            novel_poses_list.append(full_pose)
+            
+            # Extract ground truth SMPLX data from the last frame (index -1)
+            gt_smpl_data = {
+                'transl': novel_batch['transl'][0, -1, :].clone().detach().cpu().numpy(),
+                'global_orient': novel_batch['global_orient'][0, -1, :].clone().detach().cpu().numpy(),
+                'body_pose': novel_batch['body_pose'][0, -1, :].clone().detach().cpu().numpy(),
+                'betas': novel_batch['betas'][0, -1, :].clone().detach().cpu().numpy(),
+                'left_hand_pose': novel_batch['left_hand_pose'][0, -1, :].clone().detach().cpu().numpy(),
+                'right_hand_pose': novel_batch['right_hand_pose'][0, -1, :].clone().detach().cpu().numpy(),
+                'jaw_pose': novel_batch['jaw_pose'][0, -1, :].clone().detach().cpu().numpy(),
+                'leye_pose': novel_batch['leye_pose'][0, -1, :].clone().detach().cpu().numpy(),
+                'reye_pose': novel_batch['reye_pose'][0, -1, :].clone().detach().cpu().numpy(),
+                'expression': novel_batch['expression'][0, -1, :].clone().detach().cpu().numpy(),
+            }
+            
+            # Scan mesh data - extract vertices and faces
+            # Note: scan_mesh_verts_centered and scan_mesh_faces are kept as lists after collation (nonstackable_keys)
+            # For batch_size=1, novel_batch['scan_mesh_verts_centered'] is a list with one tensor of shape (num_frames, num_verts, 3)
+            # We want the last frame (index -1)
+            gt_scan_verts = novel_batch['scan_mesh_verts_centered'][0][-1].clone().detach().cpu().numpy()
+            gt_scan_faces = novel_batch['scan_mesh_faces'][0][-1].clone().detach().cpu().numpy()
+            
+            gt_data_list.append({
+                'smpl_data': gt_smpl_data,
+                'scan_verts_centered': gt_scan_verts,
+                'scan_faces': gt_scan_faces,
+            })
+            
+            # Move batch to CPU to free GPU memory
+            novel_batch = _move_to_cpu(novel_batch)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        
+        # Stack all novel poses into a tensor: (num_poses, pose_dim)
+        novel_poses = torch.stack(novel_poses_list).to(self.device)
+        logger.info(f"Extracted {novel_poses.shape[0]} novel poses and ground truth data from dataset")
+
+        
+        vp_list = []
+
+        
+        distance_list = defaultdict(list)
+        
+        stride_indices = list(range(0, novel_poses.shape[0], self.stride))
+        chunk_size = 10
+        for start in tqdm(range(0, len(stride_indices), chunk_size)):
+            end = min(start + chunk_size, len(stride_indices))
+            for idx in stride_indices[start:end]:
+                novel_pose = novel_poses[idx]
+
+                vp = self.model.drive_avatar(vc_ret, init_batch, novel_pose)
+
+                # Get ground truth data from dataset (already extracted)
+                gt_data = gt_data_list[idx]
+                gt_smpl_data = gt_data['smpl_data']
+                gt_scan_transl = gt_smpl_data['transl']
+                gt_scan_verts_centered = gt_data['scan_verts_centered']
+                gt_scan_faces = gt_data['scan_faces']
+                gt_scan_mesh = trimesh.Trimesh(vertices=gt_scan_verts_centered, faces=gt_scan_faces)
+
+
+
+                vp_cpu = _move_to_cpu(vp)
+                vp_list.append(vp_cpu)
+
+
+                mask = rearrange(init_batch['masks'][0, :4, ...], 'n h w -> (n h w)').bool()
+                mask = mask * conf_mask
+
+                pred_vp = rearrange(vp['vp'][0, -1, ...], 'n h w c -> (n h w) c')
+                pred_vp_init = rearrange(vp['vp_init'][0, -1, ...], 'n h w c -> (n h w) c')
+
+                color = rearrange(images[0, :4, ...], 'n c h w -> (n h w) c')
+                # Images are in [0, 1] range from ToTensor() transform (no normalization applied)
+                # Need to scale to [0, 255] before converting to uint8
+                color = color[mask]
+                color = color.cpu().numpy()
+                # Scale from [0, 1] to [0, 255] and clamp to ensure valid range
+                color = (color * 255.0).clip(0, 255)
+                # Ensure color is uint8 and has 4 channels (RGBA)
+                if color.shape[1] == 3:
+                    # Add alpha channel, set to 255 (fully opaque)
+                    alpha = np.full((color.shape[0], 1), 255, dtype=np.uint8)
+                    color = np.concatenate([color, alpha], axis=1)
+                color = color.astype(np.uint8)
+
+
+                pred_vp = pred_vp[mask]
+                pred_vp_init = pred_vp_init[mask]
+                # Uniformly sample pred_vp in space before calculating chamfer distance
+                # You can adjust num_points or voxel_size based on your needs
+                # For example, to sample to ~10000 points: uniformly_sample_pointcloud(pred_vp, num_points=10000)
+                # Or use a fixed voxel size: uniformly_sample_pointcloud(pred_vp, voxel_size=0.01)
+                # pred_vp = uniformly_sample_pointcloud(pred_vp, voxel_size=0.01)
+
+                # Save original pred_vp with colors before sampling
+                if self.save_dir is not None:
+                    save_path = os.path.join(self.save_dir, f"pred_vp_{idx:03d}.ply")
+                    trimesh.PointCloud(pred_vp.cpu().numpy(), colors=color).export(save_path)
+                    save_path = os.path.join(self.save_dir, f"gt_vp_{idx:03d}.ply")
+                    gt_scan_mesh.export(save_path)
+                    save_path = os.path.join(self.save_dir, f"pred_vp_init_{idx:03d}.ply")
+                    trimesh.PointCloud(pred_vp_init.cpu().numpy(), colors=color).export(save_path)
+
+                pred_vp = Pointclouds(points=pred_vp[None])
+
+                print(pred_vp.points_packed().shape)
+
+                gt_vp = Pointclouds(points=torch.tensor(gt_scan_verts_centered[None], dtype=torch.float32, device=self.device))
+
+
+                
+            
+                cfd_ret, _ = chamfer_distance(
+                    pred_vp,
+                    gt_vp,
+                    point_reduction=None,
+                    batch_reduction=None,
+                )
+
+                cfd_sqrd_pred2gt = cfd_ret[0]  
+                cfd_sqrd_gt2pred = cfd_ret[1]
+
+                cfd_pred2gt = torch.sqrt(cfd_sqrd_pred2gt).mean() * 100.0
+                cfd_gt2pred = torch.sqrt(cfd_sqrd_gt2pred).mean() * 100.0
+
+                print(cfd_pred2gt, cfd_gt2pred)
+
+                distance_list['cfd_pred2gt'].append(cfd_pred2gt.item())
+                distance_list['cfd_gt2pred'].append(cfd_gt2pred.item())
+                distance_list['cfd'].append((cfd_pred2gt.item() + cfd_gt2pred.item())/2)
+
+
+
+                del vp, vp_cpu
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
+        for k, v in distance_list.items():
+            distance_list[k] = np.mean(v)
+            print(f'{k}: {distance_list[k]}')
+
+        preds['vp_list'] = vp_list
+
+        # self.visualise(preds, init_batch)
+
+        # Save predictions and batch data
+        logger.info("Saving predictions and batch data...")
+        
+        return vp_list
+    
+
+
+    def load_pretrained(self, model, load_path=None):
+        if load_path is not None:
+            logger.info(f"Loading checkpoint: {load_path}")
+            ckpt = torch.load(load_path, weights_only=False, map_location='cpu')
+            model_state = model.state_dict()
+            pretrained_state = ckpt['state_dict']
+            
+            # Print shape mismatches
+            mismatched = {k: (v.shape, model_state[k].shape) 
+                        for k, v in pretrained_state.items() 
+                        if k in model_state and v.shape != model_state[k].shape}
+            if mismatched:
+                logger.info("Shape mismatches found:")
+                for k, (pretrained_shape, model_shape) in mismatched.items():
+                    logger.info(f"{k}: checkpoint shape {pretrained_shape}, model shape {model_shape}")
+            
+            filtered_state = {k: v for k, v in pretrained_state.items() 
+                            if k in model_state and v.shape == model_state[k].shape}
+            logger.info(f"Loading {len(filtered_state)}/{len(pretrained_state)} keys from checkpoint")
+            model.load_state_dict(filtered_state, strict=True)
+            
+        model.eval()
+        model.to(self.device)
+        return model 
+
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+
+
+    parser.add_argument(
+        '--load_from_ckpt', 
+        '-L', 
+        type=str, 
+        default=None,
+        help='Path to checkpoint. Load for finetuning'
+    )
+    parser.add_argument(
+        "--gpus", 
+        type=str, 
+        default='0', 
+        help="Comma-separated list of GPU indices to use. E.g., '0,1,2'"
+    )    
+    parser.add_argument(
+        "--dev", 
+        action="store_true"
+    )  
+    args = parser.parse_args()
+    assert (args.load_from_ckpt is not None), 'Specify load_from_ckpt'
+
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f'Device: {device}')
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+
+    cfg = get_cch_cfg_defaults()
+    cfg.TRAIN.BATCH_SIZE = 1
+
+
+    ''' ---------------------------------------------------------- '''
+    vc_id = '00134'
+    vc_take = 'Take3'
+    vc_frames = ['00006', '00006', '00006', '00006', '00006']
+    vc_cameras = ['0004', '0028', '0052', '0076', '0076']    
+
+    save_dir = f'Figures/vis/00134_exp_100_5_random_poses'
+    os.makedirs(save_dir, exist_ok=True)
+
+    solver = Solver(vc_id, vc_take, vc_frames, vc_cameras, args.load_from_ckpt, save_dir)
+    solver.run()
+
+
+    ''' ---------------------------------------------------------- '''
+    # id = '00148'
+    # take = 'Take1'
+    # frames = ['00021', '00041', '00109', '00137', '00021']
+    # cameras = ['0004', '0028', '0052', '0076', '0076']    
+    # novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take4/SMPLX'
+    # gt_scan_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take4/Meshes_pkl'
+    # gt_smpl_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take4/SMPLX'
+
+    # solver = Solver(id, take, frames, cameras, novel_pose_path, gt_scan_dir_path, gt_smpl_dir_path, args.load_from_ckpt, save_dir)
+    # solver.run()
+
+    ''' ---------------------------------------------------------- '''
+    # vc_id = '00191'
+    # vc_take = 'Take2'
+    # vc_frames = ['00021', '00021', '00021', '00021', '00021']
+    # vc_cameras = ['0004', '0028', '0052', '0076', '0076'] 
+
+
+    # for take in ['Take2', 'Take3', 'Take4', 'Take5', 'Take6', 'Take8', 'Take9']:
+    #     novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00191/Inner/{take}/SMPLX'
+    #     gt_scan_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00191/Inner/{take}/Meshes_pkl'
+    #     gt_smpl_dir_path = f'/scratch/u5au/chexuan.u5au/4DDress/00191/Inner/{take}/SMPLX'
+    #     save_dir = f'Figures/vis/00191/00191_{take}_exp_100_2'
+    #     os.makedirs(save_dir, exist_ok=True)
+
+    #     solver = Solver(vc_id, vc_take, vc_frames, vc_cameras, novel_pose_path, gt_scan_dir_path, gt_smpl_dir_path, args.load_from_ckpt, save_dir)
+    #     solver.run()
+
+    #     break 
+
+

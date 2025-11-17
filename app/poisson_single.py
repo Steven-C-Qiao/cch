@@ -1,4 +1,4 @@
-path = 'vis/00134_take1/pred_vp_050.ply'
+
 
 import open3d as o3d
 import trimesh
@@ -42,7 +42,7 @@ def smooth_point_cloud(points, k=8, iterations=3):
         smoothed_points = new_points
     
     return smoothed_points
-def poisson(path, depth=9, decimation=False):
+def poisson(path, depth=10, decimation=False):
     # Load the point cloud from a file first
     pcl = o3d.io.read_point_cloud(path)
     
@@ -57,18 +57,18 @@ def poisson(path, depth=9, decimation=False):
     print(f"After removing duplicates: {len(pcl.points)} points")
     
     # Remove statistical outliers
-    pcl, _ = pcl.remove_statistical_outlier(nb_neighbors=20, std_ratio=4.0)
+    pcl, _ = pcl.remove_statistical_outlier(nb_neighbors=20, std_ratio=6.0)
     print(f"After removing outliers: {len(pcl.points)} points")
     
     if len(pcl.points) < 100:
         raise ValueError(f"Too few points remaining after preprocessing: {len(pcl.points)}")
     
     # Smooth point cloud before reconstruction
-    print("Smoothing point cloud...")
-    points = np.asarray(pcl.points)
-    smoothed_points = smooth_point_cloud(points, k=8, iterations=3)
-    pcl.points = o3d.utility.Vector3dVector(smoothed_points)
-    print(f"Point cloud smoothed")
+    # print("Smoothing point cloud...")
+    # points = np.asarray(pcl.points)
+    # smoothed_points = smooth_point_cloud(points, k=8, iterations=3)
+    # pcl.points = o3d.utility.Vector3dVector(smoothed_points)
+    # print(f"Point cloud smoothed")
     
     # Estimate normals for the point cloud if not present
     if not pcl.has_normals():
@@ -105,7 +105,7 @@ def poisson(path, depth=9, decimation=False):
     
     # Remove low density vertices (likely outliers)
     if len(densities) > 0:
-        vertices_to_remove = densities < np.quantile(densities, 0.01)
+        vertices_to_remove = densities < np.quantile(densities, 0.001)
         mesh.remove_vertices_by_mask(vertices_to_remove)
         print(f"After removing low density vertices: {len(mesh.vertices)} vertices")
     
@@ -124,8 +124,60 @@ def poisson(path, depth=9, decimation=False):
     
 
 if __name__ == "__main__":
-    mesh_poisson = poisson(path)
-    output_path = 'vis/00134_take1/pred_vp_050_poisson.obj'
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    mesh_poisson.export(output_path)
-    print(f"Saved mesh to {output_path}")
+    # dir_path = 'Figures/vis/00191/00191_Take2_exp_100_2'
+    # dir_path = 'exp/exp_100_5_vp/vis/for_visuals'
+    # dir_path = 'exp/exp_sync_00191/vis/for_visuals'
+    # ply_files = [
+    #     f for f in os.listdir(dir_path) if f.startswith('pred_vp_') and not f.startswith('pred_vp_init_') and f.endswith('.ply')
+    # ]
+    # for ply_file in sorted(ply_files):
+    #     ply_path = os.path.join(dir_path, ply_file)
+    #     mesh_poisson = poisson(ply_path)
+    #     # output_dir = os.path.join('Figures/vis/00191/00191_Take2_exp_100_2_poisson')
+    #     # output_dir = os.path.join('exp/exp_100_5_vp/vis/poisson_reconstruction')
+    #     output_dir = os.path.join('exp/exp_sync_00191/vis/poisson_reconstruction')
+    #     os.makedirs(output_dir, exist_ok=True)
+    #     base_name = os.path.splitext(ply_file)[0]
+    #     output_path = os.path.join(output_dir, f'{base_name}_poisson.obj')
+    #     mesh_poisson.export(output_path)
+    #     print(f"Saved mesh to {output_path}")
+
+
+
+    # ply_path = 'Figures/THuman/THuman_id684_pose1771/pred_vp_1771.ply'
+    # output_dir = os.path.join('Figures/THuman/THuman_id684_pose1771')
+
+    # mesh_poisson = poisson(ply_path)
+    # os.makedirs(output_dir, exist_ok=True)
+    # base_name = os.path.splitext(os.path.basename(ply_path))[0]
+    # output_path = os.path.join(output_dir, f'{base_name}_poisson.obj')
+    # mesh_poisson.export(output_path)
+    # print(f"Saved mesh to {output_path}")
+
+
+    ''' THuman '''
+    subject_ids = [str(i) for i in range(634, 681)]  # subject ids from 634 to 680 inclusive
+    dir_path = 'Figures/THuman'
+    
+    # Ensure output directory exists
+    os.makedirs(dir_path, exist_ok=True)
+
+    for subject_id in subject_ids:
+        ply_fname = os.path.join(dir_path, f'THuman_id{subject_id}_pose1771', 'novel_pose_point_clouds/pred_vp_000.ply')
+        save_fname = os.path.join(dir_path, f'poisson_{subject_id}.obj')
+        
+        # Check if input file exists
+        if not os.path.exists(ply_fname):
+            print(f"Warning: Input file {ply_fname} does not exist, skipping...")
+            continue
+        
+        try:
+            import time 
+            time1 = time.time()
+            mesh_poisson = poisson(ply_fname)
+            time2 = time.time()
+            print(f"Poisson reconstruction for subject {subject_id} took {time2 - time1:.2f} seconds")
+            # mesh_poisson.export(save_fname)
+            # print(f"Saved mesh to {save_fname}")
+        except Exception as e:
+            print(f"Error processing {ply_fname}: {e}")

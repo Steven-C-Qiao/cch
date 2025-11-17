@@ -13,14 +13,12 @@ except ImportError:
     PV_AVAILABLE = False
     print("Warning: PyVista not available")
 
-# try:
-#     import trimesh
-#     TRIMESH_AVAILABLE = True
-# except ImportError:
-#     TRIMESH_AVAILABLE = False
-#     print("Warning: trimesh not available")
-
-TRIMESH_AVAILABLE = False
+try:
+    import trimesh
+    TRIMESH_AVAILABLE = True
+except ImportError:
+    TRIMESH_AVAILABLE = False
+    print("Warning: trimesh not available")
 
 
 def load_ply_colored(filepath):
@@ -158,6 +156,84 @@ def load_obj_colored(filepath):
     return None, None, None
 
 
+def compute_vertex_normals(verts, faces):
+    """Compute vertex normals by averaging adjacent face normals.
+    Uses optimized functions from trimesh or PyVista if available.
+    """
+    if faces is None or len(faces) == 0:
+        return None
+    
+    faces_np = np.asarray(faces, dtype=np.int64)
+    if faces_np.ndim != 2 or faces_np.shape[1] != 3:
+        return None
+    
+    # Try trimesh first (fastest)
+    if TRIMESH_AVAILABLE:
+        try:
+            mesh = trimesh.Trimesh(vertices=verts, faces=faces_np)
+            vertex_normals = mesh.vertex_normals
+            return vertex_normals
+        except Exception:
+            pass
+    
+    # Try PyVista (also fast)
+    if PV_AVAILABLE:
+        try:
+            # Build PyVista face array format: [3, i0, i1, i2, 3, j0, j1, j2, ...]
+            num_faces = faces_np.shape[0]
+            faces_pv = np.hstack([np.full((num_faces, 1), 3, dtype=np.int64), faces_np]).reshape(-1)
+            mesh = pv.PolyData(verts, faces_pv)
+            mesh = mesh.compute_normals(point_normals=True, cell_normals=False)
+            vertex_normals = mesh['Normals']
+            return vertex_normals
+        except Exception:
+            pass
+    
+    # Fallback: vectorized numpy implementation (faster than loop)
+    verts_np = np.asarray(verts, dtype=np.float32)
+    num_verts = len(verts_np)
+    vertex_normals = np.zeros((num_verts, 3), dtype=np.float32)
+    
+    # Vectorized computation of face normals
+    v0 = verts_np[faces_np[:, 0]]  # (N_faces, 3)
+    v1 = verts_np[faces_np[:, 1]]  # (N_faces, 3)
+    v2 = verts_np[faces_np[:, 2]]  # (N_faces, 3)
+    
+    edge1 = v1 - v0  # (N_faces, 3)
+    edge2 = v2 - v0  # (N_faces, 3)
+    face_normals = np.cross(edge1, edge2)  # (N_faces, 3)
+    
+    # Normalize face normals
+    face_normals_len = np.linalg.norm(face_normals, axis=1, keepdims=True)  # (N_faces, 1)
+    face_normals_len[face_normals_len < 1e-8] = 1.0  # Avoid division by zero
+    face_normals = face_normals / face_normals_len  # (N_faces, 3)
+    
+    # Accumulate face normals to vertices using numpy advanced indexing
+    np.add.at(vertex_normals, faces_np[:, 0], face_normals)
+    np.add.at(vertex_normals, faces_np[:, 1], face_normals)
+    np.add.at(vertex_normals, faces_np[:, 2], face_normals)
+    
+    # Normalize vertex normals
+    norms = np.linalg.norm(vertex_normals, axis=1, keepdims=True)  # (N_verts, 1)
+    norms[norms < 1e-8] = 1.0  # Avoid division by zero
+    vertex_normals = vertex_normals / norms  # (N_verts, 3)
+    
+    return vertex_normals
+
+
+def normals_to_colors(normals):
+    """Convert surface normals to RGB colors.
+    Maps normal direction [-1, 1] to RGB [0, 1] by: RGB = (normal + 1) / 2
+    """
+    if normals is None:
+        return None
+    # Normalize to [0, 1] range: (normal + 1) / 2
+    colors = (normals + 1.0) / 2.0
+    # Clip to valid range
+    colors = np.clip(colors, 0.0, 1.0)
+    return colors
+
+
 def render_pointcloud_pyvista(verts, colors=None, center=None, camera_pos=None, max_range=None, point_size=1., alpha=0.5, default_color='gray'):
     """Render point cloud to image using PyVista with y-axis up, elev=10, azim=20"""
     if not PV_AVAILABLE or len(verts) == 0:
@@ -220,7 +296,7 @@ def render_mesh_pyvista(verts, faces, colors=None, center=None, camera_pos=None,
     num_faces = faces_tri.shape[0]
     faces_pv = np.hstack([np.full((num_faces, 1), 3, dtype=np.int64), faces_tri]).reshape(-1)
     mesh = pv.PolyData(verts, faces_pv)
-    plotter = pv.Plotter(off_screen=True, window_size=[200, 300])
+    plotter = pv.Plotter(off_screen=True, window_size=[400, 600])
     if colors is not None and len(colors) > 0:
         if colors.max() <= 1.0:
             colors_uint8 = (colors * 255).astype(np.uint8)
@@ -279,7 +355,8 @@ def get_view_params(x):
     return center, camera_pos, max_range, front_vec
 
 
-def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=None):
+def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, poisson_dir=None, column_indices=None, gt_use_normals=False, ours_use_normals=True):
+    # Note: poisson_dir is used for loading Ours meshes, but we also support point clouds
     # Configuration: Select which rows to plot
     # Options: 'GT', 'UP2You', 'Ours'
     # rows_to_plot = ['GT', 'UP2You', 'Ours']  # Change this to select specific rows, e.g., ['GT', 'Ours'] or ['UP2You']
@@ -298,24 +375,6 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
     except Exception:
         gt_fnames = []
     gt_files = [(f, f"GT {os.path.splitext(f)[0].split('_')[-1]}") for f in gt_fnames]
-    # Load ALL available pred ply files dynamically
-    try:
-        pred_fnames = [
-            f for f in os.listdir(ply_dir)
-            if f.startswith('pred_vp_') and not f.startswith('pred_vp_init') and f.endswith('.ply')
-        ]
-        # Sort numerically by the trailing token if possible
-        def pred_sort_key(name):
-            base = os.path.splitext(name)[0]
-            token = base.split('_')[-1]
-            try:
-                return int(token)
-            except ValueError:
-                return token
-        pred_fnames = sorted(pred_fnames, key=pred_sort_key)
-    except Exception:
-        pred_fnames = []
-    pred_files = [(f, f"Pred {os.path.splitext(f)[0].split('_')[-1]}") for f in pred_fnames]
     # Load ALL available pred_init ply files dynamically
     try:
         pred_init_fnames = [
@@ -333,7 +392,6 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
     except Exception:
         pred_init_fnames = []
     pred_init_files = [(f, f"PredInit {os.path.splitext(f)[0].split('_')[-1]}") for f in pred_init_fnames]
-    obj_files = [(f"pred_mesh_aligned_{ts}.obj", f"Mesh {ts}") for ts in timesteps]
     
     # Load data only for selected rows
     all_verts = []
@@ -348,66 +406,160 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
             
             verts, faces, colors = load_ply_colored(filepath)
             if verts is not None:
+                # Compute surface normals and convert to colors if requested
+                if gt_use_normals and faces is not None and len(faces) > 0:
+                    vertex_normals = compute_vertex_normals(verts, faces)
+                    if vertex_normals is not None:
+                        colors = normals_to_colors(vertex_normals)
+                        print(f"Loaded {filename}: {len(verts)} vertices, {len(faces)} faces, using normal visualization")
+                    else:
+                        print(f"Warning: Could not compute normals for {filename}, using original colors")
+                else:
+                    print(f"Loaded {filename}: {len(verts)} points")
+                
                 all_verts.append(verts)
                 gt_geoms.append((verts, faces, colors, label))
-                print(f"Loaded {filename}: {len(verts)} points")
             else:
                 print(f"Failed to load {filename}")
     
-    # Load Pred point clouds
-    pred_pointclouds = []
-    pred_init_pointclouds = []
+    # Load Ours meshes from poisson_reconstruction directory
+    ours_geoms = []  # list of (verts, faces, colors, label)
     
     if 'Ours' in rows_to_plot:
-        for filename, label in pred_files:
-            filepath = os.path.join(ply_dir, filename)
-            if not os.path.exists(filepath):
-                print(f"Warning: {filepath} does not exist, skipping...")
-                continue
-            
-            verts, faces_dummy, colors = load_ply_colored(filepath)
-            if verts is not None:
-                all_verts.append(verts)
-                pred_pointclouds.append((verts, colors, label))
-                print(f"Loaded {filename}: {len(verts)} points")
-            else:
-                print(f"Failed to load {filename}")
+        if poisson_dir is None:
+            print("Warning: poisson_dir not provided, skipping Ours row")
+        else:
+            # Match GT files to find corresponding poisson meshes
+            for filename, label in gt_files:
+                # Extract timestep from GT filename (e.g., 'gt_vp_000.ply' -> '000')
+                timestep = os.path.splitext(filename)[0].split('_')[-1]
+                # Look for poisson mesh: pred_vp_{timestep}_poisson.obj
+                poisson_filename = f"pred_vp_{timestep}_poisson.obj"
+                filepath = os.path.join(poisson_dir, poisson_filename)
+                
+                if not os.path.exists(filepath):
+                    print(f"Warning: {filepath} does not exist, skipping...")
+                    continue
+                
+                verts, faces, colors = load_obj_colored(filepath)
+                if verts is not None:
+                    # Compute surface normals and convert to colors if requested
+                    if ours_use_normals and faces is not None and len(faces) > 0:
+                        vertex_normals = compute_vertex_normals(verts, faces)
+                        if vertex_normals is not None:
+                            colors = normals_to_colors(vertex_normals)
+                            print(f"Loaded {poisson_filename}: {len(verts)} vertices, {len(faces)} faces, using normal visualization")
+                        else:
+                            print(f"Warning: Could not compute normals for {poisson_filename}, using default color")
+                            colors = None
+                    else:
+                        if faces is None or len(faces) == 0:
+                            print(f"Warning: No faces found for {poisson_filename}")
+                        else:
+                            print(f"Loaded {poisson_filename}: {len(verts)} vertices, {len(faces)} faces, using default color")
+                        colors = None  # Use default color when normals are disabled
+                    
+                    all_verts.append(verts)
+                    ours_geoms.append((verts, faces, colors, label))
+                else:
+                    print(f"Failed to load {poisson_filename}")
     
-    # Load Pred Init point clouds
+    # Load Ours Init meshes from poisson_reconstruction directory
+    ours_init_geoms = []  # list of (verts, faces, colors, label)
+    
     if 'ours_init' in rows_to_plot:
-        for filename, label in pred_init_files:
-            filepath = os.path.join(ply_dir, filename)
-            if not os.path.exists(filepath):
-                print(f"Warning: {filepath} does not exist, skipping...")
-                continue
-            
-            verts, faces_dummy, colors = load_ply_colored(filepath)
-            if verts is not None:
-                all_verts.append(verts)
-                pred_init_pointclouds.append((verts, colors, label))
-                print(f"Loaded {filename}: {len(verts)} points (init)")
-            else:
-                print(f"Failed to load {filename} (init)")
+        if poisson_dir is None:
+            print("Warning: poisson_dir not provided, skipping ours_init row")
+        else:
+            # Match GT files to find corresponding poisson meshes for init
+            for filename, label in gt_files:
+                # Extract timestep from GT filename (e.g., 'gt_vp_000.ply' -> '000')
+                timestep = os.path.splitext(filename)[0].split('_')[-1]
+                # Look for poisson mesh: pred_vp_init_{timestep}_poisson.obj
+                poisson_filename = f"pred_vp_init_{timestep}_poisson.obj"
+                filepath = os.path.join(poisson_dir, poisson_filename)
+                
+                if not os.path.exists(filepath):
+                    print(f"Warning: {filepath} does not exist, skipping...")
+                    continue
+                
+                verts, faces, colors = load_obj_colored(filepath)
+                if verts is not None:
+                    # Compute surface normals and convert to colors if requested
+                    if ours_use_normals and faces is not None and len(faces) > 0:
+                        vertex_normals = compute_vertex_normals(verts, faces)
+                        if vertex_normals is not None:
+                            colors = normals_to_colors(vertex_normals)
+                            print(f"Loaded {poisson_filename}: {len(verts)} vertices, {len(faces)} faces, using normal visualization")
+                        else:
+                            print(f"Warning: Could not compute normals for {poisson_filename}, using default color")
+                            colors = None
+                    else:
+                        if faces is None or len(faces) == 0:
+                            print(f"Warning: No faces found for {poisson_filename}")
+                        else:
+                            print(f"Loaded {poisson_filename}: {len(verts)} vertices, {len(faces)} faces, using default color")
+                        colors = None  # Use default color when normals are disabled
+                    
+                    all_verts.append(verts)
+                    ours_init_geoms.append((verts, faces, colors, label))
+                else:
+                    print(f"Failed to load {poisson_filename}")
     
-    # Load OBJ meshes
+    # Load OBJ meshes from UP2You outputs_* directories
     obj_geoms = []  # list of (verts, faces, colors, label)
     
     if 'UP2You' in rows_to_plot:
-        for filename, label in obj_files:
-            filepath = os.path.join(obj_dir, filename)
-            if not os.path.exists(filepath):
-                print(f"Warning: {filepath} does not exist, skipping...")
+        # Find all outputs_* directories in obj_dir
+        try:
+            all_items = os.listdir(obj_dir)
+            output_dirs = [d for d in all_items if d.startswith('outputs_') and os.path.isdir(os.path.join(obj_dir, d))]
+            
+            # Sort numerically by the number after 'outputs_'
+            def output_sort_key(name):
+                try:
+                    return int(name.replace('outputs_', ''))
+                except ValueError:
+                    return -1
+            output_dirs = sorted(output_dirs, key=output_sort_key)
+        except Exception:
+            output_dirs = []
+        
+        # Match UP2You meshes to GT files by index
+        for idx, gt_filename in enumerate(gt_fnames):
+            if idx >= len(output_dirs):
+                break
+            
+            output_dir = output_dirs[idx]
+            mesh_path = os.path.join(obj_dir, output_dir, 'meshes', 'pred_mesh_aligned.obj')
+            
+            if not os.path.exists(mesh_path):
+                print(f"Warning: {mesh_path} does not exist, skipping...")
                 continue
             
-            verts, faces, colors = load_obj_colored(filepath)
+            # Extract timestep from GT filename for label
+            timestep = os.path.splitext(gt_filename)[0].split('_')[-1]
+            label = f"UP2You {timestep}"
+            
+            verts, faces, colors = load_obj_colored(mesh_path)
             if verts is not None:
+                # Compute surface normals and convert to colors
+                if faces is not None and len(faces) > 0:
+                    vertex_normals = compute_vertex_normals(verts, faces)
+                    if vertex_normals is not None:
+                        colors = normals_to_colors(vertex_normals)
+                        print(f"Loaded {output_dir}/meshes/pred_mesh_aligned.obj: {len(verts)} vertices, {len(faces)} faces, using normal visualization")
+                    else:
+                        print(f"Warning: Could not compute normals for {output_dir}/meshes/pred_mesh_aligned.obj, using original colors")
+                else:
+                    print(f"Warning: No faces found for {output_dir}/meshes/pred_mesh_aligned.obj")
+                
                 all_verts.append(verts)
                 obj_geoms.append((verts, faces, colors, label))
-                print(f"Loaded {filename}: {len(verts)} vertices, faces: {0 if faces is None else len(faces)}")
             else:
-                print(f"Failed to load {filename}")
+                print(f"Failed to load {mesh_path}")
     
-    if len(gt_geoms) == 0 and len(pred_pointclouds) == 0 and len(obj_geoms) == 0:
+    if len(gt_geoms) == 0 and len(ours_geoms) == 0 and len(ours_init_geoms) == 0 and len(obj_geoms) == 0:
         print("No point clouds or meshes loaded!")
         return
     
@@ -417,37 +569,35 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
         return
     all_verts_combined = np.vstack(all_verts)
     center, camera_pos, max_range, front_vec = get_view_params(all_verts_combined)
-
+    
     # Filter by column_indices if provided, otherwise use all items
     if column_indices is not None:
         # Cherry-pick specific indices
         gt_geoms_limited = [gt_geoms[i] for i in column_indices if i < len(gt_geoms)] if 'GT' in rows_to_plot else []
-        pred_pointclouds_limited = [pred_pointclouds[i] for i in column_indices if i < len(pred_pointclouds)] if 'Ours' in rows_to_plot else []
-        pred_init_pointclouds_limited = [pred_init_pointclouds[i] for i in column_indices if i < len(pred_init_pointclouds)] if 'ours_init' in rows_to_plot else []
+        ours_geoms_limited = [ours_geoms[i] for i in column_indices if i < len(ours_geoms)] if 'Ours' in rows_to_plot else []
+        ours_init_geoms_limited = [ours_init_geoms[i] for i in column_indices if i < len(ours_init_geoms)] if 'ours_init' in rows_to_plot else []
         obj_geoms_limited = [obj_geoms[i] for i in column_indices if i < len(obj_geoms)] if 'UP2You' in rows_to_plot else []
     else:
-        
-        # Limit first and third rows to first 21 items for layout and rendering
-        gt_geoms_limited = gt_geoms[:21] if 'GT' in rows_to_plot else []
-        pred_pointclouds_limited = pred_pointclouds[:21] if 'Ours' in rows_to_plot else []
-        pred_init_pointclouds_limited = pred_init_pointclouds[:21] if 'ours_init' in rows_to_plot else []
-    
-    
+        # Use all available items
+        gt_geoms_limited = gt_geoms if 'GT' in rows_to_plot else []
+        ours_geoms_limited = ours_geoms if 'Ours' in rows_to_plot else []
+        ours_init_geoms_limited = ours_init_geoms if 'ours_init' in rows_to_plot else []
+        obj_geoms_limited = obj_geoms if 'UP2You' in rows_to_plot else []
     
     # Map row names to their data and properties
     row_config = {
-        'GT': {'data': gt_geoms_limited, 'label': 'GT', 'render_func': 'mesh', 'overlap': True, 'default_color': 'lightgray'},
-        'UP2You': {'data': obj_geoms, 'label': 'UP2You', 'render_func': 'mesh', 'overlap': False, 'default_color': 'green'},
-        'Ours': {'data': pred_pointclouds_limited, 'label': '', 'render_func': 'pointcloud', 'overlap': True, 'default_color': 'blue'},
-        'ours_init': {'data': pred_init_pointclouds_limited, 'label': 'Ours Init', 'render_func': 'pointcloud', 'overlap': True, 'default_color': 'blue'}
+        'GT': {'data': gt_geoms_limited, 'label': 'Scan ground truth', 'render_func': 'mesh', 'overlap': True, 'default_color': 'lightgray'},
+        'UP2You': {'data': obj_geoms_limited, 'label': 'UP2You', 'render_func': 'mesh', 'overlap': False, 'default_color': 'green'},
+        'Ours': {'data': ours_geoms_limited, 'label': '', 'render_func': 'mesh', 'overlap': True, 'default_color': 'lightgray'},
+        'ours_init': {'data': ours_init_geoms_limited, 'label': 'Initial reconstruction w/o blendshapes', 'render_func': 'mesh', 'overlap': True, 'default_color': 'lightgray'}
     }
     
     # Create figure with selected rows
     num_cols = max(
         len(gt_geoms_limited) if 'GT' in rows_to_plot else 0,
-        len(pred_pointclouds_limited) if 'Ours' in rows_to_plot else 0,
-        len(obj_geoms) if 'UP2You' in rows_to_plot else 0,
-        len(pred_init_pointclouds_limited) if 'ours_init' in rows_to_plot else 0
+        len(ours_geoms_limited) if 'Ours' in rows_to_plot else 0,
+        len(obj_geoms_limited) if 'UP2You' in rows_to_plot else 0,
+        len(ours_init_geoms_limited) if 'ours_init' in rows_to_plot else 0
     )
     if num_cols == 0:
         num_cols = 4
@@ -477,7 +627,7 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
             
             # Render based on type
             if config['render_func'] == 'mesh':
-                verts, faces, colors = item[:3]  # gt_geoms format: (verts, faces, colors, label)
+                verts, faces, colors = item[:3]  # gt_geoms/ours_geoms format: (verts, faces, colors, label)
                 img = render_mesh_pyvista(
                     verts, faces, colors=colors, center=center, camera_pos=camera_pos, 
                     max_range=max_range, opacity=1.0, default_color=config['default_color']
@@ -487,7 +637,7 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
                 img = render_pointcloud_pyvista(
                     verts, colors=colors, center=center, camera_pos=camera_pos,
                     max_range=max_range, default_color=config['default_color'],
-                    point_size=1.5, alpha=1.
+                    point_size=1.2, alpha=1.
                 )
             
             ax.imshow(img)
@@ -596,7 +746,7 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
 
 if __name__ == "__main__":
 
-    rows_to_plot = ['Ours']
+    # rows_to_plot = ['GT', 'ours_init', 'Ours']
     # output_path = os.path.join("Figures/vis_00134_take1_exp_102.png")
     
     # # Directory containing PLY files
@@ -605,40 +755,74 @@ if __name__ == "__main__":
     # obj_dir = "/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/up2you_00134_take1"
 
 
-    ''' ---------------------------------------------------------- '''
+
     # for take in ['Take1']:#, 'Take3', 'Take4', 'Take5', 'Take6', 'Take7', 'Take9']:
-    #     output_path = os.path.join(f"Figures/vis/00134/vis_00134_{take}_exp_100_5.png")
-    #     ply_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/00134/00134_{take}_exp_100_5"
-    #     obj_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/up2you_00134_{take}"
+    #     output_path = os.path.join(f"Figures/vis_00134_{take}_exp_104_ep9_ours_mesh.png")
+    #     ply_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/00134_{take}_exp_104_ep9"
+    #     # UP2You directory uses lowercase 'take1' instead of 'Take1'
+    #     take_lower = take.lower()
+    #     obj_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/up2you_vis/00134_{take_lower}"
+    #     poisson_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/poisson_reconstruction/00134_{take}_exp_104_ep9"
         
     #     timesteps = ['000', '025', '050', '075', '100']
         
-    #     main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps)
-    # for take in ['Take1']:#, 'Take3', 'Take4', 'Take5', 'Take6', 'Take7', 'Take9']:
-    #     output_path = os.path.join(f"Figures/vis/00134/vis_00134_exp_100_5_random_poses.png")
-    #     ply_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/00134_exp_100_5_random_poses"
-    #     obj_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/up2you_00134_{take}"
-        
-    #     timesteps = ['000', '025', '050', '075', '100']
-        
-    #     main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps)
+    #     main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, poisson_dir=poisson_dir)
 
 
-    ''' ---------------------------------------------------------- '''
     # for take in ['Take2']:#, 'Take3', 'Take4', 'Take5', 'Take6', 'Take7', 'Take9']:
-    #     output_path = os.path.join(f"Figures/vis/00191/vis_00191_{take}_exp_100_4.png")
-    #     ply_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/00191/00191_{take}_exp_100_4"
-    #     obj_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/up2you_vis/00191_{take}"
+    #     output_path = os.path.join(f"Figures/vis/00191/00191_{take}_exp_100_2_ours_mesh.png")
+    #     ply_dir = f"Figures/vis/00191/00191_{take}_exp_100_2"
         
-    timesteps = ['000', '025', '050', '075', '100']
-    column_indices = [1, 4, 5, 6, 7, 9, 11, 13, 17, 20]
+    #     take_lower = take.lower()
+    #     obj_dir = f"Figures/vis/up2you_vis/00191_{take_lower}"
+    #     poisson_dir = f"Figures/vis/00191/00191_{take}_exp_100_2_poisson"
         
-    #     main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps)
+    #     timesteps = ['000', '025', '050', '075', '100']
+        
+    #     main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, poisson_dir=poisson_dir)
 
 
-
-    output_path = os.path.join(f"exp/exp_100_5_vp/vis/for_visuals/A_points.jpg")
-    ply_dir = f"exp/exp_100_5_vp/vis/for_visuals"
-    obj_dir = None
+    '''----------------------------------------------------------
+    A bunch of random poses 4DDress eval set
+    ----------------------------------------------------------'''
+    # rows_to_plot = ['Ours']
+    # output_path = 'Figures/fig1_meshes.jpg'
+    # ply_dir = f"exp/exp_100_5_vp/vis/for_visuals"
     
-    main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=column_indices)
+    # obj_dir = f"exp/exp_100_5_vp/vis/up2you_vis"
+    # poisson_dir = f"exp/exp_100_5_vp/vis/poisson_reconstruction"
+    
+    # timesteps = ['000', '025', '050', '075', '100']
+    
+    # # Cherry-pick specific column indices (0-indexed)
+    # # Example: column_indices = [0, 5, 10, 15, 20] to plot columns 0, 5, 10, 15, 20
+    # # Set to None to plot all available columns (up to 21)
+    # # column_indices = [1, 4, 5, 6, 7, 9, 11, 13, 17, 20]  # Change to e.g., [0, 5, 10, 15, 20] to cherry-pick
+    # column_indices = [1, 5, 6, 7, 9, 10, 12, 13, 14, 17, 22, 23]
+    
+    # # Option to use surface normals for GT visualization (default: False, uses original colors if available)
+    # gt_use_normals = False  # Set to True to visualize GT with surface normals
+    # # Option to use surface normals for Ours visualization (default: True, uses normal visualization)
+    # ours_use_normals = False  # Set to False to use original colors if available
+    
+    # main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, poisson_dir=poisson_dir, column_indices=column_indices, gt_use_normals=gt_use_normals, ours_use_normals=ours_use_normals)
+
+
+    '''----------------------------------------------------------
+    vs
+    ----------------------------------------------------------'''
+    rows_to_plot = ['GT', 'UP2You', 'Ours']
+
+    output_path = 'Figures/vs_up2you//exp_single/for_visuals/mesh_vis_single_pose.jpg'
+    ply_dir = f"Figures/vs_up2you/exp_single/for_visuals"
+    poisson_dir = f"Figures/vs_up2you/exp_single/for_visuals/poisson_reconstruction"
+    
+    up2you_obj_dir = 'Figures/vs_up2you/exp_single/Take1_00079'
+    
+    timesteps = ['000']
+    
+
+    # Option to use surface normals for GT visualization (default: False, uses original colors if available)
+    gt_use_normals = False  # Set to True to visualize GT with surface normals
+    
+    main(rows_to_plot, output_path, ply_dir, up2you_obj_dir, timesteps, poisson_dir=poisson_dir, gt_use_normals=gt_use_normals)

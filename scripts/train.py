@@ -12,6 +12,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.strategies import DDPStrategy
+from pytorch_lightning import seed_everything
 
 import sys
 sys.path.append('.')
@@ -36,8 +37,14 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+
 def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=None, plot=False):
-    set_seed(39)
+    seed_everything(42)
+    torch.use_deterministic_algorithms(True, warn_only=True)
+    # Additional CUDNN settings for determinism
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     
     # Get config
     cfg = get_cch_cfg_defaults()

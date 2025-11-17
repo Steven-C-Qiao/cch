@@ -169,7 +169,7 @@ def render_pointcloud_pyvista(verts, colors=None, center=None, camera_pos=None, 
     pcd = pv.PolyData(verts)
     
     # Create plotter with explicit offscreen mode (portrait window, lower resolution)
-    plotter = pv.Plotter(off_screen=True, window_size=[400, 600])
+    plotter = pv.Plotter(off_screen=True, window_size=[200, 300])
     
     # PyVista expects colors as uint8
     if colors is not None and len(colors) > 0:
@@ -279,7 +279,7 @@ def get_view_params(x):
     return center, camera_pos, max_range, front_vec
 
 
-def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=None):
+def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps):
     # Configuration: Select which rows to plot
     # Options: 'GT', 'UP2You', 'Ours'
     # rows_to_plot = ['GT', 'UP2You', 'Ours']  # Change this to select specific rows, e.g., ['GT', 'Ours'] or ['UP2You']
@@ -300,10 +300,7 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
     gt_files = [(f, f"GT {os.path.splitext(f)[0].split('_')[-1]}") for f in gt_fnames]
     # Load ALL available pred ply files dynamically
     try:
-        pred_fnames = [
-            f for f in os.listdir(ply_dir)
-            if f.startswith('pred_vp_') and not f.startswith('pred_vp_init') and f.endswith('.ply')
-        ]
+        pred_fnames = [f for f in os.listdir(ply_dir) if f.startswith('pred_vp_') and f.endswith('.ply')]
         # Sort numerically by the trailing token if possible
         def pred_sort_key(name):
             base = os.path.splitext(name)[0]
@@ -316,23 +313,6 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
     except Exception:
         pred_fnames = []
     pred_files = [(f, f"Pred {os.path.splitext(f)[0].split('_')[-1]}") for f in pred_fnames]
-    # Load ALL available pred_init ply files dynamically
-    try:
-        pred_init_fnames = [
-            f for f in os.listdir(ply_dir)
-            if f.startswith('pred_vp_init_') and f.endswith('.ply')
-        ]
-        def pred_init_sort_key(name):
-            base = os.path.splitext(name)[0]
-            token = base.split('_')[-1]
-            try:
-                return int(token)
-            except ValueError:
-                return token
-        pred_init_fnames = sorted(pred_init_fnames, key=pred_init_sort_key)
-    except Exception:
-        pred_init_fnames = []
-    pred_init_files = [(f, f"PredInit {os.path.splitext(f)[0].split('_')[-1]}") for f in pred_init_fnames]
     obj_files = [(f"pred_mesh_aligned_{ts}.obj", f"Mesh {ts}") for ts in timesteps]
     
     # Load data only for selected rows
@@ -356,7 +336,6 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
     
     # Load Pred point clouds
     pred_pointclouds = []
-    pred_init_pointclouds = []
     
     if 'Ours' in rows_to_plot:
         for filename, label in pred_files:
@@ -372,22 +351,6 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
                 print(f"Loaded {filename}: {len(verts)} points")
             else:
                 print(f"Failed to load {filename}")
-    
-    # Load Pred Init point clouds
-    if 'ours_init' in rows_to_plot:
-        for filename, label in pred_init_files:
-            filepath = os.path.join(ply_dir, filename)
-            if not os.path.exists(filepath):
-                print(f"Warning: {filepath} does not exist, skipping...")
-                continue
-            
-            verts, faces_dummy, colors = load_ply_colored(filepath)
-            if verts is not None:
-                all_verts.append(verts)
-                pred_init_pointclouds.append((verts, colors, label))
-                print(f"Loaded {filename}: {len(verts)} points (init)")
-            else:
-                print(f"Failed to load {filename} (init)")
     
     # Load OBJ meshes
     obj_geoms = []  # list of (verts, faces, colors, label)
@@ -417,37 +380,23 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
         return
     all_verts_combined = np.vstack(all_verts)
     center, camera_pos, max_range, front_vec = get_view_params(all_verts_combined)
-
-    # Filter by column_indices if provided, otherwise use all items
-    if column_indices is not None:
-        # Cherry-pick specific indices
-        gt_geoms_limited = [gt_geoms[i] for i in column_indices if i < len(gt_geoms)] if 'GT' in rows_to_plot else []
-        pred_pointclouds_limited = [pred_pointclouds[i] for i in column_indices if i < len(pred_pointclouds)] if 'Ours' in rows_to_plot else []
-        pred_init_pointclouds_limited = [pred_init_pointclouds[i] for i in column_indices if i < len(pred_init_pointclouds)] if 'ours_init' in rows_to_plot else []
-        obj_geoms_limited = [obj_geoms[i] for i in column_indices if i < len(obj_geoms)] if 'UP2You' in rows_to_plot else []
-    else:
-        
-        # Limit first and third rows to first 21 items for layout and rendering
-        gt_geoms_limited = gt_geoms[:21] if 'GT' in rows_to_plot else []
-        pred_pointclouds_limited = pred_pointclouds[:21] if 'Ours' in rows_to_plot else []
-        pred_init_pointclouds_limited = pred_init_pointclouds[:21] if 'ours_init' in rows_to_plot else []
     
-    
+    # Limit first and third rows to first 21 items for layout and rendering
+    gt_geoms_limited = gt_geoms[:21] if 'GT' in rows_to_plot else []
+    pred_pointclouds_limited = pred_pointclouds[:21] if 'Ours' in rows_to_plot else []
     
     # Map row names to their data and properties
     row_config = {
         'GT': {'data': gt_geoms_limited, 'label': 'GT', 'render_func': 'mesh', 'overlap': True, 'default_color': 'lightgray'},
         'UP2You': {'data': obj_geoms, 'label': 'UP2You', 'render_func': 'mesh', 'overlap': False, 'default_color': 'green'},
-        'Ours': {'data': pred_pointclouds_limited, 'label': '', 'render_func': 'pointcloud', 'overlap': True, 'default_color': 'blue'},
-        'ours_init': {'data': pred_init_pointclouds_limited, 'label': 'Ours Init', 'render_func': 'pointcloud', 'overlap': True, 'default_color': 'blue'}
+        'Ours': {'data': pred_pointclouds_limited, 'label': 'Ours', 'render_func': 'pointcloud', 'overlap': True, 'default_color': 'blue'}
     }
     
     # Create figure with selected rows
     num_cols = max(
         len(gt_geoms_limited) if 'GT' in rows_to_plot else 0,
         len(pred_pointclouds_limited) if 'Ours' in rows_to_plot else 0,
-        len(obj_geoms) if 'UP2You' in rows_to_plot else 0,
-        len(pred_init_pointclouds_limited) if 'ours_init' in rows_to_plot else 0
+        len(obj_geoms) if 'UP2You' in rows_to_plot else 0
     )
     if num_cols == 0:
         num_cols = 4
@@ -487,7 +436,7 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
                 img = render_pointcloud_pyvista(
                     verts, colors=colors, center=center, camera_pos=camera_pos,
                     max_range=max_range, default_color=config['default_color'],
-                    point_size=1.5, alpha=1.
+                    point_size=0.5, alpha=1.
                 )
             
             ax.imshow(img)
@@ -596,49 +545,16 @@ def main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=
 
 if __name__ == "__main__":
 
-    rows_to_plot = ['Ours']
-    # output_path = os.path.join("Figures/vis_00134_take1_exp_102.png")
-    
-    # # Directory containing PLY files
-    # ply_dir = "/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/00134_take1_exp_102"
-    # # Directory containing OBJ files
-    # obj_dir = "/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/up2you_00134_take1"
+    rows_to_plot = ['GT', 'Ours']
 
 
     ''' ---------------------------------------------------------- '''
-    # for take in ['Take1']:#, 'Take3', 'Take4', 'Take5', 'Take6', 'Take7', 'Take9']:
-    #     output_path = os.path.join(f"Figures/vis/00134/vis_00134_{take}_exp_100_5.png")
-    #     ply_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/00134/00134_{take}_exp_100_5"
-    #     obj_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/up2you_00134_{take}"
+    for take in ['Take2']:#, 'Take3', 'Take4', 'Take5', 'Take6', 'Take7', 'Take9']:
+        output_path = os.path.join(f"Figures/vis/THuman_2417_00134_Take1/vis_THuman_2417_00134_Take1.png")
+        ply_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/THuman_2417_00134_Take1"
+        obj_dir = None
         
-    #     timesteps = ['000', '025', '050', '075', '100']
+        timesteps = ['000', '025', '050', '075', '100']
         
-    #     main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps)
-    # for take in ['Take1']:#, 'Take3', 'Take4', 'Take5', 'Take6', 'Take7', 'Take9']:
-    #     output_path = os.path.join(f"Figures/vis/00134/vis_00134_exp_100_5_random_poses.png")
-    #     ply_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/00134_exp_100_5_random_poses"
-    #     obj_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/up2you_00134_{take}"
-        
-    #     timesteps = ['000', '025', '050', '075', '100']
-        
-    #     main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps)
+        main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps)
 
-
-    ''' ---------------------------------------------------------- '''
-    # for take in ['Take2']:#, 'Take3', 'Take4', 'Take5', 'Take6', 'Take7', 'Take9']:
-    #     output_path = os.path.join(f"Figures/vis/00191/vis_00191_{take}_exp_100_4.png")
-    #     ply_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/vis/00191/00191_{take}_exp_100_4"
-    #     obj_dir = f"/scratch/u5au/chexuan.u5au/from_u5aa/cch/Figures/up2you_vis/00191_{take}"
-        
-    timesteps = ['000', '025', '050', '075', '100']
-    column_indices = [1, 4, 5, 6, 7, 9, 11, 13, 17, 20]
-        
-    #     main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps)
-
-
-
-    output_path = os.path.join(f"exp/exp_100_5_vp/vis/for_visuals/A_points.jpg")
-    ply_dir = f"exp/exp_100_5_vp/vis/for_visuals"
-    obj_dir = None
-    
-    main(rows_to_plot, output_path, ply_dir, obj_dir, timesteps, column_indices=column_indices)

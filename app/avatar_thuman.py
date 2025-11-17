@@ -18,266 +18,21 @@ from einops import rearrange
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 
+from pytorch3d.transforms import matrix_to_euler_angles, axis_angle_to_matrix, euler_angles_to_matrix, matrix_to_axis_angle
+
 import sys
 sys.path.append('.')
 
 from core.configs.cch_cfg import get_cch_cfg_defaults
-from core.models.trainer_4ddress import CCHTrainer
-from core.data.d4dress_dataset import D4DressDataset
+from core.data.thuman_dataset import THumanDataset, THuman_metadata, load_w_maps_sparse
 from core.data.full_dataset import custom_collate_fn as d4dress_collate_fn
-from core.configs.paths import DATA_PATH as PATH_TO_DATASET
-from core.data.d4dress_utils import load_pickle, load_image, d4dress_cameras_to_pytorch3d_cameras
-
-
-def _move_to_device(sample, device):
-    """Recursively move tensors within nested containers to device."""
-    if isinstance(sample, torch.Tensor):
-        return sample.to(device)
-    if isinstance(sample, dict):
-        return {k: _move_to_device(v, device) for k, v in sample.items()}
-    if isinstance(sample, list):
-        return [_move_to_device(v, device) for v in sample]
-    if isinstance(sample, tuple):
-        return tuple(_move_to_device(v, device) for v in sample)
-    return sample
-
-
-def _get_confidence_threshold_from_percentage(confidence, image_mask, mask_percentage=0.0):
-    """
-    Compute threshold value that masks a certain percentage of foreground pixels with lowest confidence.
-    
-    Args:
-        confidence: Confidence values array (N, H, W) or (H, W), can be torch tensor or numpy array
-        image_mask: Foreground mask (N, H, W) or (H, W), can be torch tensor or numpy array
-        
-    Returns:
-        Threshold value to use for masking
-    """
-    
-    # Convert to numpy if torch tensors
-    if hasattr(confidence, 'cpu'):
-        confidence = confidence.cpu().detach().numpy()
-    if hasattr(image_mask, 'cpu'):
-        image_mask = image_mask.cpu().detach().numpy()
-    
-    # Ensure mask is boolean
-    image_mask = image_mask.astype(bool)
-    
-    # Flatten for easier processing
-    confidence_flat = confidence.flatten()
-    mask_flat = image_mask.flatten()
-    
-    # Get confidence values only for foreground pixels
-    foreground_conf = confidence_flat[mask_flat]
-    
-    # Calculate the threshold value for the given percentage
-    # We want to mask the lowest mask_percentage of foreground pixels
-    percentile = mask_percentage * 100
-    computed_threshold = np.percentile(foreground_conf, percentile)
-    
-    # Use the computed threshold
-    return computed_threshold
-
-
+from core.data.d4dress_utils import load_pickle
+from core.models.trainer_4ddress import CCHTrainer
+from core.configs.paths import THUMAN_PATH
+from core.utils.camera_utils import uv_to_pixel_space, custom_opengl2pytorch3d
 # Use timm's names
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
-
-
-def make_normalize_transform(
-    mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
-    std: Sequence[float] = IMAGENET_DEFAULT_STD,
-) -> transforms.Normalize:
-    return transforms.Normalize(mean=mean, std=std)
-
-def sapiens_transform(
-    image: torch.tensor
-) -> torch.tensor:
-    transform = transforms.Compose([
-        transforms.CenterCrop((940, 940)),
-        transforms.Resize((1024, 1024)),
-        transforms.ToTensor(),
-        make_normalize_transform()
-    ])
-    image = transform(image)
-
-    return image
-
-class AdHocDataset(D4DressDataset):
-    def __init__(self, cfg, ids=[], layer='Inner', takes=['Take3'],
-                 frames=['00011', '00011', '00011', '00011', '00015'],
-                 cameras=['0004', '0028', '0052', '0076', '0076']):
-        super().__init__(cfg, ids)
-        self.ids = ids
-        self.layer = layer
-        self.takes = takes
-        self.frames = frames
-        self.cameras = cameras
-        
-
-    def __getitem__(self, index):
-        ret = defaultdict(list)
-
-        id = self.ids[index]
-        layer = self.layer 
-        take_dir = os.path.join(PATH_TO_DATASET, id, layer, self.takes[index])
-        sampled_frames = self.frames
-        sampled_cameras = self.cameras
-
-        ret['take_dir'] = take_dir
-
-        basic_info = load_pickle(os.path.join(take_dir, 'basic_info.pkl'))
-        gender = basic_info['gender'] # is str
-        ret['gender'] = gender
-        scan_frames, scan_rotation = basic_info['scan_frames'], basic_info['rotation']
-        
-        camera_params = load_pickle(os.path.join(take_dir, 'Capture', 'cameras.pkl'))
-        R, T, K = d4dress_cameras_to_pytorch3d_cameras(camera_params, sampled_cameras)
-        ret['R'] = R
-        ret['T'] = T
-        ret['K'] = K
-
-
-        # ---- template mesh ----
-        template_dir = os.path.join(PATH_TO_DATASET, '_4D-DRESS_Template', id)
-            
-        upper_mesh = trimesh.load(os.path.join(template_dir, 'upper.ply'))
-        body_mesh = trimesh.load(os.path.join(template_dir, 'body.ply'))
-        if os.path.exists(os.path.join(template_dir, 'lower.ply')):
-            lower_mesh = trimesh.load(os.path.join(template_dir, 'lower.ply'))
-            clothing_mesh = trimesh.util.concatenate([lower_mesh, upper_mesh])
-        else:
-            clothing_mesh = upper_mesh
-        # full_mesh = trimesh.util.concatenate([body_mesh, clothing_mesh])
-
-
-        full_filtered_mesh = trimesh.load(os.path.join(template_dir, 'filtered.ply'))
-        full_filtered_vertices = full_filtered_mesh.vertices
-        full_filtered_faces = full_filtered_mesh.faces
-
-        # template_mesh_lbs_weights = np.load(os.path.join(template_dir, 'filtered_lbs_weights.npy'))
-        
-        ret['template_mesh'] = full_filtered_mesh
-        # ret['template_body_mesh'] = torch.tensor(body_mesh, dtype=torch.float32)
-        ret['template_mesh_verts'] = torch.tensor(full_filtered_vertices, dtype=torch.float32)
-        ret['template_mesh_faces'] = torch.tensor(full_filtered_faces, dtype=torch.long)
-        # ret['template_mesh_lbs_weights'] = torch.tensor(template_mesh_lbs_weights, dtype=torch.float32)
-
-        template_full_mesh = trimesh.load(os.path.join(template_dir, 'full_mesh.ply'))
-        template_full_lbs_weights = np.load(os.path.join(template_dir, 'full_lbs_weights.npy'))
-        ret['template_full_mesh'] = template_full_mesh
-        ret['template_full_lbs_weights'] = torch.tensor(template_full_lbs_weights, dtype=torch.float32)
-
-
-        # -------------- SMPL T joints and vertices --------------
-        smpl_T_joints = np.load(os.path.join(template_dir, 'smpl_T_joints.npy'))
-        smpl_T_vertices = np.load(os.path.join(template_dir, 'smpl_T_vertices.npy'))
-        ret['smpl_T_joints'] = torch.tensor(smpl_T_joints, dtype=torch.float32)[:, :self.num_joints]
-        ret['smpl_T_vertices'] = torch.tensor(smpl_T_vertices, dtype=torch.float32)
-
-
-        for i, sampled_frame in enumerate(sampled_frames):
-            
-            # ---- smpl / smplx data ----
-            smpl_data_fname = os.path.join(take_dir, self.body_model.upper(), 'mesh-f{}_{}.pkl'.format(sampled_frame, self.body_model))
-            # smpl_ply_fname = os.path.join(take_dir, self.body_model.upper(), 'mesh-f{}_{}.ply'.format(sampled_frame, self.body_model))
-
-            smpl_data = load_pickle(smpl_data_fname)
-            global_orient, body_pose, transl, betas = smpl_data['global_orient'], smpl_data['body_pose'], smpl_data['transl'], smpl_data['betas']
-            ret['global_orient'].append(global_orient)
-            ret['body_pose'].append(body_pose)
-            ret['transl'].append(transl)
-            ret['betas'].append(betas)
-
-            if self.body_model == 'smplx': # additionally load smplx attributes
-                ret['left_hand_pose'].append(smpl_data['left_hand_pose'])
-                ret['right_hand_pose'].append(smpl_data['right_hand_pose'])
-                ret['jaw_pose'].append(smpl_data['jaw_pose'])
-                ret['leye_pose'].append(smpl_data['leye_pose'])
-                ret['reye_pose'].append(smpl_data['reye_pose'])
-                ret['expression'].append(smpl_data['expression'])
-                pose = np.concatenate(
-                    [global_orient, body_pose, 
-                     smpl_data['jaw_pose'], smpl_data['leye_pose'], smpl_data['reye_pose'], 
-                     smpl_data['left_hand_pose'], smpl_data['right_hand_pose']], axis=0
-                )
-
-               
-
-            elif self.body_model == 'smpl':
-                pose = np.concatenate([global_orient, body_pose], axis=0)
-            else:
-                raise ValueError(f"Body model {self.body_model} not supported")
-
-            ret['pose'].append(pose)
-
-            
-            # ---- scan mesh ----
-            scan_mesh_fname = os.path.join(take_dir, 'Meshes_pkl', 'mesh-f{}.pkl'.format(sampled_frame))
-            scan_mesh = load_pickle(scan_mesh_fname)
-            scan_mesh['uv_path'] = scan_mesh_fname.replace('mesh-f', 'atlas-f')
-
-            ret['scan_mesh'].append(scan_mesh)
-            ret['scan_rotation'].append(torch.tensor(scan_rotation).float())
-            ret['scan_mesh_verts'].append(torch.tensor(scan_mesh['vertices']).float()) # - transl[None, :]).float())
-            ret['scan_mesh_verts_centered'].append(torch.tensor(scan_mesh['vertices'] - transl[None, :]).float())
-            ret['scan_mesh_faces'].append(torch.tensor(scan_mesh['faces']).long())
-            ret['scan_mesh_colors'].append(torch.tensor(scan_mesh['colors']).float())
-
-            # ---- images ----
-            img_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'images', 'capture-f{}.png'.format(sampled_frame))
-            mask_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'masks', 'mask-f{}.png'.format(sampled_frame))
-            
-            # Load images and apply transforms
-            img = load_image(img_fname)
-            mask = load_image(mask_fname)
-            
-            # Convert to PIL Images for transforms
-            img_pil = Image.fromarray(img)
-            mask_pil = Image.fromarray(mask)
-            
-            # Apply transforms
-            # img_transformed = self.normalise(self.transform(img_pil))
-            img_transformed = self.transform(img_pil)
-            mask_transformed = self.mask_transform(mask_pil).squeeze()
-
-            sapiens_image = sapiens_transform(img_pil)
-
-            ret['sapiens_images'].append(sapiens_image)
-            ret['imgs'].append(img_transformed)
-            ret['masks'].append(mask_transformed)
-
-
-            # lbs_weights_fname = os.path.join(take_dir, 'Capture', sampled_cameras[i], 'lbs_images', 'lbs_image-f{}.pt'.format(sampled_frame))
-            # lbs_weights_fname = '/scratch/u5au/chexuan.u5au/4DDress/00122/Inner/Take2/Capture/0076/lbs_images/lbs_image-f00011.pt'
-            # lbs_weights = torch.load(lbs_weights_fname, map_location='cpu')
-            # print(f"Loaded lbs_weights type: {type(lbs_weights)}, is_sparse: {lbs_weights.is_sparse if hasattr(lbs_weights, 'is_sparse') else 'N/A'}")
-            # ret['smpl_w_maps'].append(lbs_weights)
-
-
-        ret['imgs'] = torch.tensor(np.stack(ret['imgs']))
-        ret['masks'] = torch.tensor(np.stack(ret['masks']))
-        ret['R'] = torch.tensor(np.stack(ret['R']))
-        ret['T'] = torch.tensor(np.stack(ret['T']))
-        ret['K'] = torch.tensor(np.stack(ret['K']))
-        ret['global_orient'] = torch.tensor(np.stack(ret['global_orient']))
-        ret['body_pose'] = torch.tensor(np.stack(ret['body_pose']))
-        ret['pose'] = torch.tensor(np.stack(ret['pose']))
-        ret['transl'] = torch.tensor(np.stack(ret['transl']))
-        ret['betas'] = torch.tensor(np.stack(ret['betas']))
-        ret['scan_rotation'] = torch.tensor(np.stack(ret['scan_rotation']))
-        ret['sapiens_images'] = torch.tensor(np.stack(ret['sapiens_images']))
-        # ret['smpl_w_maps'] = torch.stack(ret['smpl_w_maps'])
-        if self.body_model == 'smplx':
-            ret['left_hand_pose'] = torch.tensor(np.stack(ret['left_hand_pose']))
-            ret['right_hand_pose'] = torch.tensor(np.stack(ret['right_hand_pose']))
-            ret['jaw_pose'] = torch.tensor(np.stack(ret['jaw_pose']))
-            ret['leye_pose'] = torch.tensor(np.stack(ret['leye_pose']))
-            ret['reye_pose'] = torch.tensor(np.stack(ret['reye_pose']))
-            ret['expression'] = torch.tensor(np.stack(ret['expression']))
-
-        return ret
-
 
 
 def _no_annotations(fig):
@@ -317,11 +72,162 @@ def _set_scatter_limits(ax, x, elev=10, azim=90):
     ax.zaxis.set_major_locator(plt.MaxNLocator(3))
 
 
+def _move_to_device(sample, device):
+    """Recursively move tensors within nested containers to device."""
+    if isinstance(sample, torch.Tensor):
+        return sample.to(device)
+    if isinstance(sample, dict):
+        return {k: _move_to_device(v, device) for k, v in sample.items()}
+    if isinstance(sample, list):
+        return [_move_to_device(v, device) for v in sample]
+    if isinstance(sample, tuple):
+        return tuple(_move_to_device(v, device) for v in sample)
+    return sample
+
+
+def _get_confidence_threshold_from_percentage(confidence, image_mask, mask_percentage=0.0):
+    if hasattr(confidence, 'cpu'):
+        confidence = confidence.cpu().detach().numpy()
+    if hasattr(image_mask, 'cpu'):
+        image_mask = image_mask.cpu().detach().numpy()
+    
+    image_mask = image_mask.astype(bool)
+    
+    confidence_flat = confidence.flatten()
+    mask_flat = image_mask.flatten()
+    
+    foreground_conf = confidence_flat[mask_flat]
+    
+    percentile = mask_percentage * 100
+    computed_threshold = np.percentile(foreground_conf, percentile)
+    
+    return computed_threshold
+
+
+
+
+class AdHocDataset(THumanDataset):
+    def __init__(
+        self, cfg, 
+        ids=None, 
+        sampled_scan_ids=['2438', '2439', '2440', '2441', '2442'], 
+        sampled_cameras=['000', '090', '180', '270', '000']
+    ):
+        super().__init__(cfg, ids)
+        self.ids = ids
+        self.sampled_scan_ids = sampled_scan_ids
+        self.sampled_cameras = sampled_cameras
+
+
+        self.crop_transform = transforms.Compose(
+            [
+                transforms.Resize(self.img_size),
+                transforms.ToTensor(),
+            ]
+        )
+
+
+    def __len__(self):
+        return 1
+    
+    def __getitem__(self, index):
+        ret = defaultdict(list)
+        ret['dataset'] = 'THuman'
+
+        N, K = 4, 5 
+
+        subject_id = self.ids[index]
+        gender = self.metadata[subject_id]['gender']
+        ret['gender'] = gender
+
+        scans_ids = self.metadata[subject_id]['scans']
+        sampled_scan_ids = self.sampled_scan_ids
+        ret['scan_ids'] = sampled_scan_ids
+        
+        ret['camera_ids'] = self.sampled_cameras
+
+        for i, scan_id in enumerate(sampled_scan_ids):
+
+            img_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, 'render', f'{self.sampled_cameras[i]}.png')
+            rgba = Image.open(img_fname).convert('RGBA')
+            
+            alpha = np.array(rgba.split()[-1])
+            mask = (alpha > 127).astype(np.uint8) * 255
+
+            img = np.array(rgba.convert('RGB'))
+
+            img_pil = Image.fromarray(img)
+            mask_pil = Image.fromarray(mask)
+
+            sapiens_img_transformed = self.sapiens_transform(img_pil)
+            img_transformed = self.crop_transform(img_pil)
+            mask_transformed = self.mask_transform(mask_pil).squeeze(-3)
+
+            
+            ret['imgs'].append(img_transformed)
+            ret['masks'].append(mask_transformed)
+            ret['sapiens_images'].append(sapiens_img_transformed)
+
+
+            smplx_fname = os.path.join(THUMAN_PATH, 'smplx', scan_id, f'smplx_param.pkl')
+            smplx_param = np.load(smplx_fname, allow_pickle=True)
+            smplx_param['left_hand_pose'] = smplx_param['left_hand_pose'][:, :12]
+            smplx_param['right_hand_pose'] = smplx_param['right_hand_pose'][:, :12]
+            if scan_id >= '0526':
+                global_orient = torch.tensor(smplx_param['global_orient'])
+                global_orient = matrix_to_euler_angles(axis_angle_to_matrix(global_orient), 'XYZ') + torch.tensor([-torch.pi/2, 0., 0.])
+                smplx_param['global_orient'] = matrix_to_axis_angle(euler_angles_to_matrix(global_orient, 'XYZ')).numpy()
+
+            ret['smplx_param'].append(smplx_param)
+            for k, v in smplx_param.items():
+                ret[k].append(v)
+
+            scan_fname = os.path.join(THUMAN_PATH, 'cleaned', f'{scan_id}.pkl')
+            scan = load_pickle(scan_fname)
+            ret['scan_verts'].append(torch.tensor(scan['scan_verts']).float())
+            ret['scan_faces'].append(torch.tensor(scan['scan_faces']).long())
+
+
+            calib_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, 'calib', f'{self.sampled_cameras[i]}.txt')
+            calib = np.loadtxt(calib_fname)
+            extrinsic = calib[:4].reshape(4,4)
+            intrinsic = calib[4:].reshape(4,4)
+
+            intrinsic = uv_to_pixel_space(intrinsic)
+            intrinsic[0, 2] = 256
+            intrinsic[1, 2] = 256
+
+            extrinsic = torch.tensor(extrinsic).float()
+            intrinsic = torch.tensor(intrinsic).float()
+
+            cam_R, cam_T = custom_opengl2pytorch3d(extrinsic)
+            ret['cam_R'].append(cam_R)
+            ret['cam_T'].append(cam_T)
+            ret['cam_K'].append(intrinsic)
+
+            w_maps_dir_fname = os.path.join(THUMAN_PATH, 'render_persp/thuman2_36views', scan_id, f'{scan_id}_w_maps_sparse', f'{self.sampled_cameras[i]}.npz')
+            w_map = load_w_maps_sparse(w_maps_dir_fname)  # Shape: (512, 512, 55)
+            assert w_map.shape == (512, 512, 55)
+            w_map = self.vc_map_transform(w_map)
+            ret['smpl_w_maps'].append(w_map)
+
+        for key in list(ret.keys()):
+            if isinstance(ret[key], (list, tuple)) and len(ret[key]) > 0:
+                try:
+                    ret[key] = torch.stack([t if torch.is_tensor(t) else torch.tensor(t) for t in ret[key]])
+                except:
+                    pass
+        return ret
+
+
+
 class Solver:
-    def __init__(self, id, take, frames, cameras, novel_pose_path, load_path):
-        self.id = id
-        self.take = take
+    def __init__(self, subject_id, scan_ids, cameras, novel_pose_path, load_path, save_name):
+        self.subject_id = subject_id
+        self.scan_ids = scan_ids
+        self.cameras = cameras
         self.novel_pose_path = novel_pose_path
+        self.save_name = save_name
 
         self.stride = 2
 
@@ -343,7 +249,7 @@ class Solver:
 
         self.load_pretrained(model=self.model, load_path=load_path)
 
-        self.dataset = AdHocDataset(cfg, ids=[id], takes=[take], frames=frames, cameras=cameras)
+        self.dataset = AdHocDataset(cfg, ids=[subject_id], sampled_scan_ids=scan_ids, sampled_cameras=cameras)
         self.dataloader = DataLoader(self.dataset, batch_size=1, shuffle=False, collate_fn=d4dress_collate_fn)
 
         
@@ -353,11 +259,11 @@ class Solver:
         init_batch = next(iter(self.dataloader))
         init_batch = _move_to_device(init_batch, self.device)
         
-        vc_ret = self.model.build_avatar(init_batch)
+        vc_ret = self.model.build_avatar_thuman(init_batch)
         for k, v in vc_ret.items():
             preds[k] = v
     
-        novel_poses = self.get_novel_poses(novel_pose_path)
+        novel_poses = self.get_novel_poses(self.novel_pose_path)
 
 
         
@@ -391,24 +297,6 @@ class Solver:
         preds['vp_list'] = vp_list
 
         self.visualise(preds, init_batch)
-
-        # Save predictions and batch data
-        logger.info("Saving predictions and batch data...")
-        
-        # Create output directory if it doesn't exist
-        # os.makedirs('app/avatar_outputs', exist_ok=True)
-        
-        # Save vp_list
-        # with open('app/avatar_outputs/vp_list.pkl', 'wb') as f:
-        #     pickle.dump(vp_list, f)
-            
-        # # Save full predictions dict
-        # with open('app/avatar_outputs/preds.pkl', 'wb') as f:
-        #     pickle.dump(preds, f)
-            
-        # # Save initial batch
-        # with open('app/avatar_outputs/init_batch.pkl', 'wb') as f:
-        #     pickle.dump(init_batch, f)
 
         return vp_list
     
@@ -527,12 +415,7 @@ class Solver:
 
         self.x = x
 
-        self.gen_gt_animation(gt_scan_path)
-
-
-            
-
-
+        # self.gen_gt_animation(gt_scan_path)
 
         # Save individual subplots for gif
         frames = []
@@ -568,7 +451,7 @@ class Solver:
         
         # Save as gif
         frames[0].save(
-            f'Animations/{self.id}_{self.take}_animation.gif',
+            f'{self.save_name}.gif',
             save_all=True,
             append_images=frames[1:],
             duration=100, # 500ms per frame
@@ -609,33 +492,13 @@ class Solver:
             
         # Save vp_init as gif
         vp_init_frames[0].save(
-            f'Animations/{self.id}_{self.take}_vp_init_animation.gif',
+            f'{self.save_name}_vp_init.gif',
             save_all=True,
             append_images=vp_init_frames[1:],
             duration=100, # 500ms per frame
             loop=0,
             dpi=(200, 200) # Higher DPI for better quality
         )
-
-
-            
-        # fig = plt.figure(figsize=(subfig_size * num_cols, subfig_size * num_rows))
-        # r = 0
-
-
-        # for i in range(num_total_plots):
-        #     verts = predictions['vp_list'][i]['vp'][0, -1, ...].cpu().detach().numpy() # B K N H W 3 -> N H W 3
-        #     verts = verts[scatter_mask]
-        #     ax = fig.add_subplot(num_rows, num_cols, i+1, projection='3d')
-        #     ax.scatter(verts[:, 0], 
-        #             verts[:, 1], 
-        #             verts[:, 2], c=color, s=s, alpha=gt_alpha)
-        #     ax.set_title(f'pred $V^{{{i+1}}}$')
-        #     _set_scatter_limits(ax, x)
-
-        # plt.tight_layout()
-        # plt.savefig(f'{self.id}_{self.take}_animation.png', dpi=200)
-        # plt.close()
 
 
     def gen_gt_animation(self, path):
@@ -681,7 +544,7 @@ class Solver:
         plt.close(gt_fig)
 
         gt_frames[0].save(
-            f'Animations/{self.id}_{self.take}_gt_animation.gif',
+            f'{self.save_name}_gt.gif',
             save_all=True,
             append_images=gt_frames[1:],
             duration=100, # 500ms per frame
@@ -723,40 +586,15 @@ if __name__ == '__main__':
     assert (args.load_from_ckpt is not None), 'Specify load_from_ckpt'
 
 
-    # id = '00147'
-    # take = 'Take6'
-    # frames = ['00021', '00021', '00021', '00021', '00021']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
-
-
-
-    # id = '00187'
-    # take = 'Take1'
-    # frames = ['00011', '00011', '00011', '00011', '00011']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
-
-    # id = '00188'
-    # take = 'Take1'
-    # frames = ['00021', '00021', '00021', '00021', '00021']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
-
-
-    id = '00134'
-    take = 'Take3'
-    frames = ['00006', '00021', '00041', '00061', '00081']
-    cameras = ['0004', '0028', '0052', '0076', '0076']
+    
+    subject_id = '684'
+    scan_ids = ['2438', '2439', '2440', '2441', '2442']
+    cameras = ['000', '090', '180', '270', '000']
     novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/SMPLX'
     gt_scan_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/Meshes_pkl'
 
+    save_name = f'Animations/THuman_{subject_id}'
 
 
-    # id = '00148'
-    # take = 'Take1'
-    # frames = ['00021', '00041', '00109', '00137', '00021']
-    # cameras = ['0004', '0028', '0052', '0076', '0076']
-    # novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/SMPLX'
-    # gt_scan_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/Meshes_pkl'
-
-
-    solver = Solver(id, take, frames, cameras, novel_pose_path, args.load_from_ckpt)
+    solver = Solver(subject_id, scan_ids, cameras, novel_pose_path, args.load_from_ckpt, save_name)
     solver.run()

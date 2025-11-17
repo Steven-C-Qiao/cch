@@ -1,0 +1,719 @@
+(dev) chexuan.u5au@nid010061:/scratch/u5au/chexuan.u5au/from_u5aa/cch> pip install rtree
+Collecting rtree
+  Downloading rtree-1.4.1-py3-none-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl.metadata (2.1 kB)
+Downloading rtree-1.4.1-py3-none-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl (459 kB)
+Installing collected packages: rtree
+Successfully installed rtree-1.4.1
+(dev) chexuan.u5au@nid010061:/scratch/u5au/chexuan.u5au/from_u5aa/cch> python compute_p2s.py
+Found 71 GT mesh files
+Found 71 predicted point cloud files
+Loading predicted point cloud: pred_vp_17435.ply
+Processing: pred_vp_17435.ply -> gt_vp_17435.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 80172 points
+  Mean distance: 0.683 cm
+  Median distance: 0.544 cm
+  Std distance: 0.558 cm
+
+Loading predicted point cloud: pred_vp_17436.ply
+Processing: pred_vp_17436.ply -> gt_vp_17436.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 83244 points
+  Mean distance: 0.822 cm
+  Median distance: 0.610 cm
+  Std distance: 0.765 cm
+
+Loading predicted point cloud: pred_vp_17437.ply
+Processing: pred_vp_17437.ply -> gt_vp_17437.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 90380 points
+  Mean distance: 0.645 cm
+  Median distance: 0.488 cm
+  Std distance: 0.592 cm
+
+Loading predicted point cloud: pred_vp_17438.ply
+Processing: pred_vp_17438.ply -> gt_vp_17438.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 84128 points
+  Mean distance: 0.713 cm
+  Median distance: 0.520 cm
+  Std distance: 0.691 cm
+
+Loading predicted point cloud: pred_vp_17439.ply
+Processing: pred_vp_17439.ply -> gt_vp_17439.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 82088 points
+  Mean distance: 0.956 cm
+  Median distance: 0.622 cm
+  Std distance: 1.037 cm
+
+Loading predicted point cloud: pred_vp_17440.ply
+Processing: pred_vp_17440.ply -> gt_vp_17440.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 91130 points
+  Mean distance: 0.733 cm
+  Median distance: 0.555 cm
+  Std distance: 0.646 cm
+
+Loading predicted point cloud: pred_vp_17441.ply
+Processing: pred_vp_17441.ply -> gt_vp_17441.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 92710 points
+  Mean distance: 0.591 cm
+  Median distance: 0.470 cm
+  Std distance: 0.496 cm
+
+Loading predicted point cloud: pred_vp_17442.ply
+Processing: pred_vp_17442.ply -> gt_vp_17442.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 83428 points
+  Mean distance: 0.820 cm
+  Median distance: 0.574 cm
+  Std distance: 0.803 cm
+
+Loading predicted point cloud: pred_vp_17443.ply
+Processing: pred_vp_17443.ply -> gt_vp_17443.ply
+  GT mesh: 40000 vertices, 80000 faces
+  Predicted points: 97500 points
+  Mean distance: 0.750 cm
+  Median distance: 0.571 cm
+  Std distance: 0.660 cm
+
+Loading predicted point cloud: pred_vp_17444.ply
+Processing: pred_vp_17444.ply -> gt_vp_17444.ply
+  GT mesh: 39998 vertices, 80000 faces
+  Predicted points: 83456 points
+  Mean distance: 1.220 cm
+  Median distance: 0.859 cm
+  Std distance: 1.110 cm
+
+Loading predicted point cloud: pred_vp_17445.ply
+Processing: pred_vp_17445.ply -> gt_vp_17445.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 79770 points
+  Mean distance: 0.663 cm
+  Median distance: 0.485 cm
+  Std distance: 0.638 cm
+
+Loading predicted point cloud: pred_vp_17446.ply
+Processing: pred_vp_17446.ply -> gt_vp_17446.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 81606 points
+  Mean distance: 0.614 cm
+  Median distance: 0.487 cm
+  Std distance: 0.516 cm
+
+Loading predicted point cloud: pred_vp_17447.ply
+Processing: pred_vp_17447.ply -> gt_vp_17447.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 76945 points
+  Mean distance: 0.581 cm
+  Median distance: 0.440 cm
+  Std distance: 0.513 cm
+
+Loading predicted point cloud: pred_vp_17448.ply
+Processing: pred_vp_17448.ply -> gt_vp_17448.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 73325 points
+  Mean distance: 0.622 cm
+  Median distance: 0.470 cm
+  Std distance: 0.560 cm
+
+Loading predicted point cloud: pred_vp_17449.ply
+Processing: pred_vp_17449.ply -> gt_vp_17449.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 78707 points
+  Mean distance: 0.733 cm
+  Median distance: 0.524 cm
+  Std distance: 0.748 cm
+
+Loading predicted point cloud: pred_vp_17450.ply
+Processing: pred_vp_17450.ply -> gt_vp_17450.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 85165 points
+  Mean distance: 0.624 cm
+  Median distance: 0.443 cm
+  Std distance: 0.607 cm
+
+Loading predicted point cloud: pred_vp_17451.ply
+Processing: pred_vp_17451.ply -> gt_vp_17451.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 82792 points
+  Mean distance: 0.792 cm
+  Median distance: 0.579 cm
+  Std distance: 0.707 cm
+
+Loading predicted point cloud: pred_vp_17452.ply
+Processing: pred_vp_17452.ply -> gt_vp_17452.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 80949 points
+  Mean distance: 0.589 cm
+  Median distance: 0.431 cm
+  Std distance: 0.568 cm
+
+Loading predicted point cloud: pred_vp_17453.ply
+Processing: pred_vp_17453.ply -> gt_vp_17453.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 84580 points
+  Mean distance: 0.754 cm
+  Median distance: 0.570 cm
+  Std distance: 0.676 cm
+
+Loading predicted point cloud: pred_vp_17454.ply
+Processing: pred_vp_17454.ply -> gt_vp_17454.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 86384 points
+  Mean distance: 0.751 cm
+  Median distance: 0.518 cm
+  Std distance: 0.775 cm
+
+Loading predicted point cloud: pred_vp_17455.ply
+Processing: pred_vp_17455.ply -> gt_vp_17455.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 88234 points
+  Mean distance: 0.926 cm
+  Median distance: 0.558 cm
+  Std distance: 1.050 cm
+
+Loading predicted point cloud: pred_vp_17456.ply
+Processing: pred_vp_17456.ply -> gt_vp_17456.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 71571 points
+  Mean distance: 0.610 cm
+  Median distance: 0.471 cm
+  Std distance: 0.548 cm
+
+Loading predicted point cloud: pred_vp_17457.ply
+Processing: pred_vp_17457.ply -> gt_vp_17457.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 80328 points
+  Mean distance: 0.670 cm
+  Median distance: 0.508 cm
+  Std distance: 0.619 cm
+
+Loading predicted point cloud: pred_vp_17458.ply
+Processing: pred_vp_17458.ply -> gt_vp_17458.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 80863 points
+  Mean distance: 0.813 cm
+  Median distance: 0.533 cm
+  Std distance: 0.788 cm
+
+Loading predicted point cloud: pred_vp_17459.ply
+Processing: pred_vp_17459.ply -> gt_vp_17459.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 77322 points
+  Mean distance: 0.708 cm
+  Median distance: 0.495 cm
+  Std distance: 0.682 cm
+
+Loading predicted point cloud: pred_vp_17460.ply
+Processing: pred_vp_17460.ply -> gt_vp_17460.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 86450 points
+  Mean distance: 0.787 cm
+  Median distance: 0.529 cm
+  Std distance: 0.776 cm
+
+Loading predicted point cloud: pred_vp_17461.ply
+Processing: pred_vp_17461.ply -> gt_vp_17461.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 88332 points
+  Mean distance: 0.673 cm
+  Median distance: 0.505 cm
+  Std distance: 0.611 cm
+
+Loading predicted point cloud: pred_vp_17462.ply
+Processing: pred_vp_17462.ply -> gt_vp_17462.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 82927 points
+  Mean distance: 0.613 cm
+  Median distance: 0.431 cm
+  Std distance: 0.618 cm
+
+Loading predicted point cloud: pred_vp_17463.ply
+Processing: pred_vp_17463.ply -> gt_vp_17463.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 87131 points
+  Mean distance: 0.691 cm
+  Median distance: 0.518 cm
+  Std distance: 0.662 cm
+
+Loading predicted point cloud: pred_vp_17464.ply
+Processing: pred_vp_17464.ply -> gt_vp_17464.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 86363 points
+  Mean distance: 0.754 cm
+  Median distance: 0.599 cm
+  Std distance: 0.646 cm
+
+Loading predicted point cloud: pred_vp_17465.ply
+Processing: pred_vp_17465.ply -> gt_vp_17465.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 91886 points
+  Mean distance: 0.663 cm
+  Median distance: 0.504 cm
+  Std distance: 0.591 cm
+
+Loading predicted point cloud: pred_vp_17466.ply
+Processing: pred_vp_17466.ply -> gt_vp_17466.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 75075 points
+  Mean distance: 0.718 cm
+  Median distance: 0.502 cm
+  Std distance: 0.729 cm
+
+Loading predicted point cloud: pred_vp_17467.ply
+Processing: pred_vp_17467.ply -> gt_vp_17467.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 75879 points
+  Mean distance: 0.531 cm
+  Median distance: 0.381 cm
+  Std distance: 0.513 cm
+
+Loading predicted point cloud: pred_vp_17468.ply
+Processing: pred_vp_17468.ply -> gt_vp_17468.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 85529 points
+  Mean distance: 0.599 cm
+  Median distance: 0.464 cm
+  Std distance: 0.541 cm
+
+Loading predicted point cloud: pred_vp_17469.ply
+Processing: pred_vp_17469.ply -> gt_vp_17469.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 86256 points
+  Mean distance: 0.628 cm
+  Median distance: 0.455 cm
+  Std distance: 0.577 cm
+
+Loading predicted point cloud: pred_vp_17470.ply
+Processing: pred_vp_17470.ply -> gt_vp_17470.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 81239 points
+  Mean distance: 0.745 cm
+  Median distance: 0.542 cm
+  Std distance: 0.694 cm
+
+Loading predicted point cloud: pred_vp_17471.ply
+Processing: pred_vp_17471.ply -> gt_vp_17471.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 75241 points
+  Mean distance: 0.640 cm
+  Median distance: 0.434 cm
+  Std distance: 0.656 cm
+
+Loading predicted point cloud: pred_vp_17472.ply
+Processing: pred_vp_17472.ply -> gt_vp_17472.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 84432 points
+  Mean distance: 0.803 cm
+  Median distance: 0.601 cm
+  Std distance: 0.713 cm
+
+Loading predicted point cloud: pred_vp_17473.ply
+Processing: pred_vp_17473.ply -> gt_vp_17473.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 80606 points
+  Mean distance: 0.650 cm
+  Median distance: 0.502 cm
+  Std distance: 0.614 cm
+
+Loading predicted point cloud: pred_vp_17474.ply
+Processing: pred_vp_17474.ply -> gt_vp_17474.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 85470 points
+  Mean distance: 0.764 cm
+  Median distance: 0.562 cm
+  Std distance: 0.701 cm
+
+Loading predicted point cloud: pred_vp_17475.ply
+Processing: pred_vp_17475.ply -> gt_vp_17475.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 86409 points
+  Mean distance: 0.715 cm
+  Median distance: 0.530 cm
+  Std distance: 0.662 cm
+
+Loading predicted point cloud: pred_vp_17476.ply
+Processing: pred_vp_17476.ply -> gt_vp_17476.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 79336 points
+  Mean distance: 0.897 cm
+  Median distance: 0.666 cm
+  Std distance: 0.834 cm
+
+Loading predicted point cloud: pred_vp_17477.ply
+Processing: pred_vp_17477.ply -> gt_vp_17477.ply
+  GT mesh: 40000 vertices, 80000 faces
+  Predicted points: 77003 points
+  Mean distance: 1.014 cm
+  Median distance: 0.706 cm
+  Std distance: 0.973 cm
+
+Loading predicted point cloud: pred_vp_17478.ply
+Processing: pred_vp_17478.ply -> gt_vp_17478.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 76421 points
+  Mean distance: 0.707 cm
+  Median distance: 0.502 cm
+  Std distance: 0.675 cm
+
+Loading predicted point cloud: pred_vp_17479.ply
+Processing: pred_vp_17479.ply -> gt_vp_17479.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 77078 points
+  Mean distance: 0.822 cm
+  Median distance: 0.610 cm
+  Std distance: 0.754 cm
+
+Loading predicted point cloud: pred_vp_17480.ply
+Processing: pred_vp_17480.ply -> gt_vp_17480.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 83795 points
+  Mean distance: 0.685 cm
+  Median distance: 0.469 cm
+  Std distance: 0.672 cm
+
+Loading predicted point cloud: pred_vp_17481.ply
+Processing: pred_vp_17481.ply -> gt_vp_17481.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 80512 points
+  Mean distance: 0.684 cm
+  Median distance: 0.512 cm
+  Std distance: 0.616 cm
+
+Loading predicted point cloud: pred_vp_17482.ply
+Processing: pred_vp_17482.ply -> gt_vp_17482.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 82210 points
+  Mean distance: 0.712 cm
+  Median distance: 0.520 cm
+  Std distance: 0.661 cm
+
+Loading predicted point cloud: pred_vp_17483.ply
+Processing: pred_vp_17483.ply -> gt_vp_17483.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 87206 points
+  Mean distance: 0.684 cm
+  Median distance: 0.515 cm
+  Std distance: 0.625 cm
+
+Loading predicted point cloud: pred_vp_17484.ply
+Processing: pred_vp_17484.ply -> gt_vp_17484.ply
+  GT mesh: 40000 vertices, 80000 faces
+  Predicted points: 71292 points
+  Mean distance: 0.716 cm
+  Median distance: 0.504 cm
+  Std distance: 0.671 cm
+
+Loading predicted point cloud: pred_vp_17485.ply
+Processing: pred_vp_17485.ply -> gt_vp_17485.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 76683 points
+  Mean distance: 0.707 cm
+  Median distance: 0.526 cm
+  Std distance: 0.656 cm
+
+Loading predicted point cloud: pred_vp_17486.ply
+Processing: pred_vp_17486.ply -> gt_vp_17486.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 84321 points
+  Mean distance: 0.788 cm
+  Median distance: 0.571 cm
+  Std distance: 0.724 cm
+
+Loading predicted point cloud: pred_vp_17487.ply
+Processing: pred_vp_17487.ply -> gt_vp_17487.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 81849 points
+  Mean distance: 0.835 cm
+  Median distance: 0.559 cm
+  Std distance: 0.908 cm
+
+Loading predicted point cloud: pred_vp_17488.ply
+Processing: pred_vp_17488.ply -> gt_vp_17488.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 81858 points
+  Mean distance: 0.675 cm
+  Median distance: 0.461 cm
+  Std distance: 0.691 cm
+
+Loading predicted point cloud: pred_vp_17489.ply
+Processing: pred_vp_17489.ply -> gt_vp_17489.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 80629 points
+  Mean distance: 0.957 cm
+  Median distance: 0.671 cm
+  Std distance: 0.977 cm
+
+Loading predicted point cloud: pred_vp_17490.ply
+Processing: pred_vp_17490.ply -> gt_vp_17490.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 72841 points
+  Mean distance: 0.641 cm
+  Median distance: 0.473 cm
+  Std distance: 0.613 cm
+
+Loading predicted point cloud: pred_vp_17491.ply
+Processing: pred_vp_17491.ply -> gt_vp_17491.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 90869 points
+  Mean distance: 0.723 cm
+  Median distance: 0.496 cm
+  Std distance: 0.735 cm
+
+Loading predicted point cloud: pred_vp_17492.ply
+Processing: pred_vp_17492.ply -> gt_vp_17492.ply
+  GT mesh: 40000 vertices, 80000 faces
+  Predicted points: 84728 points
+  Mean distance: 0.751 cm
+  Median distance: 0.588 cm
+  Std distance: 0.633 cm
+
+Loading predicted point cloud: pred_vp_17493.ply
+Processing: pred_vp_17493.ply -> gt_vp_17493.ply
+  GT mesh: 40000 vertices, 80000 faces
+  Predicted points: 85816 points
+  Mean distance: 0.745 cm
+  Median distance: 0.579 cm
+  Std distance: 0.640 cm
+
+Loading predicted point cloud: pred_vp_17494.ply
+Processing: pred_vp_17494.ply -> gt_vp_17494.ply
+  GT mesh: 40000 vertices, 80000 faces
+  Predicted points: 80174 points
+  Mean distance: 0.767 cm
+  Median distance: 0.547 cm
+  Std distance: 0.755 cm
+
+Loading predicted point cloud: pred_vp_17495.ply
+Processing: pred_vp_17495.ply -> gt_vp_17495.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 81708 points
+  Mean distance: 0.723 cm
+  Median distance: 0.523 cm
+  Std distance: 0.664 cm
+
+Loading predicted point cloud: pred_vp_17496.ply
+Processing: pred_vp_17496.ply -> gt_vp_17496.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 74168 points
+  Mean distance: 0.737 cm
+  Median distance: 0.526 cm
+  Std distance: 0.714 cm
+
+Loading predicted point cloud: pred_vp_17497.ply
+Processing: pred_vp_17497.ply -> gt_vp_17497.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 78147 points
+  Mean distance: 0.790 cm
+  Median distance: 0.600 cm
+  Std distance: 0.733 cm
+
+Loading predicted point cloud: pred_vp_17498.ply
+Processing: pred_vp_17498.ply -> gt_vp_17498.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 78479 points
+  Mean distance: 0.670 cm
+  Median distance: 0.507 cm
+  Std distance: 0.608 cm
+
+Loading predicted point cloud: pred_vp_17499.ply
+Processing: pred_vp_17499.ply -> gt_vp_17499.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 78200 points
+  Mean distance: 0.744 cm
+  Median distance: 0.530 cm
+  Std distance: 0.751 cm
+
+Loading predicted point cloud: pred_vp_17500.ply
+Processing: pred_vp_17500.ply -> gt_vp_17500.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 80671 points
+  Mean distance: 0.713 cm
+  Median distance: 0.501 cm
+  Std distance: 0.705 cm
+
+Loading predicted point cloud: pred_vp_17501.ply
+Processing: pred_vp_17501.ply -> gt_vp_17501.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 81743 points
+  Mean distance: 0.662 cm
+  Median distance: 0.478 cm
+  Std distance: 0.616 cm
+
+Loading predicted point cloud: pred_vp_17502.ply
+Processing: pred_vp_17502.ply -> gt_vp_17502.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 81413 points
+  Mean distance: 0.852 cm
+  Median distance: 0.646 cm
+  Std distance: 0.762 cm
+
+Loading predicted point cloud: pred_vp_17503.ply
+Processing: pred_vp_17503.ply -> gt_vp_17503.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 85374 points
+  Mean distance: 0.664 cm
+  Median distance: 0.494 cm
+  Std distance: 0.624 cm
+
+Loading predicted point cloud: pred_vp_17504.ply
+Processing: pred_vp_17504.ply -> gt_vp_17504.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 81349 points
+  Mean distance: 0.621 cm
+  Median distance: 0.454 cm
+  Std distance: 0.588 cm
+
+Loading predicted point cloud: pred_vp_17505.ply
+Processing: pred_vp_17505.ply -> gt_vp_17505.ply
+  GT mesh: 40002 vertices, 80000 faces
+  Predicted points: 82150 points
+  Mean distance: 0.597 cm
+  Median distance: 0.418 cm
+  Std distance: 0.568 cm
+
+============================================================
+Summary:
+============================================================
+Overall mean distance: 0.727 cm
+Overall median distance: 0.529 cm
+Std of mean distances: 0.111 cm
+
+Per-file results:
+  pred_vp_17435.ply: mean=0.683 cm, median=0.544 cm
+  pred_vp_17436.ply: mean=0.822 cm, median=0.610 cm
+  pred_vp_17437.ply: mean=0.645 cm, median=0.488 cm
+  pred_vp_17438.ply: mean=0.713 cm, median=0.520 cm
+  pred_vp_17439.ply: mean=0.956 cm, median=0.622 cm
+  pred_vp_17440.ply: mean=0.733 cm, median=0.555 cm
+  pred_vp_17441.ply: mean=0.591 cm, median=0.470 cm
+  pred_vp_17442.ply: mean=0.820 cm, median=0.574 cm
+  pred_vp_17443.ply: mean=0.750 cm, median=0.571 cm
+  pred_vp_17444.ply: mean=1.220 cm, median=0.859 cm
+  pred_vp_17445.ply: mean=0.663 cm, median=0.485 cm
+  pred_vp_17446.ply: mean=0.614 cm, median=0.487 cm
+  pred_vp_17447.ply: mean=0.581 cm, median=0.440 cm
+  pred_vp_17448.ply: mean=0.622 cm, median=0.470 cm
+  pred_vp_17449.ply: mean=0.733 cm, median=0.524 cm
+  pred_vp_17450.ply: mean=0.624 cm, median=0.443 cm
+  pred_vp_17451.ply: mean=0.792 cm, median=0.579 cm
+  pred_vp_17452.ply: mean=0.589 cm, median=0.431 cm
+  pred_vp_17453.ply: mean=0.754 cm, median=0.570 cm
+  pred_vp_17454.ply: mean=0.751 cm, median=0.518 cm
+  pred_vp_17455.ply: mean=0.926 cm, median=0.558 cm
+  pred_vp_17456.ply: mean=0.610 cm, median=0.471 cm
+  pred_vp_17457.ply: mean=0.670 cm, median=0.508 cm
+  pred_vp_17458.ply: mean=0.813 cm, median=0.533 cm
+  pred_vp_17459.ply: mean=0.708 cm, median=0.495 cm
+  pred_vp_17460.ply: mean=0.787 cm, median=0.529 cm
+  pred_vp_17461.ply: mean=0.673 cm, median=0.505 cm
+  pred_vp_17462.ply: mean=0.613 cm, median=0.431 cm
+  pred_vp_17463.ply: mean=0.691 cm, median=0.518 cm
+  pred_vp_17464.ply: mean=0.754 cm, median=0.599 cm
+  pred_vp_17465.ply: mean=0.663 cm, median=0.504 cm
+  pred_vp_17466.ply: mean=0.718 cm, median=0.502 cm
+  pred_vp_17467.ply: mean=0.531 cm, median=0.381 cm
+  pred_vp_17468.ply: mean=0.599 cm, median=0.464 cm
+  pred_vp_17469.ply: mean=0.628 cm, median=0.455 cm
+  pred_vp_17470.ply: mean=0.745 cm, median=0.542 cm
+  pred_vp_17471.ply: mean=0.640 cm, median=0.434 cm
+  pred_vp_17472.ply: mean=0.803 cm, median=0.601 cm
+  pred_vp_17473.ply: mean=0.650 cm, median=0.502 cm
+  pred_vp_17474.ply: mean=0.764 cm, median=0.562 cm
+  pred_vp_17475.ply: mean=0.715 cm, median=0.530 cm
+  pred_vp_17476.ply: mean=0.897 cm, median=0.666 cm
+  pred_vp_17477.ply: mean=1.014 cm, median=0.706 cm
+  pred_vp_17478.ply: mean=0.707 cm, median=0.502 cm
+  pred_vp_17479.ply: mean=0.822 cm, median=0.610 cm
+  pred_vp_17480.ply: mean=0.685 cm, median=0.469 cm
+  pred_vp_17481.ply: mean=0.684 cm, median=0.512 cm
+  pred_vp_17482.ply: mean=0.712 cm, median=0.520 cm
+  pred_vp_17483.ply: mean=0.684 cm, median=0.515 cm
+  pred_vp_17484.ply: mean=0.716 cm, median=0.504 cm
+  pred_vp_17485.ply: mean=0.707 cm, median=0.526 cm
+  pred_vp_17486.ply: mean=0.788 cm, median=0.571 cm
+  pred_vp_17487.ply: mean=0.835 cm, median=0.559 cm
+  pred_vp_17488.ply: mean=0.675 cm, median=0.461 cm
+  pred_vp_17489.ply: mean=0.957 cm, median=0.671 cm
+  pred_vp_17490.ply: mean=0.641 cm, median=0.473 cm
+  pred_vp_17491.ply: mean=0.723 cm, median=0.496 cm
+  pred_vp_17492.ply: mean=0.751 cm, median=0.588 cm
+  pred_vp_17493.ply: mean=0.745 cm, median=0.579 cm
+  pred_vp_17494.ply: mean=0.767 cm, median=0.547 cm
+  pred_vp_17495.ply: mean=0.723 cm, median=0.523 cm
+  pred_vp_17496.ply: mean=0.737 cm, median=0.526 cm
+  pred_vp_17497.ply: mean=0.790 cm, median=0.600 cm
+  pred_vp_17498.ply: mean=0.670 cm, median=0.507 cm
+  pred_vp_17499.ply: mean=0.744 cm, median=0.530 cm
+  pred_vp_17500.ply: mean=0.713 cm, median=0.501 cm
+  pred_vp_17501.ply: mean=0.662 cm, median=0.478 cm
+  pred_vp_17502.ply: mean=0.852 cm, median=0.646 cm
+  pred_vp_17503.ply: mean=0.664 cm, median=0.494 cm
+  pred_vp_17504.ply: mean=0.621 cm, median=0.454 cm
+  pred_vp_17505.ply: mean=0.597 cm, median=0.418 cm
+
+
+
+
+
+============================================================
+Summary:
+============================================================
+Overall mean distance: 0.750 cm
+Overall median distance: 0.572 cm
+Std of mean distances: 0.080 cm
+
+Per-file results:
+  pred_vp_17435.ply: mean=0.725 cm, median=0.570 cm
+  pred_vp_17436.ply: mean=0.800 cm, median=0.631 cm
+  pred_vp_17437.ply: mean=0.839 cm, median=0.655 cm
+  pred_vp_17438.ply: mean=0.721 cm, median=0.538 cm
+  pred_vp_17439.ply: mean=0.700 cm, median=0.540 cm
+  pred_vp_17440.ply: mean=0.780 cm, median=0.569 cm
+  pred_vp_17441.ply: mean=0.881 cm, median=0.688 cm
+  pred_vp_17442.ply: mean=0.870 cm, median=0.667 cm
+  pred_vp_17443.ply: mean=0.684 cm, median=0.566 cm
+  pred_vp_17444.ply: mean=0.638 cm, median=0.466 cm
+  pred_vp_17445.ply: mean=0.751 cm, median=0.568 cm
+  pred_vp_17446.ply: mean=0.762 cm, median=0.582 cm
+  pred_vp_17447.ply: mean=0.772 cm, median=0.611 cm
+  pred_vp_17448.ply: mean=0.679 cm, median=0.525 cm
+  pred_vp_17449.ply: mean=0.546 cm, median=0.437 cm
+  pred_vp_17450.ply: mean=0.773 cm, median=0.608 cm
+  pred_vp_17451.ply: mean=0.702 cm, median=0.515 cm
+  pred_vp_17452.ply: mean=0.745 cm, median=0.568 cm
+  pred_vp_17453.ply: mean=0.717 cm, median=0.564 cm
+  pred_vp_17454.ply: mean=0.825 cm, median=0.646 cm
+  pred_vp_17455.ply: mean=0.714 cm, median=0.530 cm
+  pred_vp_17456.ply: mean=0.876 cm, median=0.631 cm
+  pred_vp_17457.ply: mean=0.818 cm, median=0.594 cm
+  pred_vp_17458.ply: mean=0.675 cm, median=0.515 cm
+  pred_vp_17459.ply: mean=0.718 cm, median=0.569 cm
+  pred_vp_17460.ply: mean=0.811 cm, median=0.581 cm
+  pred_vp_17461.ply: mean=0.693 cm, median=0.550 cm
+  pred_vp_17462.ply: mean=0.718 cm, median=0.581 cm
+  pred_vp_17463.ply: mean=0.739 cm, median=0.585 cm
+  pred_vp_17464.ply: mean=0.635 cm, median=0.471 cm
+  pred_vp_17465.ply: mean=0.718 cm, median=0.534 cm
+  pred_vp_17466.ply: mean=0.658 cm, median=0.519 cm
+  pred_vp_17467.ply: mean=0.708 cm, median=0.535 cm
+  pred_vp_17468.ply: mean=0.818 cm, median=0.643 cm
+  pred_vp_17469.ply: mean=0.831 cm, median=0.656 cm
+  pred_vp_17470.ply: mean=0.630 cm, median=0.479 cm
+  pred_vp_17471.ply: mean=0.689 cm, median=0.542 cm
+  pred_vp_17472.ply: mean=0.837 cm, median=0.595 cm
+  pred_vp_17473.ply: mean=0.795 cm, median=0.552 cm
+  pred_vp_17474.ply: mean=0.798 cm, median=0.576 cm
+  pred_vp_17475.ply: mean=0.865 cm, median=0.626 cm
+  pred_vp_17476.ply: mean=0.905 cm, median=0.750 cm
+  pred_vp_17477.ply: mean=0.905 cm, median=0.687 cm
+  pred_vp_17478.ply: mean=0.686 cm, median=0.510 cm
+  pred_vp_17479.ply: mean=0.614 cm, median=0.493 cm
+  pred_vp_17480.ply: mean=0.724 cm, median=0.539 cm
+  pred_vp_17481.ply: mean=0.667 cm, median=0.522 cm
+  pred_vp_17482.ply: mean=0.838 cm, median=0.661 cm
+  pred_vp_17483.ply: mean=0.745 cm, median=0.539 cm
+  pred_vp_17484.ply: mean=0.758 cm, median=0.547 cm

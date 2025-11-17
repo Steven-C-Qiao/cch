@@ -1,6 +1,8 @@
 import torch 
 import os 
-
+import trimesh 
+import numpy as np
+from scipy.spatial import cKDTree
 import matplotlib
 matplotlib.use('Agg')  # Set the backend to Agg before importing pyplot
 import matplotlib.pyplot as plt
@@ -45,6 +47,8 @@ class Visualiser(pl.LightningModule):
         self.threshold = cfg.LOSS.CONFIDENCE_THRESHOLD if cfg is not None else 100
         self.mask_percentage = cfg.LOSS.CONFIDENCE_MASK_PERCENTAGE if cfg is not None else 0.0
         self._suffix = ''
+
+        self.counter = 0
 
         # self.threshold = 50
         # print("Visualiser confidence threshold:", self.threshold)
@@ -245,10 +249,11 @@ class Visualiser(pl.LightningModule):
         self._epoch = epoch if epoch is not None else 0
         self._split = split if split else ''
 
-        if batch_idx is not None:
-            self.counter = batch_idx
-        else:
-            self.counter = self.global_step
+        # if batch_idx is not None:
+        #     self.counter = batch_idx
+        # else:
+        #     self.counter = self.global_step
+        
 
         # if 'gt_normal_maps' in batch:
         #     B, K, H, W, C = batch['gt_normal_maps'].shape
@@ -288,10 +293,10 @@ class Visualiser(pl.LightningModule):
             batch
         )
 
-        self.visualise_pbs_pms(
-            predictions,
-            batch
-        )
+        # self.visualise_pbs_pms(
+        #     predictions,
+        #     batch
+        # )
 
         self.visualise_full_pyvista(
             predictions,
@@ -695,6 +700,8 @@ class Visualiser(pl.LightningModule):
             confidence = confidence > threshold_value
         else:
             confidence = np.ones_like(predictions['vc_init'])[..., 0].astype(bool)
+
+
         scatter_mask = scatter_mask * confidence[0].astype(bool)
         
         # If scatter_mask is empty (all confidence below threshold), fall back to image masks only
@@ -978,8 +985,118 @@ class Visualiser(pl.LightningModule):
         plt.savefig(os.path.join(self.save_dir, self._get_filename(f'_{dataset_name}')), dpi=200)
         plt.close()
 
+
+        
+        save=True
+
+        def remove_outliers(points, k=20, threshold=5.0, return_mask=False):
+            """Remove statistical outliers using k-nearest neighbors statistics.
             
+            Args:
+                points: numpy array of shape (N, 3)
+                k: number of nearest neighbors to consider
+                threshold: threshold multiplier for outlier detection
+                return_mask: if True, return (filtered_points, mask) instead of just filtered_points
             
+            Returns:
+                filtered_points if return_mask=False, else (filtered_points, mask) where mask is boolean array
+            """
+            if len(points) < k + 1:
+                if return_mask:
+                    return points, np.ones(len(points), dtype=bool)
+                return points
+            
+            tree = cKDTree(points)
+            distances, _ = tree.query(points, k=k+1)
+            mean_dist = np.mean(distances[:, 1:], axis=1)
+            
+            threshold_value = np.mean(mean_dist) + threshold * np.std(mean_dist)
+            mask = mean_dist < threshold_value
+            
+            filtered_points = points[mask]
+            if return_mask:
+                return filtered_points, mask
+            return filtered_points
+
+        if save:
+            output_save_dir = os.path.join(self.save_dir, 'point_clouds', f'{self.counter:06d}')
+            output_for_vis_save_dir = os.path.join(self.save_dir, 'novel_pose_point_clouds')
+            os.makedirs(output_save_dir, exist_ok=True)
+            os.makedirs(output_for_vis_save_dir, exist_ok=True)
+            
+            if 'scan_mesh_verts_centered' in batch:
+                gt_vp = batch['scan_mesh_verts_centered'][0]  # list of K meshes
+                gt_vp_faces = batch['scan_mesh_faces'][0]  # list of K face arrays
+            elif 'scan_verts' in batch:
+                gt_vp = batch['scan_verts'][0]  # list of K meshes
+                gt_vp_faces = batch['scan_faces'][0]  # list of K face arrays
+
+            pred_vp = predictions['vp'][0] # k n h w 3
+            pred_vp_init = predictions['vp_init'][0] # k n h w 3
+            
+            # Convert colors to uint8 [0, 255] range for trimesh
+            color_uint8 = (color * 255.0).astype(np.uint8)[:, :3]
+            
+            for k in range(K):
+                # # Save GT mesh
+                # gt_points = gt_vp[k].cpu().detach().numpy()
+                # gt_faces = gt_vp_faces[k].cpu().detach().numpy()
+                # trimesh.Trimesh(
+                #     vertices=gt_points,
+                #     faces=gt_faces
+                # ).export(os.path.join(output_save_dir, f'gt_vp_{k:03d}.ply'))
+                
+                # # Save predicted vp point cloud (with colors)
+                # pred_points = pred_vp[k, scatter_mask]
+                # pred_points, outlier_mask = remove_outliers(pred_points, return_mask=True)
+                # # Filter colors to match the points after outlier removal
+                # color_filtered = color_uint8[outlier_mask]
+                # trimesh.PointCloud(
+                #     vertices=pred_points,
+                #     colors=color_filtered
+                # ).export(os.path.join(output_save_dir, f'pred_vp_{k:03d}.ply'))
+                
+                # # Save predicted vp_init point cloud (with colors)
+                # pred_init_points = pred_vp_init[k, scatter_mask]
+                # pred_init_points, outlier_mask_init = remove_outliers(pred_init_points, return_mask=True)
+                # # Filter colors to match the init points after outlier removal
+                # color_init_filtered = color_uint8[outlier_mask_init]
+                # trimesh.PointCloud(
+                #     vertices=pred_init_points,
+                #     colors=color_init_filtered
+                # ).export(os.path.join(output_save_dir, f'pred_vp_init_{k:03d}.ply'))
+
+                if k == 4:
+                    # Save GT mesh for visualization
+                    gt_points = gt_vp[k].cpu().detach().numpy()
+                    gt_faces = gt_vp_faces[k].cpu().detach().numpy()
+                    trimesh.Trimesh(
+                        vertices=gt_points,
+                        faces=gt_faces
+                    ).export(os.path.join(output_for_vis_save_dir, f'gt_vp_{self.counter:03d}.ply'))
+                    
+                    # Save predicted vp point cloud (with colors)
+                    pred_points = pred_vp[k, scatter_mask]
+                    # pred_points, outlier_mask = remove_outliers(pred_points, return_mask=True)
+                    # Filter colors to match the points after outlier removal
+                    # color_filtered = color_uint8[outlier_mask]
+                    trimesh.PointCloud(
+                        vertices=pred_points,
+                        colors=color_uint8#color_filtered
+                    ).export(os.path.join(output_for_vis_save_dir, f'pred_vp_{self.counter:03d}.ply'))
+                    
+                    # Save predicted vp_init point cloud (with colors)
+                    pred_init_points = pred_vp_init[k, scatter_mask]
+                    # pred_init_points, outlier_mask_init = remove_outliers(pred_init_points, return_mask=True)
+                    # Filter colors to match the init points after outlier removal
+                    # color_init_filtered = color_uint8[outlier_mask_init]
+                    trimesh.PointCloud(
+                        vertices=pred_init_points,
+                        colors=color_uint8#color_init_filtered
+                    ).export(os.path.join(output_for_vis_save_dir, f'pred_vp_init_{self.counter:03d}.ply'))
+
+            self.counter += 1
+
 
 
 
