@@ -53,6 +53,7 @@ class CCHTrainer(pl.LightningModule):
         self.num_joints = 24 if self.body_model=='smpl' else 55
         self.num_smpl_vertices = 6890 if self.body_model=='smpl' else 10475
         self.freeze_canonical_epochs = getattr(cfg.TRAIN, 'WARMUP_EPOCHS', 0)
+        self.num_frames_pp = getattr(cfg.DATA, 'NUM_FRAMES_PP', 4)  # N: number of frames for canonical reconstruction
 
         if self.cfg.DATA.IMAGE_SIZE == 518:
             self.feature_renderer_image_size = (512, 384)
@@ -144,6 +145,7 @@ class CCHTrainer(pl.LightningModule):
             batch = self.process_thuman(batch)
 
         preds = self(batch)
+
 
         loss, loss_dict = self.criterion(preds, batch, dataset_name=batch['dataset'][0])
 
@@ -275,8 +277,10 @@ class CCHTrainer(pl.LightningModule):
         with torch.autocast(enabled=False, device_type='cuda'):
 
             B, K = batch['imgs'].shape[:2]
-            assert K == 5
-            N = 4 
+            # K should be num_frames_pp + 1 (N frames from main take + 1 from extra take)
+            expected_K = self.num_frames_pp + 1
+            assert K == expected_K, f"Expected K={expected_K} (num_frames_pp={self.num_frames_pp} + 1), got K={K}"
+            N = self.num_frames_pp  # Number of frames used for canonical reconstruction 
 
             batch['imgs'] = batch['imgs'] * batch['masks'].unsqueeze(2)
 
@@ -522,6 +526,7 @@ class CCHTrainer(pl.LightningModule):
                 template_mesh_verts = [verts * (normalise_to_height / smpl_T_height[i]) for i, verts in enumerate(template_mesh_verts)]
 
             batch['smpl_T_joints'] = smpl_T_joints
+            batch['scan_mesh_verts_centered'] = scan_mesh_verts_centered
 
 
             # ----------------------- Render scan pointmaps for normal loss -----------------------
@@ -578,7 +583,10 @@ class CCHTrainer(pl.LightningModule):
     def process_thuman(self, batch):
         with torch.autocast(enabled=False, device_type='cuda'):
             B, K = batch['imgs'].shape[:2]
-            N = 4
+            # K should be num_frames_pp + 1 (N frames from main take + 1 from extra take)
+            expected_K = self.num_frames_pp + 1
+            assert K == expected_K, f"Expected K={expected_K} (num_frames_pp={self.num_frames_pp} + 1), got K={K}"
+            N = self.num_frames_pp  # Number of frames used for canonical reconstruction
 
             smpl_model = self.smpl_neutral # neutral is used to fit THuman 
             smpl_skinning_weights = self.smpl_male.lbs_weights
@@ -1206,6 +1214,9 @@ class CCHTrainer(pl.LightningModule):
     # # plt.colorbar()
     # plt.savefig(f'dvc_maps.png')
     # plt.show()
+
+    # import ipdb 
+    # ipdb.set_trace()
 
     # import ipdb 
     # ipdb.set_trace()

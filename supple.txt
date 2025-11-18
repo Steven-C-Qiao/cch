@@ -1,0 +1,229 @@
+00134:
+
+avg of extra_vp_poisson_cfd: 1.429451936483383
+avg of extra_vp_poisson_p2s: 1.2383 cm
+avg of cfd_pred2gt: 0.8297564327716828
+avg of cfd_gt2pred: 1.3169718116521836
+Testing DataLoader 1: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 20/20 [05:26<00:00,  0.06it/s]
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       Test metric             DataLoader 0             DataLoader 1
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    val_extra_vp_cfd                                  1.12546706199646
+  val_extra_vp_init_cfd                              1.3752729892730713
+val_extra_vp_poisson_cfd                             1.4294520616531372
+       val_vc_cfd                                    1.1802128553390503
+   val_vc_chamfer_loss                               -3.271918773651123
+     val_vc_pm_loss                                  -2.7346324920654297
+       val_vp_cfd                                    1.0733641386032104
+   val_vp_cfd_gt2pred                                 1.316971778869629
+   val_vp_cfd_pred2gt                                0.8297563791275024
+   val_vp_chamfer_loss                               -16.358558654785156
+     val_vp_init_cfd                                 1.3309730291366577
+val_vp_init_chamfer_loss                             -1.5677117109298706
+   val_vp_normal_loss                                3.6264145374298096
+       val_w_loss                                    0.2016667127609253
+─────────────────────────────────────────────
+
+
+00191
+
+avg of extra_vp_poisson_cfd: 0.728017145395279
+avg of extra_vp_poisson_p2s: 0.6889 cm
+avg of cfd_pred2gt: 0.5972008168697357
+avg of cfd_gt2pred: 0.7867883384227753
+Testing DataLoader 1: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 20/20 [04:07<00:00,  0.08it/s]
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+       Test metric             DataLoader 0             DataLoader 1
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    val_extra_vp_cfd                                 0.7310189008712769
+  val_extra_vp_init_cfd                              1.0664138793945312
+val_extra_vp_poisson_cfd                             0.7280172109603882
+        val_loss                                     -23.618772506713867
+     val_total_loss                                  -23.618772506713867
+       val_vc_cfd                                    0.7305974364280701
+   val_vc_chamfer_loss                               -3.462650775909424
+     val_vc_pm_loss                                  -3.1867687702178955
+       val_vp_cfd                                    0.6919944882392883
+   val_vp_cfd_gt2pred                                 0.786788284778595
+   val_vp_cfd_pred2gt                                0.5972008109092712
+   val_vp_chamfer_loss                               -17.317319869995117
+     val_vp_init_cfd                                 1.0269782543182373
+val_vp_init_chamfer_loss                             -1.6242749691009521
+   val_vp_normal_loss                                 2.799879550933838
+       val_w_loss                                    -0.8276408314704895
+──────────────────────────────────────────────────────────────────────────────
+
+
+
+wrong p2s 
+
+avg of extra_vp_poisson_cfd: 0.7280188381671906
+avg of extra_vp_poisson_p2s: 0.6889 cm
+avg of cfd_pred2gt (poisson): 0.6906132519245147
+avg of cfd_gt2pred (poisson): 0.7654244184494019
+extra_vp_cfd: 0.8931978344917297, avg: 0.6919945776462555
+cfd_pred2gt (raw): 0.8709779977798462, avg: 0.5972008168697357
+cfd_gt2pred (raw): 0.9169598817825317, avg: 0.7867883384227753
+p2s (raw): 0.8484 cm, avg: 0.6889047659390921
+
+extra_vp_poisson_cfd: 1.044691562652588, avg: 1.4294532120227814
+extra_vp_poisson_p2s: 1.0672 cm, avg: 1.2382794163480213
+cfd_pred2gt (poisson): 0.9615864753723145, avg: 1.5600240707397461
+cfd_gt2pred (poisson): 1.1277966499328613, avg: 1.2988823652267456
+extra_vp_cfd: 1.0598018169403076, avg: 1.0733641147613526
+cfd_pred2gt (raw): 0.8844756484031677, avg: 0.8297564327716828
+cfd_gt2pred (raw): 1.2351280450820923, avg: 1.3169718116521836
+extra_vp_p2s (raw): 1.0672 cm, avg: 1.2382794163480213
+
+
+corrected 3 views 
+
+extra_vp_poisson_cfd avg: 1.427547860145569
+extra_vp_poisson_p2s avg: 1.4970289618307908
+cfd_pred2gt (poisson) avg: 1.555997285246849
+cfd_gt2pred (poisson) avg: 1.2990984112024306
+extra_vp_cfd avg: 1.0731461107730866
+cfd_pred2gt (raw) avg: 0.8296669125556946
+cfd_gt2pred (raw) avg: 1.316625314950943
+extra_vp_p2s (raw) avg: 0.7902548497323572
+
+
+extra_vp_poisson_cfd avg: 0.7282386928796768
+extra_vp_poisson_p2s avg: 0.8996490030638757
+cfd_pred2gt (poisson) avg: 0.6914834201335907
+cfd_gt2pred (poisson) avg: 0.7649939656257629
+extra_vp_cfd avg: 0.6920704543590546
+cfd_pred2gt (raw) avg: 0.597193443775177
+cfd_gt2pred (raw) avg: 0.7869474649429321
+extra_vp_p2s (raw) avg: 0.7464524493160921
+
+
+
+
+
+
+4 views 
+extra_vp_poisson_cfd avg: 0.7076729267835618
+extra_vp_poisson_p2s avg: 0.8863733363499465
+cfd_pred2gt (poisson) avg: 0.6820234030485153
+cfd_gt2pred (poisson) avg: 0.7333224505186081
+extra_vp_cfd avg: 0.6267555683851243
+cfd_pred2gt (raw) avg: 0.6104478508234024
+cfd_gt2pred (raw) avg: 0.6430632650852204
+extra_vp_p2s (raw) avg: 0.766695954465509
+
+extra_vp_poisson_cfd avg: 0.9813937932252884
+extra_vp_poisson_p2s avg: 0.8460399049198124
+cfd_pred2gt (poisson) avg: 0.9078212797641754
+cfd_gt2pred (poisson) avg: 1.0549663037061692
+extra_vp_cfd avg: 0.8702345818281174
+cfd_pred2gt (raw) avg: 0.8404621928930283
+cfd_gt2pred (raw) avg: 0.9000069737434387
+extra_vp_p2s (raw) avg: 0.7979319040137675
+
+
+2 views 
+extra_vp_poisson_cfd avg: 2.3473382949829102
+extra_vp_poisson_p2s avg: 2.9719910315395763
+cfd_pred2gt (poisson) avg: 3.0266681015491486
+cfd_gt2pred (poisson) avg: 1.6680085122585298
+extra_vp_cfd avg: 1.3994377672672271
+cfd_pred2gt (raw) avg: 0.8306503057479858
+cfd_gt2pred (raw) avg: 1.9682252168655396
+extra_vp_p2s (raw) avg: 0.7905327836334823
+
+extra_vp_poisson_cfd avg: 3.5894615650177
+extra_vp_poisson_p2s avg: 5.416081200552966
+cfd_pred2gt (poisson) avg: 5.141629457473755
+cfd_gt2pred (poisson) avg: 2.037293553352356
+extra_vp_cfd avg: 1.45817764600118
+cfd_pred2gt (raw) avg: 0.5906224648157755
+cfd_gt2pred (raw) avg: 2.3257327874501548
+extra_vp_p2s (raw) avg: 0.7590224770301705
+
+
+
+
+-------
+-------
+-------
+
+4 views 
+extra_vp_poisson_cfd avg: 0.7076690793037415
+extra_vp_poisson_p2s avg: 0.6016198520573165
+cfd_pred2gt (poisson) avg: 0.6820122867822647
+cfd_gt2pred (poisson) avg: 0.7333258718252182
+extra_vp_cfd avg: 0.6795319646596909
+cfd_pred2gt (raw) avg: 0.6473103493452073
+cfd_gt2pred (raw) avg: 0.71175357401371
+extra_vp_p2s (raw) avg: 0.564970545554048
+
+extra_vp_poisson_cfd avg: 0.9813962906599045
+extra_vp_poisson_p2s avg: 0.8424763316693428
+cfd_pred2gt (poisson) avg: 0.9078211218118668
+cfd_gt2pred (poisson) avg: 1.0549714535474777
+extra_vp_cfd avg: 0.9265255868434906
+cfd_pred2gt (raw) avg: 0.8631393104791641
+cfd_gt2pred (raw) avg: 0.9899118512868881
+extra_vp_p2s (raw) avg: 0.7952883966948194
+
+
+
+
+
+4 views full
+
+vp_p2s (raw) avg: 0.7720991512470081
+vp_p2s (poisson) avg: 0.8081714517883894
+cfd_pred2gt (poisson) avg: 0.8750365906953812
+cfd_gt2pred (poisson) avg: 0.9581851750612259
+cfd_vp (poisson) avg: 0.9166108840703964
+
+val_vp_cfd                                    0.8700777888298035
+val_vp_cfd_gt2pred                                0.8996753692626953
+val_vp_cfd_pred2gt                                0.8404801487922668
+
+
+vp_p2s (raw) avg: 0.5249450389444277
+vp_p2s (poisson) avg: 0.5565172330835824
+cfd_pred2gt (poisson) avg: 0.6409288400411606
+cfd_gt2pred (poisson) avg: 0.6620997899770736
+cfd_vp (poisson) avg: 0.6515143144130707
+
+val_vp_cfd                                    0.6266602277755737
+val_vp_cfd_gt2pred                                 0.64287269115448
+val_vp_cfd_pred2gt                                0.6104477643966675
+
+
+
+3 views 
+vp_p2s (raw) avg: 0.5271262220320452
+vp_p2s (poisson) avg: 0.5978617089623967
+cfd_pred2gt (poisson) avg: 0.679274408519268
+cfd_gt2pred (poisson) avg: 0.72715764939785
+cfd_vp (poisson) avg: 0.7032160282135009
+val_vp_cfd                                     0.698438286781311
+val_vp_cfd_gt2pred                                 0.785024106502533
+val_vp_cfd_pred2gt                                0.6118522882461548
+
+One failed 
+vp_p2s (raw) avg: 0.7854934189113145
+vp_p2s (poisson) avg: 1.858367897862633
+cfd_pred2gt (poisson) avg: 1.9188319250941277
+cfd_gt2pred (poisson) avg: 1.2670154631137849
+cfd_vp (poisson) avg: 1.5929236948490142
+val_vp_cfd                                     1.080381155014038
+val_vp_cfd_gt2pred                                1.3074302673339844
+val_vp_cfd_pred2gt                                0.8533318638801575
+
+
+2views 
+vp_p2s (raw) avg: 0.514188341576558
+val_vp_cfd                                    1.4353444576263428
+val_vp_cfd_gt2pred                                 2.270916700363159
+val_vp_cfd_pred2gt                                 0.599772572517395
+
+vp_p2s (raw) avg: 0.7992050159207275
+val_vp_cfd                                     1.414202332496643
+   val_vp_cfd_gt2pred                                1.9619760513305664
+   val_vp_cfd_pred2gt                                 0.866428554058075

@@ -46,6 +46,7 @@ class Visualiser(pl.LightningModule):
         self.cfg = cfg
         self.threshold = cfg.LOSS.CONFIDENCE_THRESHOLD if cfg is not None else 100
         self.mask_percentage = cfg.LOSS.CONFIDENCE_MASK_PERCENTAGE if cfg is not None else 0.0
+        self.num_frames_pp = getattr(cfg.DATA, 'NUM_FRAMES_PP', 4) if cfg is not None else 4
         self._suffix = ''
 
         self.counter = 0
@@ -171,7 +172,7 @@ class Visualiser(pl.LightningModule):
         
         B, N, H, W = debug_vc_pm_loss_conf.shape
         B = 1
-        N = min(N, 4)
+        N = min(N, self.num_frames_pp)
         sub_fig_size = 4
         num_cols = 4
         num_rows = 2
@@ -341,9 +342,9 @@ class Visualiser(pl.LightningModule):
 
 
         B = 1
-        N = min(N, 4)
+        N = min(N, self.num_frames_pp)
         sub_fig_size = 4
-        num_cols = 4
+        num_cols = N
 
         num_rows = 0
 
@@ -530,7 +531,7 @@ class Visualiser(pl.LightningModule):
     ):
         dataset_name = batch['dataset'][0]
         B, N, H, W, C = predictions['vc_init'].shape
-        K = 5 
+        K = self.num_frames_pp + 1  # Total frames = num_frames_pp + 1
         image_masks = batch['masks']
 
         image_masks_N = image_masks[:, :N]
@@ -548,9 +549,9 @@ class Visualiser(pl.LightningModule):
         mask = np.repeat(batch['masks'][:, :N][:, None], K, axis=1) # B, K, N, H, W
 
         B = 1
-        N = min(N, 4)
+        N = min(N, self.num_frames_pp)
         sub_fig_size = 4
-        num_cols = 4
+        num_cols = N
 
         num_rows = 0
 
@@ -593,7 +594,7 @@ class Visualiser(pl.LightningModule):
         row = 0
         for k in range(K):
             if 'vp_init' in predictions:
-                for n in range(4):
+                for n in range(N):
                     plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                     plt.imshow(vp_init[0, k, n])
                     plt.title(f'Pred init $V_{n+1}^{k+1}$')
@@ -616,14 +617,14 @@ class Visualiser(pl.LightningModule):
                 row += 1
 
             if 'vc' in predictions:
-                for n in range(4):
+                for n in range(N):
                     plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                     plt.imshow(vc[0, k, n])
                     plt.title(f'Pred $V_{n+1}^{{c,{k+1}}}$')
                 row += 1
 
             if 'vp' in predictions:
-                for n in range(4):
+                for n in range(N):
                     plt.subplot(num_rows, num_cols, (row)*num_cols + n + 1)
                     plt.imshow(vp[0, k, n])
                     plt.title(f'Pred final $V_{n+1}^{k+1}$')
@@ -677,7 +678,7 @@ class Visualiser(pl.LightningModule):
         point_size = 0.7 # PyVista point size
 
         B, N, H, W, C = predictions['vc_init'].shape
-        K = 5
+        K = self.num_frames_pp + 1  # Total frames = num_frames_pp + 1
 
         image_masks = batch['masks']
         image_masks_N = image_masks[:, :N]
@@ -1025,7 +1026,7 @@ class Visualiser(pl.LightningModule):
             os.makedirs(output_for_vis_save_dir, exist_ok=True)
             
             if 'scan_mesh_verts_centered' in batch:
-                gt_vp = batch['scan_mesh_verts_centered'][0]  # list of K meshes
+                gt_vp = batch['scan_mesh_verts_centered']  # list of K meshes
                 gt_vp_faces = batch['scan_mesh_faces'][0]  # list of K face arrays
             elif 'scan_verts' in batch:
                 gt_vp = batch['scan_verts'][0]  # list of K meshes
@@ -1066,7 +1067,7 @@ class Visualiser(pl.LightningModule):
                 #     colors=color_init_filtered
                 # ).export(os.path.join(output_save_dir, f'pred_vp_init_{k:03d}.ply'))
 
-                if k == 4:
+                if k == K - 1:  # Last frame (K-1 since k is 0-indexed)
                     # Save GT mesh for visualization
                     gt_points = gt_vp[k].cpu().detach().numpy()
                     gt_faces = gt_vp_faces[k].cpu().detach().numpy()
@@ -1390,6 +1391,8 @@ class Visualiser(pl.LightningModule):
         num_rows, num_cols = 4, 5
         sub_fig_size = 4 
 
+        # Get N from predictions shape
+        B, N, H, W, C = predictions['vc_init'].shape
 
         mask = batch['masks'][0].astype(np.bool) # nhw
         if "vc_init_conf" in predictions:
@@ -1433,7 +1436,8 @@ class Visualiser(pl.LightningModule):
         if "scan_mesh_verts_centered" in batch:
             scan_mesh_verts = batch['scan_mesh_verts_centered'][0]
             scan_mesh_colors = batch['scan_mesh_colors'][0]
-            for i in range(4):
+            N_vis = min(N, self.num_frames_pp)
+            for i in range(N_vis):
                 verts = scan_mesh_verts[i].cpu().detach().numpy()
                 colors = (scan_mesh_colors[i].cpu().detach().numpy() / 255.).astype(np.float32)
                 ax = fig.add_subplot(num_rows, num_cols, i+1, projection='3d')
@@ -1445,8 +1449,9 @@ class Visualiser(pl.LightningModule):
         if "vp_init" in predictions:
             vp_init = predictions['vp_init'][0] # k n h w 3
             J_init = predictions['J_init'][0]
+            N_vis = min(N, self.num_frames_pp)
 
-            for i in range(4):
+            for i in range(N_vis):
                 verts = vp_init[i, mask]
                 ax = fig.add_subplot(num_rows, num_cols, num_cols+i+1, projection='3d')
                 ax.scatter(verts[:, 0], 
@@ -1460,8 +1465,9 @@ class Visualiser(pl.LightningModule):
 
         if "vc" in predictions:
             vc = predictions['vc'][0] # k n h w 3
+            N_vis = min(N, self.num_frames_pp)
 
-            for i in range(4):
+            for i in range(N_vis):
                 verts = vc[i, mask]
                 ax = fig.add_subplot(num_rows, num_cols, 2*num_cols+i+1, projection='3d')
                 ax.scatter(verts[:, 0], 
@@ -1471,8 +1477,9 @@ class Visualiser(pl.LightningModule):
                 
         if "vp" in predictions:
             vp = predictions['vp'][0] # k n h w 3
+            N_vis = min(N, self.num_frames_pp)
 
-            for i in range(4):
+            for i in range(N_vis):
                 verts = vp[i, mask]
                 ax = fig.add_subplot(num_rows, num_cols, 3*num_cols+i+1, projection='3d')
                 ax.scatter(verts[:, 0], 

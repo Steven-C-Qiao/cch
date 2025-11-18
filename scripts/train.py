@@ -40,7 +40,7 @@ def set_seed(seed=42):
 os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
 
 def run_train(exp_dir, cfg_opts=None, dev=False, resume_path=None, load_path=None, plot=False):
-    seed_everything(42)
+    seed_everything(41)
     torch.use_deterministic_algorithms(True, warn_only=True)
     # Additional CUDNN settings for determinism
     torch.backends.cudnn.deterministic = True

@@ -39,7 +39,7 @@ class CCHLoss(pl.LightningModule):
         total_loss = 0
 
         B, N, H, W, _ = predictions['vc_init'].shape
-        K = 5 
+        K = N + 1 
 
         if "vc_init" in predictions and "template_mesh_verts" in batch:
             gt_vc = Pointclouds(
@@ -258,7 +258,7 @@ class CCHLoss(pl.LightningModule):
             mask = batch['masks'].bool()
             confidence = predictions['vc_init_conf'] if "vc_init_conf" in predictions else None # (B, N, H, W)
 
-            pred = torch.stack([pred[:, i, i] for i in range(4)], dim=1)
+            pred = torch.stack([pred[:, i, i] for i in range(N)], dim=1)
             pred = rearrange(pred, 'b n h w c -> (b n) h w c')
             gt = rearrange(gt[:, :N], 'b n h w c -> (b n) h w c')
             mask = rearrange(mask[:, :N], 'b n h w -> (b n) h w')

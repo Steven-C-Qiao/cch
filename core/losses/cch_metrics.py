@@ -111,9 +111,14 @@ class CCHMetrics(pl.LightningModule):
         self.threshold = cfg.LOSS.CONFIDENCE_THRESHOLD
         self.mask_percentage = cfg.LOSS.CONFIDENCE_MASK_PERCENTAGE
 
-        self.list_of_cfd_values = []
-        self.list_of_poisson_cfd_values = []
-        self.list_of_poisson_p2s_values = []
+        # Raw points metrics
+        self.list_raw_p2s = []  # Point-to-surface for raw points
+        
+        # Poisson reconstructed mesh metrics
+        self.list_poisson_cfd = []  # Combined CFD for poisson
+        self.list_poisson_cfd_pred2gt = []  # CFD pred2gt for poisson
+        self.list_poisson_cfd_gt2pred = []  # CFD gt2pred for poisson
+        self.list_poisson_p2s = []  # Point-to-surface for poisson
 
         self.filter_by_quantile = True
 
@@ -158,7 +163,7 @@ class CCHMetrics(pl.LightningModule):
         ret = {}
 
         B, N, H, W, _ = predictions['vc_init'].shape
-        K = 5
+        K = N + 1
 
         if "vc_init_conf" in predictions:
             confidence_raw = predictions['vc_init_conf']
@@ -203,7 +208,7 @@ class CCHMetrics(pl.LightningModule):
 
             # An extra frame in the end 
             # extra_gt_vp = Pointclouds(batch['vp_ptcld'].points_list()[4::K])
-            extra_gt_vp = Pointclouds(batch['vp'][4::K])
+            extra_gt_vp = Pointclouds(batch['vp'][N::K])
             extra_pred_vp = rearrange(predictions['vp_init'][:, -1], 'b n h w c -> b (n h w) c')
             mask = rearrange((batch['masks'][:, :N] * confidence), 'b n h w -> b (n h w)')
 
@@ -225,92 +230,90 @@ class CCHMetrics(pl.LightningModule):
             ret['vp_cfd_pred2gt'] = vp_cfd_pred2gt
             ret['vp_cfd_gt2pred'] = vp_cfd_gt2pred
 
-            self.list_of_cfd_values.append(vp_cfd.item())
 
             # An extra frame in the end 
             # extra_gt_vp = Pointclouds(batch['vp_ptcld'].points_list()[4::K])
-            extra_gt_vp = Pointclouds(batch['vp'][4::K])
+            extra_gt_vp = Pointclouds(batch['vp'][N::K])
             extra_pred_vp = rearrange(predictions['vp'][:, -1], 'b n h w c -> b (n h w) c')
             mask = rearrange((batch['masks'][:, :N] * confidence), 'b n h w -> b (n h w)')
 
-            extra_vp_cfd, _, _ = self.masked_metric_cfd(extra_gt_vp, extra_pred_vp, mask)
+            extra_vp_cfd, extra_vp_cfd_pred2gt, extra_vp_cfd_gt2pred = self.masked_metric_cfd(extra_gt_vp, extra_pred_vp, mask)
             ret['extra_vp_cfd'] = extra_vp_cfd
 
-            # Poisson reconstruction and chamfer distance
-            # Batch size is always 1, so squeeze
-            extra_pred_vp_squeezed = extra_pred_vp.squeeze(0)  # (n h w, c)
-            mask_squeezed = mask.squeeze(0).bool()  # (n h w,)
+
+            # -------------------------------- raw p2s & poisson p2s & poisson cfd --------------------------------
+            mask = mask.squeeze(0).bool() 
+
+            raw_p2s_values = []
+            poisson_p2s_values = []
+
+            poisson_cfd_pred2gt_values = []
+            poisson_cfd_gt2pred_values = []
+            poisson_cfd_values = []
             
-            # Apply mask to get valid points
-            valid_points = extra_pred_vp_squeezed[mask_squeezed].cpu().numpy()  # (N, 3)
-            print(f"valid_points: {valid_points.shape}")
-            
-            if len(valid_points) > 0:
-                try:
-                    # Reconstruct mesh using poisson (pass points directly)
-                    reconstructed_mesh = poisson(valid_points, depth=10, decimation=False)
-                    # print(f"reconstructed_mesh: {reconstructed_mesh.vertices.shape}")
-                    
-                    # Convert to pytorch3d Meshes for sampling and chamfer distance
-                    mesh_verts = torch.from_numpy(reconstructed_mesh.vertices).float().to(extra_pred_vp.device)
-                    mesh_faces = torch.from_numpy(reconstructed_mesh.faces).long().to(extra_pred_vp.device)
-                    mesh_pytorch3d = Meshes(verts=[mesh_verts], faces=[mesh_faces])
-                    
-                    # Sample points from reconstructed mesh
-                    num_samples = len(valid_points)  # Sample same number as input points
-                    sampled_points_pytorch3d = sample_points_from_meshes(mesh_pytorch3d, 100000)
-                    
-                    # Compute chamfer distance with extra_gt_vp
-                    sampled_points_ptcld = Pointclouds(points=[sampled_points_pytorch3d.squeeze(0)])
-                    cfd_ret, _ = chamfer_distance(
-                        sampled_points_ptcld, extra_gt_vp,
-                        batch_reduction=None,
-                        point_reduction=None
-                    )
-                    
-                    cfd_sqrd_pred2gt = cfd_ret[0]
-                    cfd_sqrd_gt2pred = cfd_ret[1]
-                    
-                    cfd_pred2gt = torch.sqrt(cfd_sqrd_pred2gt).mean() * 100.0
-                    cfd_gt2pred = torch.sqrt(cfd_sqrd_gt2pred).mean() * 100.0
-                    extra_vp_poisson_cfd = (cfd_pred2gt + cfd_gt2pred) / 2
-                    
-                    # print(f"cfd_pred2gt: {cfd_pred2gt}, cfd_gt2pred: {cfd_gt2pred}", end=' ')
-                    print(f"current extra_vp_poisson_cfd: {extra_vp_poisson_cfd.item()}")
-                    ret['extra_vp_poisson_cfd'] = extra_vp_poisson_cfd
-                    self.list_of_poisson_cfd_values.append(extra_vp_poisson_cfd.item())
-                    
-                    # Compute point-to-surface distance from reconstructed mesh to GT
-                    # Extract GT points (batch size is 1, so get first point cloud)
-                    gt_points_list = extra_gt_vp.points_list()
-                    gt_points = gt_points_list[0].cpu().numpy()  # (N, 3)
-                    
-                    # Compute point-to-surface distance using trimesh
-                    closest_points, distances, face_indices = reconstructed_mesh.nearest.on_surface(gt_points)
-                    distances = np.asarray(distances)
-                    
-                    # Compute mean distance in centimeters
-                    mean_p2s = np.mean(distances) * 100.0
-                    
-                    print(f"extra_vp_poisson_p2s: {mean_p2s:.4f} cm")
-                    self.list_of_poisson_p2s_values.append(mean_p2s)
-                except Exception as e:
-                    # If reconstruction fails, skip this metric
-                    print(f"Warning: Poisson reconstruction failed: {e}")
-                    ret['extra_vp_poisson_cfd'] = torch.tensor(float('inf'), device=extra_pred_vp.device)
-            else:
-                ret['extra_vp_poisson_cfd'] = torch.tensor(float('inf'), device=extra_pred_vp.device)
+            for frame_idx in range(K):  # Loop through all K frames (0 to N)
+                pred_vp_frame = rearrange(predictions['vp'][:, frame_idx], 'b n h w c -> b (n h w) c')
+
+                pred_vp_squeezed = pred_vp_frame.squeeze(0)  # (n h w, c)
+                
+                pred_vp_masked = pred_vp_squeezed[mask].cpu().detach().numpy()  # (N, 3)
+                
+                scan_verts = batch['scan_mesh_verts_centered'][frame_idx]  # (V, 3)
+                scan_faces = batch['scan_mesh_faces'][0][frame_idx]  # (F, 3)
+                
+                gt_mesh = trimesh.Trimesh(vertices=scan_verts.cpu().numpy(), faces=scan_faces.cpu().numpy())
+                
+                # Raw p2s 
+                _, distances, _ = gt_mesh.nearest.on_surface(pred_vp_masked)
+                mean_p2s_frame = np.mean(distances) * 100.0
+                raw_p2s_values.append(mean_p2s_frame)
 
 
-            print(f"vp_cfd: {vp_cfd.item()}, avg: {np.mean(self.list_of_cfd_values)}")
-            print(f"avg of extra_vp_poisson_cfd: {np.mean(self.list_of_poisson_cfd_values)}")
-            if len(self.list_of_poisson_p2s_values) > 0:
-                print(f"avg of extra_vp_poisson_p2s: {np.mean(self.list_of_poisson_p2s_values):.4f} cm")
+            #     vp_poisson_mesh = poisson(pred_vp_masked, depth=10, decimation=False)
+            #     mesh_verts = torch.from_numpy(vp_poisson_mesh.vertices).float().to(pred_vp.device)
+            #     mesh_faces = torch.from_numpy(vp_poisson_mesh.faces).long().to(pred_vp.device)
+            #     mesh_pytorch3d = Meshes(verts=[mesh_verts], faces=[mesh_faces])
+                
+            #     sampled_points_pytorch3d = sample_points_from_meshes(mesh_pytorch3d, 100000)
 
-            
-            
+            #     _, poisson_p2s, _ = gt_mesh.nearest.on_surface(sampled_points_pytorch3d.squeeze(0).cpu().numpy())
+            #     poisson_p2s = np.mean(np.asarray(poisson_p2s)) * 100.0
+            #     poisson_p2s_values.append(poisson_p2s)
+
+
+            #     sampled_points_ptcld = Pointclouds(points=[sampled_points_pytorch3d.squeeze(0)])
+
+            #     poisson_cfd_ret, _ = chamfer_distance(
+            #         sampled_points_ptcld, batch['vp'][frame_idx][None],
+            #         batch_reduction=None,
+            #         point_reduction=None
+            #     )
+            #     poisson_cfd_sqrd_pred2gt = poisson_cfd_ret[0]
+            #     poisson_cfd_sqrd_gt2pred = poisson_cfd_ret[1]
+                
+            #     poisson_cfd_pred2gt = torch.sqrt(poisson_cfd_sqrd_pred2gt).mean() * 100.0
+            #     poisson_cfd_gt2pred = torch.sqrt(poisson_cfd_sqrd_gt2pred).mean() * 100.0
+            #     vp_poisson_cfd = (poisson_cfd_pred2gt + poisson_cfd_gt2pred) / 2
+            #     # Record poisson metrics
+            #     poisson_cfd_pred2gt_values.append(poisson_cfd_pred2gt.item())
+            #     poisson_cfd_gt2pred_values.append(poisson_cfd_gt2pred.item())
+            #     poisson_cfd_values.append(vp_poisson_cfd.item())
+
+            self.list_raw_p2s.append(raw_p2s_values)
+            # self.list_poisson_p2s.append(poisson_p2s_values)
+            # self.list_poisson_cfd_pred2gt.append(poisson_cfd_pred2gt_values)
+            # self.list_poisson_cfd_gt2pred.append(poisson_cfd_gt2pred_values)
+            # self.list_poisson_cfd.append(poisson_cfd_values)
+
+            print(f"vp_p2s (raw) avg: {np.mean(self.list_raw_p2s)}")
+            # print(f"vp_p2s (poisson) avg: {np.mean(self.list_poisson_p2s)}")
+            # print(f"cfd_pred2gt (poisson) avg: {np.mean(self.list_poisson_cfd_pred2gt)}")
+            # print(f"cfd_gt2pred (poisson) avg: {np.mean(self.list_poisson_cfd_gt2pred)}")
+            # print(f"cfd_vp (poisson) avg: {np.mean(self.list_poisson_cfd)}")
+
+
         return ret
-
+    
 
 
     def masked_metric_cfd(self, x_gt, x_pred, mask):
@@ -330,6 +333,7 @@ class CCHMetrics(pl.LightningModule):
 
         cfd_sqrd_pred2gt = cfd_ret[0]  
         cfd_sqrd_gt2pred = cfd_ret[1]
+
 
         # test = torch.sqrt(cfd_sqrd_pred2gt).mean() * 100.0
         # print(f"Test chamfer distance (pred2gt) inside masked_metric_cfd: {test.item()}")

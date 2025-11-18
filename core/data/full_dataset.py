@@ -66,8 +66,8 @@ class FullDataModule(pl.LightningDataModule):
             '00160', '00163', '00167', '00168', '00169', '00170', '00174', '00175',
             '00176', '00179', '00180', '00185', '00187', '00190', '00188'
         ]
-        self.d4dress_val_ids = ['00191', '00134']
-        # self.d4dress_val_ids = ['00191']
+        # self.d4dress_val_ids = ['00191', '00134']
+        self.d4dress_val_ids = ['00134']
 
         self.thuman_train_ids = sorted(THuman_metadata.keys())[:-50]
         self.thuman_val_ids = sorted(THuman_metadata.keys())[-50:]

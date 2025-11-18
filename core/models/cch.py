@@ -26,6 +26,7 @@ class CCH(nn.Module):
         self.image_size = cfg.DATA.IMAGE_SIZE
         self.use_sapiens = cfg.MODEL.USE_SAPIENS
         self.sapiens_downsample_method = cfg.MODEL.SAPIENS_DOWNSAMPLE_METHOD
+        self.num_frames_pp = getattr(cfg.DATA, 'NUM_FRAMES_PP', 4)  # N: number of frames for canonical reconstruction
 
         s1_cfg = MODEL_CONFIGS[cfg.MODEL.CANONICAL_STAGE_SIZE]
         s2_cfg = MODEL_CONFIGS[cfg.MODEL.PBS_STAGE_SIZE]
@@ -124,8 +125,10 @@ class CCH(nn.Module):
         if len(images.shape) == 4:
             images = images.unsqueeze(0)
         B, K, C_in, H, W = images.shape
-        assert K == 5
-        N = 4 
+        # K should be num_frames_pp + 1 (N frames from main take + 1 from extra take)
+        expected_K = self.num_frames_pp + 1
+        assert K == expected_K, f"Expected K={expected_K} (num_frames_pp={self.num_frames_pp} + 1), got K={K}"
+        N = self.num_frames_pp  # Number of frames used for canonical reconstruction 
 
         pose = batch['pose']
         joints = batch['smpl_T_joints'] # .repeat(1, K, 1, 1)
@@ -263,8 +266,10 @@ class CCH(nn.Module):
         if len(images.shape) == 4:
             images = images.unsqueeze(0)
         B, K, C_in, H, W = images.shape
-        assert K == 5
-        N = 4 
+        # K should be num_frames_pp + 1 (N frames from main take + 1 from extra take)
+        expected_K = self.num_frames_pp + 1
+        assert K == expected_K, f"Expected K={expected_K} (num_frames_pp={self.num_frames_pp} + 1), got K={K}"
+        N = self.num_frames_pp  # Number of frames used for canonical reconstruction 
 
         pose = batch['pose']
         joints = batch['smpl_T_joints']# .repeat(1, K, 1, 1)
@@ -336,8 +341,10 @@ class CCH(nn.Module):
         if len(images.shape) == 4:
             images = images.unsqueeze(0)
         B, K, C_in, H, W = images.shape
-        assert K == 5
-        N = 4 
+        # K should be num_frames_pp + 1 (N frames from main take + 1 from extra take)
+        expected_K = self.num_frames_pp + 1
+        assert K == expected_K, f"Expected K={expected_K} (num_frames_pp={self.num_frames_pp} + 1), got K={K}"
+        N = self.num_frames_pp  # Number of frames used for canonical reconstruction 
 
         pose = batch['pose']
         joints = batch['smpl_T_joints']

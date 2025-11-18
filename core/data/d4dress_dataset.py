@@ -31,7 +31,8 @@ IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 class D4DressDataset(Dataset):
     def __init__(self, cfg, ids):
         self.cfg = cfg
-        self.num_frames_pp = 4
+        self.num_frames_pp = getattr(cfg.DATA, 'NUM_FRAMES_PP', 4)
+        assert self.num_frames_pp >= 2, "NUM_FRAMES_PP must be at least 2"
         self.lengthen_by = cfg.DATA.LENGHTHEN_D4DRESS
 
         self.img_size = cfg.DATA.IMAGE_SIZE
@@ -168,10 +169,17 @@ class D4DressDataset(Dataset):
         sampled_frame_extra = np.random.choice(extra_scan_frames, size=1, replace=False)[0]
         sampled_frames = list(sampled_frames_main) + [sampled_frame_extra]
         
-        # print(subject_id, sampled_take, extra_take)
-        # print(sampled_frames)
-        
-        sampled_cameras = self.camera_ids + [np.random.choice(self.camera_ids, size=1, replace=False).item()]
+        # Sample cameras to match number of frames (num_frames_pp + 1 total)
+        # Use first num_frames_pp cameras from fixed list, then one random for the extra frame
+        if self.num_frames_pp <= len(self.camera_ids):
+            sampled_cameras = list(self.camera_ids[:self.num_frames_pp]) + [np.random.choice(self.camera_ids, size=1, replace=False).item()]
+        else:
+            # If num_frames_pp > number of available cameras, repeat cameras
+            num_repeats = self.num_frames_pp - len(self.camera_ids)
+            sampled_cameras = list(self.camera_ids) + [
+                np.random.choice(self.camera_ids, size=1, replace=False).item() 
+                for _ in range(num_repeats + 1)
+            ]
         
         # Restore the original random state
         torch.set_rng_state(rng_state)

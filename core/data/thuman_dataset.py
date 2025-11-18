@@ -82,7 +82,8 @@ class THumanDataset(Dataset):
             '270', '280', '290', '300', '310', '320', '330', '340', '350', 
         ]
 
-        self.num_frames_pp = 4
+        self.num_frames_pp = getattr(cfg.DATA, 'NUM_FRAMES_PP', 4)
+        assert self.num_frames_pp >= 2, "NUM_FRAMES_PP must be at least 2"
 
         self.img_size = cfg.DATA.IMAGE_SIZE
         self.body_model = cfg.MODEL.BODY_MODEL
@@ -131,7 +132,9 @@ class THumanDataset(Dataset):
         ret = defaultdict(list)
         ret['dataset'] = 'THuman'
 
-        N, K = 4, 5 
+        # N: number of frames for canonical reconstruction, K: total frames (N + 1)
+        N = self.num_frames_pp
+        K = self.num_frames_pp + 1
 
         subject_id = self.ids[index // self.lengthen_by]
         gender = self.metadata[subject_id]['gender']
@@ -141,16 +144,31 @@ class THumanDataset(Dataset):
         sampled_scan_ids = np.random.choice(scans_ids, size=K, replace=True)
         ret['scan_ids'] = sampled_scan_ids
         
-        # Sample one camera ID from each row of camera angles
-        sampled_cameras = [
-            np.random.choice(['000', '010', '020'], size=1)[0],
-            np.random.choice(['090', '100', '110'], size=1)[0], 
-            np.random.choice(['180', '190', '200'], size=1)[0],
-            np.random.choice(['270', '280', '290'], size=1)[0]
+        # Sample cameras to match number of frames
+        # Define camera angle groups (quadrants)
+        camera_groups = [
+            ['000', '010', '020'],  # First quadrant
+            ['090', '100', '110'],  # Second quadrant
+            ['180', '190', '200'],  # Third quadrant
+            ['270', '280', '290']   # Fourth quadrant
         ]
-        if len(sampled_cameras) < K:
-            additional_cameras = np.random.choice(self.camera_ids, size=K-len(sampled_cameras), replace=False)
-            sampled_cameras.extend(additional_cameras)
+        
+        # Sample one camera from each group for the first N frames
+        sampled_cameras = []
+        for i in range(min(N, len(camera_groups))):
+            sampled_cameras.append(np.random.choice(camera_groups[i], size=1)[0])
+        
+        # If N > number of camera groups, sample additional cameras from groups
+        if N > len(camera_groups):
+            remaining = N - len(camera_groups)
+            for _ in range(remaining):
+                group = np.random.choice(camera_groups)
+                sampled_cameras.append(np.random.choice(group, size=1)[0])
+        
+        # Add one more random camera for the extra frame (K = N + 1)
+        additional_camera = np.random.choice(self.camera_ids, size=1, replace=False)[0]
+        sampled_cameras.append(additional_camera)
+        
         ret['camera_ids'] = sampled_cameras
 
         

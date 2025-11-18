@@ -500,7 +500,7 @@ class Solver:
             confidence = predictions['vc_init_conf']
             # Compute threshold from percentage if enabled, otherwise use fixed threshold
             threshold_value = _get_confidence_threshold_from_percentage(
-                confidence[0], mask_N[0], mask_percentage=0.01
+                confidence[0], mask_N[0], mask_percentage=0.1
             )
             confidence = confidence > threshold_value
         else:
@@ -741,12 +741,12 @@ if __name__ == '__main__':
     # cameras = ['0004', '0028', '0052', '0076', '0076']
 
 
-    id = '00134'
-    take = 'Take3'
-    frames = ['00006', '00021', '00041', '00061', '00081']
-    cameras = ['0004', '0028', '0052', '0076', '0076']
-    novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/SMPLX'
-    gt_scan_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/Meshes_pkl'
+    # id = '00134'
+    # take = 'Take3'
+    # frames = ['00006', '00021', '00041', '00061', '00081']
+    # cameras = ['0004', '0028', '0052', '0076', '0076']
+    # novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/SMPLX'
+    # gt_scan_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/Meshes_pkl'
 
 
 
@@ -756,6 +756,14 @@ if __name__ == '__main__':
     # cameras = ['0004', '0028', '0052', '0076', '0076']
     # novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/SMPLX'
     # gt_scan_path = f'/scratch/u5au/chexuan.u5au/4DDress/00148/Inner/Take1/Meshes_pkl'
+
+    id = '00134'
+    take = 'Take5'
+    frames = ['00025', '00050', '00075', '00090', '00100']
+    cameras = ['0004', '0028', '0052', '0076', '0076']
+    novel_pose_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take5/SMPLX'
+    gt_scan_path = f'/scratch/u5au/chexuan.u5au/4DDress/00134/Inner/Take5/Meshes_pkl'
+
 
 
     solver = Solver(id, take, frames, cameras, novel_pose_path, args.load_from_ckpt)
